@@ -1,31 +1,110 @@
 <?xml version="1.0" encoding="utf-8"?>
 <android.support.constraint.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    xmlns:app="http://schemas.android.com/apk/res-auto">
+    android:background="@color/whiteLayoutBackground">
 
-    <android.support.v7.widget.AppCompatButton
-        android:id="@+id/btn_restore"
+    <ImageView
+        android:id="@+id/imageView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
         android:layout_marginEnd="8dp"
         android:layout_marginStart="8dp"
-        android:layout_marginTop="8dp"
-        android:text="@string/restore_my_wallet"
+        android:layout_marginTop="25dp"
+        android:src="@drawable/logo_big"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="5dp"
+        android:text="@string/welcome_to"
+        android:textAllCaps="true"
+        android:textColor="@color/lightGrayTextColor"
+        android:textSize="11dp"
+        app:layout_constraintBottom_toTopOf="@+id/tv_ink_wallet"
+        app:layout_constraintHorizontal_bias="0.518"
+        app:layout_constraintLeft_toLeftOf="@+id/tv_ink_wallet"
+        app:layout_constraintRight_toRightOf="@+id/tv_ink_wallet"
+        tools:ignore="MissingConstraints" />
+
+    <TextView
+        android:id="@+id/tv_ink_wallet"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/ink_wallet"
+        android:textColor="@color/blackTextColor"
+        android:textSize="28dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
     <android.support.v7.widget.AppCompatButton
-        android:id="@+id/btn_create_new"
-        android:text="@string/create_new_wallet"
+        android:id="@+id/btn_restore"
+        style="@style/BtnBlueStyle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/dimen_16dp"
-        app:layout_constraintLeft_toLeftOf="@id/btn_restore"
-        app:layout_constraintRight_toRightOf="@id/btn_restore"
-        app:layout_constraintTop_toBottomOf="@id/btn_restore"/>
+        android:layout_marginBottom="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="25dp"
+        android:text="@string/restore_my_wallet"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/tv_ink_wallet"
+        app:layout_constraintVertical_bias="0.209" />
 
+    <TextView
+        android:id="@+id/tv_create_new"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="15dp"
+        android:text="@string/create_new_wallet"
+        android:textColor="@color/blueTextColor"
+        app:layout_constraintLeft_toLeftOf="@+id/btn_restore"
+        app:layout_constraintRight_toRightOf="@+id/btn_restore"
+        app:layout_constraintTop_toBottomOf="@+id/btn_restore" />
+
+    <TextView
+        android:id="@+id/tv_term_of_use_link"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="25dp"
+        android:text="@string/terms_of_usage"
+        android:textColor="@color/blueTextColor"
+        app:layout_constraintBottom_toTopOf="@+id/tv_copyright"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <TextView
+        android:id="@+id/tv_copyright"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginStart="8dp"
+        android:text="@string/copyright_ink_labs_foundation"
+        android:textColor="#a7a7a7"
+        android:textSize="12dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <TextView
+        android:id="@+id/tv_version_number"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginStart="8dp"
+        android:text="V0.1.0"
+        android:textColor="#a7a7a7"
+        android:textSize="14dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 </android.support.constraint.ConstraintLayout>

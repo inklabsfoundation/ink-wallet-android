@@ -3,6 +3,7 @@ package ink.qtum.org.views.activities;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.v7.widget.AppCompatButton;
+import android.widget.TextView;
 
 import butterknife.BindView;
 import butterknife.OnClick;
@@ -18,8 +19,8 @@ public class LoginActivity extends BaseActivity{
     @BindView(R.id.btn_restore)
     AppCompatButton btnRestore;
 
-    @BindView(R.id.btn_create_new)
-    AppCompatButton btnCreateNew;
+    @BindView(R.id.tv_create_new)
+    TextView btnCreateNew;
 
     @Override
     protected void init(Bundle savedInstanceState) {
@@ -36,7 +37,7 @@ public class LoginActivity extends BaseActivity{
         Intent intent = new Intent(this, RestoreWalletActivity.class);
         startActivity(intent);
     }
-    @OnClick(R.id.btn_create_new)
+    @OnClick(R.id.tv_create_new)
     void openCreateActivity(){
         Intent intent = new Intent(this, CreateWalletActivity.class);
         startActivity(intent);

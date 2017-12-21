@@ -3,4 +3,8 @@
     <string name="dialog_msg_please_wait">Please wait</string>
     <string name="restore_my_wallet">Restore My Wallet</string>
     <string name="create_new_wallet">Create New Wallet</string>
+    <string name="ink_wallet">Ink wallet</string>
+    <string name="welcome_to">Welcome to</string>
+    <string name="copyright_ink_labs_foundation">Copyright@Ink labs Foundation</string>
+    <string name="terms_of_usage">Terms of Usage</string>
 </resources>

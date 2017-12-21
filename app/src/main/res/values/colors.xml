@@ -4,4 +4,16 @@
     <color name="colorPrimaryDark">#0c101c</color>
     <color name="colorAccent">#394db0</color>
     <color name="navBarColor">#3d4256</color>
+
+    <!-- background colors-->
+    <color name="whiteLayoutBackground">#ffffff</color>
+
+    <!-- text colors -->
+    <color name="blackTextColor">#000</color>
+    <color name="lightGrayTextColor">#c9d1da</color>
+    <color name="blueTextColor">@color/colorAccent</color>
+
+    <!-- other colors-->
+    <color name="btnBlueTextColor">@color/colorAccent</color>
+    <color name="btnWhiteTextColor">#ffffff</color>
 </resources>
