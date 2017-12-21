@@ -1,9 +1,9 @@
-package ink.qtum.org.inkqtum.views.activities;
+package ink.qtum.org.views.activities;
 
 import android.os.Bundle;
 
 import ink.qtum.org.inkqtum.R;
-import ink.qtum.org.inkqtum.views.activities.base.BaseActivity;
+import ink.qtum.org.views.activities.base.BaseActivity;
 
 public class MainActivity extends BaseActivity {
 

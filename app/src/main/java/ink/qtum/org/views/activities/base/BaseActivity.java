@@ -1,4 +1,4 @@
-package ink.qtum.org.inkqtum.views.activities.base;
+package ink.qtum.org.views.activities.base;
 
 import android.app.ProgressDialog;
 import android.content.Context;
@@ -16,15 +16,11 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
-import android.widget.Toolbar;
 
-import javax.inject.Inject;
-
-import autodagger.AutoInjector;
 import butterknife.ButterKnife;
 import ink.qtum.org.inkqtum.R;
-import ink.qtum.org.inkqtum.views.activities.LoginActivity;
-import ink.qtum.org.inkqtum.views.activities.MainActivity;
+import ink.qtum.org.views.activities.LoginActivity;
+import ink.qtum.org.views.activities.MainActivity;
 
 /**
  * Created by SV on 18.12.2017.

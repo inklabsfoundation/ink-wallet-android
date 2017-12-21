@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/INKQtum.iml" filepath="$PROJECT_DIR$/INKQtum.iml" />
+      <module fileurl="file://$PROJECT_DIR$/Qtum-INK.iml" filepath="$PROJECT_DIR$/Qtum-INK.iml" />
       <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
     </modules>
   </component>
