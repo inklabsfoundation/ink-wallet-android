@@ -1,0 +1,198 @@
+<android.support.constraint.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_grey_transparent"
+    tools:context="ink.qtum.org.views.fragments.CreatePinFragment">
+
+    <android.support.v7.widget.CardView
+        android:id="@+id/cv_main"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginBottom="48dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="24dp"
+        android:background="@android:color/white"
+        app:cardCornerRadius="2dp"
+        app:cardElevation="4dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <android.support.constraint.ConstraintLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <ImageView
+                android:id="@+id/ib_close"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_marginEnd="8dp"
+
+                android:layout_marginTop="8dp"
+                android:adjustViewBounds="true"
+                android:src="@drawable/ic_action_close"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <TextView
+                android:id="@+id/textView2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_marginStart="8dp"
+                android:layout_marginTop="8dp"
+                android:text="2/3"
+                android:textColor="@color/dark_gray_text_color"
+                android:textSize="20sp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <TextView
+                android:id="@+id/textView3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_marginStart="8dp"
+                android:layout_marginTop="16dp"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:text="@string/set_your_pin"
+                android:textColor="@color/dark_gray_text_color"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/textView2" />
+
+            <EditText
+                android:id="@+id/et_pin1"
+                android:layout_width="20dp"
+                android:layout_height="30dp"
+                android:layout_marginStart="24dp"
+                android:layout_marginTop="32dp"
+                android:background="@drawable/edit_text_border"
+                android:gravity="center"
+                android:inputType="numberPassword"
+                android:maxLines="10"
+                android:padding="4dp"
+                android:textSize="14sp"
+                app:layout_constraintHorizontal_chainStyle="spread"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintRight_toLeftOf="@+id/et_pin2"
+                app:layout_constraintTop_toBottomOf="@+id/textView3" />
+
+            <EditText
+                android:id="@+id/et_pin2"
+                android:layout_width="20dp"
+                android:layout_height="30dp"
+                android:layout_marginTop="32dp"
+                android:background="@drawable/edit_text_border"
+                android:gravity="top|start"
+                android:maxLines="10"
+                android:padding="4dp"
+                android:textSize="14sp"
+                android:layout_marginLeft="@dimen/dimen_16dp"
+                app:layout_constraintRight_toLeftOf="@+id/et_pin3"
+                app:layout_constraintLeft_toRightOf="@+id/et_pin1"
+                app:layout_constraintTop_toBottomOf="@+id/textView3" />
+
+            <EditText
+                android:id="@+id/et_pin3"
+                android:layout_width="20dp"
+                android:layout_height="30dp"
+                android:layout_marginTop="32dp"
+                android:background="@drawable/edit_text_border"
+                android:gravity="top|start"
+                android:maxLines="10"
+                android:padding="4dp"
+                android:textSize="14sp"
+                android:layout_marginLeft="@dimen/dimen_16dp"
+                app:layout_constraintRight_toLeftOf="@+id/et_pin4"
+                app:layout_constraintLeft_toRightOf="@+id/et_pin2"
+                app:layout_constraintTop_toBottomOf="@+id/textView3" />
+
+            <EditText
+                android:id="@+id/et_pin4"
+                android:layout_width="20dp"
+                android:layout_height="30dp"
+                android:layout_marginTop="32dp"
+                android:background="@drawable/edit_text_border"
+                android:gravity="top|start"
+                android:maxLines="10"
+                android:padding="4dp"
+                android:textSize="14sp"
+                android:layout_marginLeft="@dimen/dimen_16dp"
+                app:layout_constraintRight_toLeftOf="@+id/et_pin5"
+                app:layout_constraintLeft_toRightOf="@+id/et_pin3"
+                app:layout_constraintTop_toBottomOf="@+id/textView3" />
+
+            <EditText
+                android:id="@+id/et_pin5"
+                android:layout_width="20dp"
+                android:layout_height="30dp"
+                android:layout_marginTop="32dp"
+                android:background="@drawable/edit_text_border"
+                android:gravity="top|start"
+                android:maxLines="10"
+                android:padding="4dp"
+                android:textSize="14sp"
+                android:layout_marginLeft="@dimen/dimen_16dp"
+                app:layout_constraintLeft_toRightOf="@+id/et_pin4"
+                app:layout_constraintRight_toLeftOf="@+id/et_pin6"
+                app:layout_constraintTop_toBottomOf="@+id/textView3" />
+
+            <EditText
+                android:id="@+id/et_pin6"
+                android:layout_width="20dp"
+                android:layout_height="30dp"
+                android:layout_marginLeft="@dimen/dimen_16dp"
+                android:layout_marginRight="24dp"
+                android:layout_marginTop="32dp"
+                android:background="@drawable/edit_text_border"
+                android:gravity="top|start"
+                android:maxLines="10"
+                android:padding="4dp"
+                android:textSize="14sp"
+                app:layout_constraintLeft_toRightOf="@+id/et_pin5"
+                app:layout_constraintRight_toRightOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/textView3" />
+
+            <TextView
+                android:id="@+id/textView4"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:layout_marginEnd="32dp"
+                android:layout_marginStart="32dp"
+                android:layout_marginTop="8dp"
+                android:text="@string/about_the_pin"
+                android:textColor="@color/lightGrayTextColor"
+                android:textSize="11sp"
+                app:layout_constraintBottom_toTopOf="@+id/btn_next"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/et_pin1" />
+
+            <android.support.v7.widget.AppCompatButton
+                android:id="@+id/btn_next"
+                style="@style/BtnBlueStyle"
+                android:layout_width="140dp"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp"
+                android:layout_marginEnd="8dp"
+                android:layout_marginStart="8dp"
+                android:text="@string/next"
+                android:textAllCaps="false"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent" />
+
+        </android.support.constraint.ConstraintLayout>
+
+    </android.support.v7.widget.CardView>
+
+
+</android.support.constraint.ConstraintLayout>

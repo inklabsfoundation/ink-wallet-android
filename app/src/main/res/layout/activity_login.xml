@@ -10,15 +10,19 @@
         android:id="@+id/imageView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
         android:layout_marginEnd="8dp"
         android:layout_marginStart="8dp"
         android:layout_marginTop="25dp"
         android:src="@drawable/logo_big"
+        app:layout_constraintBottom_toTopOf="@+id/tv_ink_wallet"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.26" />
 
     <TextView
+        android:id="@+id/textView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="5dp"
@@ -27,10 +31,8 @@
         android:textColor="@color/lightGrayTextColor"
         android:textSize="11dp"
         app:layout_constraintBottom_toTopOf="@+id/tv_ink_wallet"
-        app:layout_constraintHorizontal_bias="0.518"
         app:layout_constraintLeft_toLeftOf="@+id/tv_ink_wallet"
-        app:layout_constraintRight_toRightOf="@+id/tv_ink_wallet"
-        tools:ignore="MissingConstraints" />
+        app:layout_constraintRight_toRightOf="@+id/tv_ink_wallet" />
 
     <TextView
         android:id="@+id/tv_ink_wallet"
@@ -53,6 +55,7 @@
         android:layout_marginEnd="8dp"
         android:layout_marginStart="8dp"
         android:layout_marginTop="25dp"
+        android:textAllCaps="false"
         android:text="@string/restore_my_wallet"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -63,7 +66,8 @@
         android:id="@+id/tv_create_new"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="15dp"
+        android:layout_marginTop="8dp"
+        android:padding="@dimen/dimen_8dp"
         android:text="@string/create_new_wallet"
         android:textColor="@color/blueTextColor"
         app:layout_constraintLeft_toLeftOf="@+id/btn_restore"

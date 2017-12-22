@@ -10,10 +10,15 @@
 
     <!-- text colors -->
     <color name="blackTextColor">#000</color>
-    <color name="lightGrayTextColor">#c9d1da</color>
+    <color name="lightGrayTextColor">#bac0c7</color>
+    <color name="dark_gray_text_color">#434343</color>
     <color name="blueTextColor">@color/colorAccent</color>
 
     <!-- other colors-->
     <color name="btnBlueTextColor">@color/colorAccent</color>
     <color name="btnWhiteTextColor">#ffffff</color>
+
+    <color name="bg_grey_transparent">#3d4256</color>
+    <color name="btn_disable_color">#eeeeee</color>
+    <color name="grey_medium">#dadde3</color>
 </resources>

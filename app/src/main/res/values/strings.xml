@@ -7,4 +7,18 @@
     <string name="welcome_to">Welcome to</string>
     <string name="copyright_ink_labs_foundation">Copyright@Ink labs Foundation</string>
     <string name="terms_of_usage">Terms of Usage</string>
+
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+    <string name="input_your_seeds">Input your seeds</string>
+    <string name="create_ink_wallet">Create INK Wallet</string>
+    <string name="next">Next</string>
+    <string name="about_the_seeds">About the seeds:\nSeeds is a character string used to generate random address. You can input anything you like here.
+    And you have not been to remember it. Be aware that you can not get the same address even though
+     input the same seeds here.</string>
+    <string name="set_your_pin">Set your PIN</string>
+    <string name="about_the_pin">About the PIN:\nPIN is a six-digit-number to unlock your ink wallet
+     app. Each time when you log out, you have to reset it.</string>
+    <string name="here_is_your_wallet_address">Here is your wallet address and mnemonics</string>
+    <string name="wallet_address_is_the_identity_of_your_wallet">Wallet address is the identity of your wallet</string>
 </resources>

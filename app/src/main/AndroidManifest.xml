@@ -24,9 +24,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name="ink.qtum.org.views.activities.MainActivity" />
-        <activity android:name="ink.qtum.org.views.activities.RestoreWalletActivity" />
-        <activity android:name="ink.qtum.org.views.activities.CreateWalletActivity" />
+        <activity android:name="ink.qtum.org.views.activities.MainActivity"
+            android:screenOrientation="portrait"/>
+        <activity android:name="ink.qtum.org.views.activities.RestoreWalletActivity"
+            android:screenOrientation="portrait"/>
+        <activity android:name="ink.qtum.org.views.activities.CreateWalletActivity"
+            android:screenOrientation="portrait"/>
     </application>
 
 </manifest>
