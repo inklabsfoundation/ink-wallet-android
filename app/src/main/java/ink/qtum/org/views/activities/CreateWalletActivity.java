@@ -1,5 +1,6 @@
 package ink.qtum.org.views.activities;
 
+import android.os.Build;
 import android.os.Bundle;
 import android.support.v4.app.FragmentManager;
 import android.util.Log;
@@ -43,7 +44,11 @@ public class CreateWalletActivity extends BaseActivity implements CreateSeedFrag
 }
 
     private void setCreateProgress(int progress) {
-        pbCreateProgress.setProgress(progress);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            pbCreateProgress.setProgress(progress, true);
+        } else {
+            pbCreateProgress.setProgress(progress);
+        }
     }
 
     @Override

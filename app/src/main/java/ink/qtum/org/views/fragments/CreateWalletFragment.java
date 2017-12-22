@@ -17,7 +17,7 @@ import ink.qtum.org.inkqtum.R;
 public class CreateWalletFragment extends Fragment {
 
 
-    @BindView(R.id.btn_next)
+    @BindView(R.id.btn_copy_mnemonics)
     AppCompatButton btnNext;
 
     private OnWalletFragmentInteractionListener mListener;
@@ -67,7 +67,7 @@ public class CreateWalletFragment extends Fragment {
         mListener = null;
     }
 
-    @OnClick(R.id.btn_next)
+    @OnClick(R.id.btn_copy_mnemonics)
     void onNextClick(){
 
     }
