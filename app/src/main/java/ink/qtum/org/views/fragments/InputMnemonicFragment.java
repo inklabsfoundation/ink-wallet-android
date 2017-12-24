@@ -13,27 +13,27 @@ import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 
 
-public class CreateSeedFragment extends BaseFragment {
+public class InputMnemonicFragment extends BaseFragment {
 
     @BindView(R.id.et_seed)
-    EditText etSeed;
+    EditText etMnemonics;
 
     @BindView(R.id.btn_next)
     AppCompatButton btnNext;
 
-    private OnSeedFragmentInteractionListener mListener;
+    private OnMnemonicFragmentInteractionListener mListener;
 
-    public CreateSeedFragment() {
+    public InputMnemonicFragment() {
         // Required empty public constructor
     }
 
-    public static CreateSeedFragment newInstance() {
-        return new CreateSeedFragment();
+    public static InputMnemonicFragment newInstance() {
+        return new InputMnemonicFragment();
     }
 
     @Override
     protected int getLayout() {
-        return R.layout.fragment_create_seed;
+        return R.layout.fragment_input_mnemonic;
     }
 
     @Override
@@ -43,7 +43,7 @@ public class CreateSeedFragment extends BaseFragment {
 
     private void initViews() {
         btnNext.setEnabled(false);
-        etSeed.addTextChangedListener(new TextWatcher() {
+        etMnemonics.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) {
 
@@ -51,7 +51,7 @@ public class CreateSeedFragment extends BaseFragment {
 
             @Override
             public void onTextChanged(CharSequence charSequence, int i, int i1, int i2) {
-                if (!TextUtils.isEmpty(etSeed.getText().toString())){
+                if (!TextUtils.isEmpty(etMnemonics.getText().toString())){
                     btnNext.setEnabled(true);
                 } else {
                     btnNext.setEnabled(false);
@@ -68,11 +68,11 @@ public class CreateSeedFragment extends BaseFragment {
     @Override
     public void onAttach(Context context) {
         super.onAttach(context);
-        if (context instanceof OnSeedFragmentInteractionListener) {
-            mListener = (OnSeedFragmentInteractionListener) context;
+        if (context instanceof OnMnemonicFragmentInteractionListener) {
+            mListener = (OnMnemonicFragmentInteractionListener) context;
         } else {
             throw new RuntimeException(context.toString()
-                    + " must implement OnSeedFragmentInteractionListener");
+                    + " must implement OnMnemonicFragmentInteractionListener");
         }
     }
 
@@ -84,14 +84,14 @@ public class CreateSeedFragment extends BaseFragment {
 
     @OnClick(R.id.btn_next)
     void onNextClick(){
-        String seed = etSeed.getText().toString();
-        if (!TextUtils.isEmpty(seed)){
-            mListener.onSeedEntered(seed);
+        String mnemonic = etMnemonics.getText().toString();
+        if (!TextUtils.isEmpty(mnemonic)){
+            mListener.onMnemonicsEntered(mnemonic);
         }
     }
 
 
-    public interface OnSeedFragmentInteractionListener {
-        void onSeedEntered(String seed);
+    public interface OnMnemonicFragmentInteractionListener {
+        void onMnemonicsEntered(String seed);
     }
 }

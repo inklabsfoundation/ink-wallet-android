@@ -1,24 +1,35 @@
 package ink.qtum.org.views.fragments;
 
 import android.content.Context;
-import android.os.Bundle;
-import android.support.v4.app.Fragment;
-import android.support.v7.widget.AppCompatButton;
-import android.view.LayoutInflater;
-import android.view.View;
-import android.view.ViewGroup;
+import android.widget.TextView;
 
+import org.bitcoinj.wallet.Wallet;
+
+import javax.inject.Inject;
+
+import autodagger.AutoInjector;
 import butterknife.BindView;
-import butterknife.ButterKnife;
 import butterknife.OnClick;
+import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.WalletCreationCallback;
+import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.utils.ClipboardUtils;
+import ink.qtum.org.views.fragments.base.BaseFragment;
 
 
-public class CreateWalletFragment extends Fragment {
+@AutoInjector(QtumApp.class)
+public class CreateWalletFragment extends BaseFragment {
 
+    @BindView(R.id.tv_address)
+    TextView tvAddress;
+    @BindView(R.id.tv_mnemonics)
+    TextView tvMnemonics;
 
-    @BindView(R.id.btn_copy_mnemonics)
-    AppCompatButton btnNext;
+    private static String passPhrase;
+
+    @Inject
+    WalletManager walletManager;
 
     private OnWalletFragmentInteractionListener mListener;
 
@@ -26,28 +37,30 @@ public class CreateWalletFragment extends Fragment {
         // Required empty public constructor
     }
 
-    public static CreateWalletFragment newInstance() {
+    public static CreateWalletFragment newInstance(String seed) {
+        passPhrase = seed;
         return new CreateWalletFragment();
     }
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
+    protected int getLayout() {
+        return R.layout.fragment_create_wallet;
     }
 
     @Override
-    public View onCreateView(LayoutInflater inflater, ViewGroup container,
-                             Bundle savedInstanceState) {
-        // Inflate the layout for this fragment
-        View fragmentView = inflater.inflate(R.layout.fragment_create_wallet, container, false);
-        ButterKnife.bind(this, fragmentView);
-        initViews();
-        return fragmentView;
+    protected void init() {
+        QtumApp.getAppComponent().inject(this);
+        generateWallet();
     }
 
-    private void initViews() {
-
+    private void generateWallet() {
+        walletManager.createWallet(passPhrase, new WalletCreationCallback() {
+            @Override
+            public void onWalletCreated(Wallet wallet) {
+                tvAddress.setText(walletManager.getWalletFriendlyAddress());
+                tvMnemonics.setText(walletManager.getPrivateKey());
+            }
+        });
     }
 
     @Override
@@ -68,12 +81,22 @@ public class CreateWalletFragment extends Fragment {
     }
 
     @OnClick(R.id.btn_copy_mnemonics)
-    void onNextClick(){
+    void onNextClick() {
 
     }
 
 
     public interface OnWalletFragmentInteractionListener {
-        void onFinishCreateWallet(String seed);
+        void onFinishCreateWallet();
+    }
+
+    @OnClick(R.id.btn_copy_mnemonics)
+    public void copyMnemonics(){
+        ClipboardUtils.copyToClipBoard(getContext(), tvMnemonics.getText().toString());
+    }
+
+    @OnClick(R.id.tv_start_wallet)
+    public void goToMainActivity(){
+        mListener.onFinishCreateWallet();
     }
 }

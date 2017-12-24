@@ -13,7 +13,7 @@
         <item name="windowNoTitle">true</item>
     </style>
 
-    <style name="BtnBlueStyle" parent="Base.Widget.AppCompat.Button">
+    <style name="BtnStyle" parent="Base.Widget.AppCompat.Button">
         <item name="android:minWidth">1dp</item>
         <item name="android:minHeight">1dp</item>
         <item name="android:paddingLeft">16dp</item>
@@ -21,7 +21,18 @@
         <item name="android:paddingTop">8dp</item>
         <item name="android:paddingBottom">8dp</item>
         <item name="android:textSize">13sp</item>
+
+    </style>
+
+    <style name="BtnStyle.Blue">
         <item name="android:background">@drawable/bg_blue_button</item>
         <item name="android:textColor">@color/btnWhiteTextColor</item>
     </style>
+
+    <style name="BtnStyle.BlueGray">
+        <!--<item name="android:background">@drawable/bg_blue_button</item>-->
+        <item name="android:background">#595f7f</item>
+        <item name="android:textColor">@color/btnWhiteTextColor</item>
+    </style>
+
 </resources>

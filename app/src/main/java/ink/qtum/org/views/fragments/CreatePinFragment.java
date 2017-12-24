@@ -1,24 +1,15 @@
 package ink.qtum.org.views.fragments;
 
 import android.content.Context;
-import android.os.Bundle;
-import android.support.v4.app.Fragment;
 import android.support.v7.widget.AppCompatButton;
-import android.text.Editable;
-import android.text.TextUtils;
-import android.text.TextWatcher;
-import android.view.LayoutInflater;
-import android.view.View;
-import android.view.ViewGroup;
-import android.widget.EditText;
 
 import butterknife.BindView;
-import butterknife.ButterKnife;
 import butterknife.OnClick;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.views.fragments.base.BaseFragment;
 
 
-public class CreatePinFragment extends Fragment {
+public class CreatePinFragment extends BaseFragment {
 
 
     @BindView(R.id.btn_next)
@@ -35,19 +26,13 @@ public class CreatePinFragment extends Fragment {
     }
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
+    protected int getLayout() {
+        return R.layout.fragment_create_pin;
     }
 
     @Override
-    public View onCreateView(LayoutInflater inflater, ViewGroup container,
-                             Bundle savedInstanceState) {
-        // Inflate the layout for this fragment
-        View fragmentView = inflater.inflate(R.layout.fragment_create_pin, container, false);
-        ButterKnife.bind(this, fragmentView);
+    protected void init() {
         initViews();
-        return fragmentView;
     }
 
     private void initViews() {

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<android.support.v7.widget.Toolbar xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/toolbar"
+    android:layout_width="match_parent"
+    android:layout_height="?attr/actionBarSize"
+    android:background="@color/navBarColor">
+
+    <!--<TextView-->
+        <!--android:id="@+id/tv_toolbar_title"-->
+        <!--android:layout_width="wrap_content"-->
+        <!--android:layout_height="wrap_content"-->
+        <!--android:text="@string/app_name"-->
+        <!--android:textColor="@color/toolbar_text_color"-->
+        <!--android:textSize="20dp" />-->
+
+</android.support.v7.widget.Toolbar>

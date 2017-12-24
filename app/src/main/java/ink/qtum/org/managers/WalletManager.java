@@ -3,6 +3,7 @@ package ink.qtum.org.managers;
 import android.content.Context;
 
 import com.google.common.base.Joiner;
+import com.google.common.base.Splitter;
 
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.NetworkParameters;
@@ -12,6 +13,8 @@ import org.bitcoinj.wallet.Wallet;
 
 import java.util.HashSet;
 
+import autodagger.AutoInjector;
+import ink.qtum.org.QtumApp;
 import ink.qtum.org.utils.FileUtils;
 
 import static ink.qtum.org.models.Constants.BIP_39_WORDLIST_ASSET;
@@ -20,6 +23,7 @@ import static ink.qtum.org.models.Constants.BIP_39_WORDLIST_ASSET;
  * Created by SV on 21.12.2017.
  */
 
+@AutoInjector(QtumApp.class)
 public class WalletManager {
 
     private Wallet wallet;
@@ -53,5 +57,22 @@ public class WalletManager {
 
     public String getWalletFriendlyAddress() {
         return wallet.currentReceiveAddress().toString();
+    }
+
+    public void restoreWallet(String mnemonicCode, WalletCreationCallback callback) {
+        if (mnemonicCode.charAt(mnemonicCode.length() - 1) == ' ') {
+            mnemonicCode = mnemonicCode.substring(0, mnemonicCode.length() - 1);
+        }
+
+        DeterministicSeed seed = new DeterministicSeed(Splitter.on(' ').splitToList(mnemonicCode), null, "", 0);
+
+        wallet = Wallet.fromSeed(params, seed);
+        mnemonicKey = Joiner.on(" ").join(seed.getMnemonicCode());
+
+        walletFriendlyAddress = wallet.currentReceiveAddress().toString();
+
+        callback.onWalletCreated(wallet);
+
+
     }
 }

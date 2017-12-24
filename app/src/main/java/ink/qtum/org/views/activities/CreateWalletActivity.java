@@ -1,9 +1,9 @@
 package ink.qtum.org.views.activities;
 
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.support.v4.app.FragmentManager;
-import android.util.Log;
 import android.widget.ProgressBar;
 
 import javax.inject.Inject;
@@ -12,11 +12,11 @@ import autodagger.AutoInjector;
 import butterknife.BindView;
 import butterknife.ButterKnife;
 import ink.qtum.org.QtumApp;
-import ink.qtum.org.views.fragments.CreatePinFragment;
-import ink.qtum.org.views.fragments.CreateSeedFragment;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.WalletManager;
-import ink.qtum.org.views.activities.base.BaseActivity;
+import ink.qtum.org.views.activities.base.AToolbarActivity;
+import ink.qtum.org.views.fragments.CreatePinFragment;
+import ink.qtum.org.views.fragments.CreateSeedFragment;
 import ink.qtum.org.views.fragments.CreateWalletFragment;
 
 /**
@@ -24,9 +24,9 @@ import ink.qtum.org.views.fragments.CreateWalletFragment;
  */
 
 @AutoInjector(QtumApp.class)
-public class CreateWalletActivity extends BaseActivity implements CreateSeedFragment.OnSeedFragmentInteractionListener,
+public class CreateWalletActivity extends AToolbarActivity implements CreateSeedFragment.OnSeedFragmentInteractionListener,
         CreatePinFragment.OnPinFragmentInteractionListener,
-        CreateWalletFragment.OnWalletFragmentInteractionListener{
+        CreateWalletFragment.OnWalletFragmentInteractionListener {
 
     @BindView(R.id.pb_create_progress)
     ProgressBar pbCreateProgress;
@@ -34,14 +34,17 @@ public class CreateWalletActivity extends BaseActivity implements CreateSeedFrag
     @Inject
     WalletManager walletManager;
 
+    private String mSeed;
+    private String mPin;
+
     @Override
     protected void init(Bundle savedInstanceState) {
         QtumApp.getAppComponent().inject(this);
         ButterKnife.bind(this);
-        enableBackButton();
-        setTitle(getString(R.string.create_ink_wallet));
+//        enableBackButton();
+        setToolBarTitle(R.string.create_ink_wallet);
         showSeedFragment();
-}
+    }
 
     private void setCreateProgress(int progress) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -56,7 +59,7 @@ public class CreateWalletActivity extends BaseActivity implements CreateSeedFrag
         return R.layout.activity_create_new;
     }
 
-    private void showSeedFragment(){
+    private void showSeedFragment() {
         setCreateProgress(1);
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
@@ -66,6 +69,7 @@ public class CreateWalletActivity extends BaseActivity implements CreateSeedFrag
 
     @Override
     public void onSeedEntered(String seed) {
+        mSeed = seed;
         showPinFragment();
     }
 
@@ -78,7 +82,8 @@ public class CreateWalletActivity extends BaseActivity implements CreateSeedFrag
     }
 
     @Override
-    public void onPinEntered(String seed) {
+    public void onPinEntered(String pin) {
+        mPin = pin;
         showWalletFragment();
     }
 
@@ -86,12 +91,12 @@ public class CreateWalletActivity extends BaseActivity implements CreateSeedFrag
         setCreateProgress(3);
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
-                .replace(R.id.fl_fragment_container, CreateWalletFragment.newInstance())
+                .replace(R.id.fl_fragment_container, CreateWalletFragment.newInstance(mSeed))
                 .commit();
     }
 
     @Override
-    public void onFinishCreateWallet(String seed) {
-
+    public void onFinishCreateWallet() {
+        startActivity(new Intent(CreateWalletActivity.this, MainActivity.class));
     }
 }

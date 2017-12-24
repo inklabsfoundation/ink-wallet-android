@@ -18,7 +18,7 @@ import ink.qtum.org.dependencies.AppModule;
 public class QtumApp extends Application {
 
 
-    private static  QtumAppComponent appComponent;
+    private static QtumAppComponent appComponent;
 
     @Override
     public void onCreate() {
