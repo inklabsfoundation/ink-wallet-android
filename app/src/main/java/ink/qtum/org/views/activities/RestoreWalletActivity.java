@@ -25,7 +25,7 @@ public class RestoreWalletActivity extends AToolbarActivity implements InputMnem
     @Override
     protected void init(Bundle savedInstanceState) {
         QtumApp.getAppComponent().inject(this);
-        setToolBarTitle(R.string.restore_ink_wallet);
+        setToolBarTitle(getString(R.string.restore_ink_wallet));
         showMnemonicFragment();
     }
 

@@ -42,7 +42,7 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
         QtumApp.getAppComponent().inject(this);
         ButterKnife.bind(this);
 //        enableBackButton();
-        setToolBarTitle(R.string.create_ink_wallet);
+        setToolBarTitle(getString(R.string.create_ink_wallet));
         showSeedFragment();
     }
 

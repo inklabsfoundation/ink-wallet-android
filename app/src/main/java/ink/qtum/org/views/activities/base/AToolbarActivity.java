@@ -78,12 +78,15 @@ public abstract class AToolbarActivity extends BaseActivity {
 //        title.setText(resId);
     }
 
-//    protected void setToolBarTitle(CharSequence title) {
-//        if (this.title != null) {
+    protected void setToolBarTitle(CharSequence title) {
+        if (title != null) {
+            toolBar.setTitle(title);
 //            this.title.setText(title);
-//        } else {
+        } else {
 //            setTitle(getTitle().toString() + " " + title);
-//        }
-//    }
+            toolBar.setTitle(" ");
+        }
+        toolBar.setTitleTextColor(getResources().getColor(R.color.toolbar_text_color));
+    }
 
 }

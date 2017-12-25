@@ -41,4 +41,9 @@
     <string name="copied_to_clipboard">Copied to clipboard</string>
     <string name="address">address</string>
     <string name="input_your_mnemonics">Input your mnemonics below to restore your wallet</string>
+    <string name="title_backup">Backup</string>
+    <string name="mnemonics_backup_text">Mnemonics are used to restore your wallet in other devices or when you log out. Be aware them just for yourself.</string>
+    <string name="copy_mnemonics_attention_content">Copy mnemonics and save them digitally may cause security risks.\n\nWe strongly suggest you write them down, without relying on any network service and digit devices.</string>
+    <string name="btn_still_copy">Still copy</string>
+    <string name="btn_give_up">Give up</string>
 </resources>

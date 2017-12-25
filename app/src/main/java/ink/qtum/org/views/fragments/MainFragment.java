@@ -1,5 +1,6 @@
 package ink.qtum.org.views.fragments;
 
+import android.content.Intent;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.widget.TextView;
@@ -17,6 +18,7 @@ import ink.qtum.org.QtumApp;
 import ink.qtum.org.adapter.TokensAdapter;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.views.activities.BackupActivity;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 
 @AutoInjector(QtumApp.class)
@@ -65,7 +67,7 @@ public class MainFragment extends BaseFragment {
 
     @OnClick(R.id.cl_backup)
     public void onBackupClick() {
-        Toast.makeText(getContext(), "Backup", Toast.LENGTH_SHORT).show();
+        startActivity(new Intent(getActivity(), BackupActivity.class));
     }
 
     @OnClick(R.id.rl_receive)
