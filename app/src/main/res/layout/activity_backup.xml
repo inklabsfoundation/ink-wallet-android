@@ -16,7 +16,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_centerInParent="true"
-            android:src="@drawable/ic_attention" />
+            android:src="@drawable/ic_backup_exclamation_point" />
 
         <TextView
             android:layout_width="wrap_content"

@@ -15,7 +15,7 @@
             android:layout_marginBottom="30dp"
             android:layout_marginStart="10dp"
             android:layout_marginTop="30dp"
-            android:src="@drawable/logo_main_screen"
+            android:src="@drawable/ic_fragment_logo_main_info"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
@@ -37,7 +37,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
-                android:src="@drawable/ic_save_vec"
+                android:src="@drawable/ic_backup_diskette"
                 app:layout_constraintBottom_toBottomOf="@+id/textView5"
                 app:layout_constraintEnd_toStartOf="@+id/textView5"
                 app:layout_constraintTop_toTopOf="@+id/textView5" />
