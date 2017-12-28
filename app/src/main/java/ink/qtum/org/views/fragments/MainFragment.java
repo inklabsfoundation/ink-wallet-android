@@ -8,7 +8,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import org.bitcoinj.core.Coin;
-import org.w3c.dom.Text;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -26,6 +25,7 @@ import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.views.activities.BackupActivity;
+import ink.qtum.org.views.activities.TxHistoryActivity;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 import okhttp3.ResponseBody;
 
@@ -60,9 +60,22 @@ public class MainFragment extends BaseFragment {
     private void initViews() {
         mAddress.setText(walletManager.getWalletFriendlyAddress());
         getBalance();
+        initList();
+    }
+
+    private void initList() {
         adapter = new TokensAdapter(getDemoList());
         final LinearLayoutManager layoutManager = new LinearLayoutManager(getContext());
         layoutManager.setOrientation(LinearLayoutManager.VERTICAL);
+
+        adapter.setItemClickListener(new TokensAdapter.OnItemClickListener() {
+            @Override
+            public void OnItemClick(int position) {
+                Intent intent = new Intent(getActivity(), TxHistoryActivity.class);
+
+                startActivity(intent);
+            }
+        });
 
         mRecycler.setLayoutManager(layoutManager);
         mRecycler.setAdapter(adapter);
@@ -73,7 +86,7 @@ public class MainFragment extends BaseFragment {
             @Override
             public void onSuccess(Object response) {
                 try {
-                    Long balanceSatoshi = Long.parseLong(((ResponseBody)response).string());
+                    Long balanceSatoshi = Long.parseLong(((ResponseBody) response).string());
                     Coin balance = Coin.valueOf(balanceSatoshi);
                     showQtumBalance(balance.toPlainString());
                     Log.d("svcom", "balance - " + balance.toString());
@@ -89,9 +102,11 @@ public class MainFragment extends BaseFragment {
             }
         });
     }
-    private void showQtumBalance(String balance){
+
+    private void showQtumBalance(String balance) {
         tvQtumBalance.setText(balance);
     }
+
     private List<Integer> getDemoList() {
         List<Integer> list = new ArrayList<>();
         for (int i = 0; i < 10; i++) {

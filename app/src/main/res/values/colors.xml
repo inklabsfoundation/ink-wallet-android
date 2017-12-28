@@ -4,6 +4,9 @@
     <color name="colorPrimaryDark">#0c101c</color>
     <color name="colorAccent">#394db0</color>
     <color name="navBarColor">#3d4256</color>
+    <color name="turquoiseColor">#3aa6b0</color>
+
+    <color name="transparent">#00ffffff</color>
 
     <!-- background colors-->
     <color name="whiteLayoutBackground">#ffffff</color>
@@ -15,6 +18,7 @@
     <color name="blueTextColor">@color/colorAccent</color>
     <color name="toolbar_text_color">#ffffff</color>
     <color name="black8TextColor">#393939</color>
+    <color name="turquoiseTextColor">@color/turquoiseColor</color>
 
     <!-- other colors-->
     <color name="btnBlueTextColor">@color/colorAccent</color>
@@ -26,4 +30,5 @@
     <color name="grey_medium">#dadde3</color>
     <color name="drawer_bg">#3d4256</color>
     <color name="drawerMenuTextColor">#ececec</color>
+    <color name="turquoiseBtnBgColor">@color/turquoiseColor</color>
 </resources>

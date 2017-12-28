@@ -47,4 +47,6 @@
     <string name="btn_still_copy">Still copy</string>
     <string name="btn_give_up">Give up</string>
     <string name="qtum">Qtum</string>
+    <string name="toolbar_title_details">Details</string>
+    <string name="transaction_history">Transaction history</string>
 </resources>

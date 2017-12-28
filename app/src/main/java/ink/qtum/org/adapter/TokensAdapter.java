@@ -4,17 +4,19 @@ import android.support.v7.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.LinearLayout;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import butterknife.BindView;
 import butterknife.ButterKnife;
 import ink.qtum.org.inkqtum.R;
 
 public class TokensAdapter extends RecyclerView.Adapter<TokensItemHolder> {
 
     public interface OnItemClickListener {
-        void OnItemClick(int position, String name, String code);
+        void OnItemClick(int position);
     }
 
     OnItemClickListener listener;
@@ -47,7 +49,14 @@ public class TokensAdapter extends RecyclerView.Adapter<TokensItemHolder> {
 
     @Override
     public void onBindViewHolder(TokensItemHolder holder, final int position) {
-
+        holder.vRoot.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if (listener != null) {
+                    listener.OnItemClick(position);
+                }
+            }
+        });
     }
 
     @Override
@@ -59,7 +68,8 @@ public class TokensAdapter extends RecyclerView.Adapter<TokensItemHolder> {
 
 class TokensItemHolder extends RecyclerView.ViewHolder {
 
-
+    @BindView(R.id.ll_root)
+    LinearLayout vRoot;
 
 
     TokensItemHolder(View itemView) {
