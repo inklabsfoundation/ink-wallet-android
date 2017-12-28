@@ -5,7 +5,9 @@ import android.support.v7.widget.AppCompatButton;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.view.View;
 import android.widget.EditText;
+import android.widget.ImageView;
 
 import butterknife.BindView;
 import butterknife.OnClick;
@@ -20,6 +22,9 @@ public class CreateSeedFragment extends BaseFragment {
 
     @BindView(R.id.btn_next)
     AppCompatButton btnNext;
+
+    @BindView(R.id.ib_close)
+    ImageView ivClose;
 
     private OnSeedFragmentInteractionListener mListener;
 
@@ -61,6 +66,13 @@ public class CreateSeedFragment extends BaseFragment {
             @Override
             public void afterTextChanged(Editable editable) {
 
+            }
+        });
+
+        ivClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                getActivity().finish();
             }
         });
     }

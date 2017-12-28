@@ -2,6 +2,8 @@ package ink.qtum.org.views.fragments;
 
 import android.content.Context;
 import android.support.v7.widget.AppCompatButton;
+import android.view.View;
+import android.widget.ImageView;
 
 import butterknife.BindView;
 import butterknife.OnClick;
@@ -14,6 +16,9 @@ public class CreatePinFragment extends BaseFragment {
 
     @BindView(R.id.btn_next)
     AppCompatButton btnNext;
+
+    @BindView(R.id.ib_close)
+    ImageView ivClose;
 
     private OnPinFragmentInteractionListener mListener;
 
@@ -36,7 +41,12 @@ public class CreatePinFragment extends BaseFragment {
     }
 
     private void initViews() {
-
+        ivClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                getActivity().finish();
+            }
+        });
     }
 
     @Override

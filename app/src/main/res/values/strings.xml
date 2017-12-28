@@ -46,4 +46,5 @@
     <string name="copy_mnemonics_attention_content">Copy mnemonics and save them digitally may cause security risks.\n\nWe strongly suggest you write them down, without relying on any network service and digit devices.</string>
     <string name="btn_still_copy">Still copy</string>
     <string name="btn_give_up">Give up</string>
+    <string name="qtum">Qtum</string>
 </resources>

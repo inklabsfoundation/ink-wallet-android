@@ -1,6 +1,8 @@
 package ink.qtum.org.views.fragments;
 
 import android.content.Context;
+import android.view.View;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import org.bitcoinj.wallet.Wallet;
@@ -25,6 +27,8 @@ public class CreateWalletFragment extends BaseFragment {
     TextView tvAddress;
     @BindView(R.id.tv_mnemonics)
     TextView tvMnemonics;
+    @BindView(R.id.ib_close)
+    ImageView ivClose;
 
     private static String passPhrase;
 
@@ -50,7 +54,17 @@ public class CreateWalletFragment extends BaseFragment {
     @Override
     protected void init() {
         QtumApp.getAppComponent().inject(this);
+        initViews();
         generateWallet();
+    }
+
+    private void initViews() {
+        ivClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                getActivity().finish();
+            }
+        });
     }
 
     private void generateWallet() {

@@ -56,6 +56,7 @@ public class WalletManager {
     }
 
     public String getWalletFriendlyAddress() {
+//        return "QPhxcDvs4jopCJcFqRBKM9XayhtLdkLHur";
         return wallet.currentReceiveAddress().toString();
     }
 
