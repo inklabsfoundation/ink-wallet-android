@@ -19,6 +19,7 @@
     <color name="toolbar_text_color">#ffffff</color>
     <color name="black8TextColor">#393939</color>
     <color name="turquoiseTextColor">@color/turquoiseColor</color>
+    <color name="hintTextColor">#a6a6a6</color>
 
     <!-- other colors-->
     <color name="btnBlueTextColor">@color/colorAccent</color>

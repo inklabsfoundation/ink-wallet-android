@@ -49,4 +49,11 @@
     <string name="qtum">Qtum</string>
     <string name="toolbar_title_details">Details</string>
     <string name="transaction_history">Transaction history</string>
+    <string name="et_hint_from">From:</string>
+    <string name="et_hint_to">To:</string>
+    <string name="et_hint_fees">Fees:</string>
+    <string name="et_hint_description">Description:</string>
+    <string name="et_hint_tx_hash">Tx hash:</string>
+    <string name="et_hint_block_height">Block height:</string>
+    <string name="et_hint_time_stamp">Time stamp:</string>
 </resources>

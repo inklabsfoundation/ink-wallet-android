@@ -1,6 +1,7 @@
 package ink.qtum.org;
 
 import android.app.Application;
+import android.content.Context;
 
 import javax.inject.Singleton;
 
@@ -19,11 +20,13 @@ public class QtumApp extends Application {
 
 
     private static QtumAppComponent appComponent;
+    private static Context appContext;
 
     @Override
     public void onCreate() {
         super.onCreate();
         appComponent = buildAppComponent();
+        appContext = getApplicationContext();
     }
 
     public static QtumAppComponent getAppComponent() {
@@ -34,5 +37,9 @@ public class QtumApp extends Application {
         return DaggerQtumAppComponent.builder()
                 .appModule(new AppModule(this))
                 .build();
+    }
+
+    public static Context getAppContext() {
+        return appContext;
     }
 }

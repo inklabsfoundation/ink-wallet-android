@@ -1,10 +1,7 @@
 package ink.qtum.org.views.activities;
 
 import android.os.Bundle;
-import android.view.View;
 import android.widget.TextView;
-
-import com.afollestad.materialdialogs.MaterialDialog;
 
 import javax.inject.Inject;
 
@@ -13,6 +10,7 @@ import butterknife.BindView;
 import butterknife.OnClick;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.DialogManager;
 import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.utils.ClipboardUtils;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
@@ -41,26 +39,14 @@ public class BackupActivity extends AToolbarActivity {
 
     @OnClick(R.id.btn_copy_mnemonics)
     public void copyMnemonic() {
-        showAttentionDialog();
+        DialogManager.showCopyMnemonicsDialog(new DialogManager.DialogListener() {
+            @Override
+            public void onPositiveButtonClick() {
+                super.onPositiveButtonClick();
+                ClipboardUtils.copyToClipBoard(QtumApp.getAppContext(), tvMnemonics.getText().toString());
+            }
+        });
     }
 
-    private void showAttentionDialog(){
-        MaterialDialog.Builder builder = new MaterialDialog.Builder(this)
-                .content(R.string.copy_mnemonics_attention_content)
-                .positiveText(R.string.btn_still_copy)
-                .negativeText(R.string.btn_give_up)
-                .positiveColor(getResources().getColor(R.color.btnBlueTextColor))
-                .negativeColor(getResources().getColor(R.color.lightGrayTextColor))
-                .callback(new MaterialDialog.ButtonCallback() {
-                    @Override
-                    public void onPositive(MaterialDialog dialog) {
-                        ClipboardUtils.copyToClipBoard(getApplicationContext(), tvMnemonics.getText().toString());
-                        super.onPositive(dialog);
-                    }
-                });
-        MaterialDialog dialog = builder.build();
-        dialog.getContentView().setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
-        dialog.show();
 
-    }
 }

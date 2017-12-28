@@ -14,6 +14,7 @@ import butterknife.BindView;
 import butterknife.OnClick;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.DialogManager;
 import ink.qtum.org.managers.WalletCreationCallback;
 import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.utils.ClipboardUtils;
@@ -106,7 +107,13 @@ public class CreateWalletFragment extends BaseFragment {
 
     @OnClick(R.id.btn_copy_mnemonics)
     public void copyMnemonics(){
-        ClipboardUtils.copyToClipBoard(getContext(), tvMnemonics.getText().toString());
+        DialogManager.showCopyMnemonicsDialog(new DialogManager.DialogListener() {
+            @Override
+            public void onPositiveButtonClick() {
+                super.onPositiveButtonClick();
+                ClipboardUtils.copyToClipBoard(QtumApp.getAppContext(), tvMnemonics.getText().toString());
+            }
+        });
     }
 
     @OnClick(R.id.tv_start_wallet)

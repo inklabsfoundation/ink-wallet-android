@@ -13,7 +13,8 @@
 
         <android.support.constraint.ConstraintLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp">
 
             <ImageView
                 android:id="@+id/iv_currency_logo"
@@ -57,14 +58,149 @@
 
         <android.support.design.widget.TextInputLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp"
+            app:hintTextAppearance="@style/TextLabel">
+
+            <android.support.design.widget.TextInputEditText
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:id="@+id/et_from_address"
+                android:background="@color/transparent"
+                android:enabled="false"
+                android:hint="@string/et_hint_from"
+                android:paddingTop="10dp"
+                android:text="Q_rococoLjlsjLjLhjgjghadj"
+                android:textColor="@color/black8TextColor"
+                android:textColorHint="@color/hintTextColor"
+                android:textSize="14dp" />
+        </android.support.design.widget.TextInputLayout>
+
+        <android.support.design.widget.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp"
+            app:hintTextAppearance="@style/TextLabel">
 
             <android.support.design.widget.TextInputEditText
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@color/transparent"
-                android:hint="ratata"
-                android:text="sasfdfds" />
+                android:enabled="false"
+                android:id="@+id/et_to_address"
+                android:hint="@string/et_hint_to"
+                android:paddingTop="10dp"
+                android:text="Q_rococoAsgSDFjgARtgjAjGFkgfvgfsbsrt"
+                android:textColor="@color/black8TextColor"
+                android:textColorHint="@color/hintTextColor"
+                android:textSize="14dp" />
+        </android.support.design.widget.TextInputLayout>
+
+        <android.support.design.widget.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp"
+            app:hintTextAppearance="@style/TextLabel">
+
+            <android.support.design.widget.TextInputEditText
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/transparent"
+                android:id="@+id/et_fees"
+                android:enabled="false"
+                android:hint="@string/et_hint_fees"
+                android:paddingTop="10dp"
+                android:text="8.88"
+                android:textColor="@color/black8TextColor"
+                android:textColorHint="@color/hintTextColor"
+                android:textSize="14dp" />
+        </android.support.design.widget.TextInputLayout>
+
+        <android.support.design.widget.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp"
+            app:hintTextAppearance="@style/TextLabel">
+
+            <android.support.design.widget.TextInputEditText
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/transparent"
+                android:id="@+id/et_description"
+                android:enabled="false"
+                android:hint="@string/et_hint_description"
+                android:paddingTop="10dp"
+                android:text="sasfdfds\nsf\nherfgdrgddghhs df sfg hs h fh asdfghthycfj "
+                android:textColor="@color/black8TextColor"
+                android:textColorHint="@color/hintTextColor"
+                android:textSize="14dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0.5dp"
+                android:layout_marginTop="5dp"
+                android:background="@color/hintTextColor" />
+
+        </android.support.design.widget.TextInputLayout>
+
+        <android.support.design.widget.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp"
+            app:hintTextAppearance="@style/TextLabel">
+
+            <android.support.design.widget.TextInputEditText
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/transparent"
+                android:enabled="false"
+                android:hint="@string/et_hint_tx_hash"
+                android:id="@+id/et_tx_hash"
+                android:paddingTop="10dp"
+                android:text="tx_sSf$@43g24qg34Gh34qg4f43v3g44gv34"
+                android:textColor="@color/black8TextColor"
+                android:textColorHint="@color/hintTextColor"
+                android:textSize="14dp" />
+        </android.support.design.widget.TextInputLayout>
+
+        <android.support.design.widget.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp"
+            app:hintTextAppearance="@style/TextLabel">
+
+            <android.support.design.widget.TextInputEditText
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/transparent"
+                android:id="@+id/et_block_height"
+                android:enabled="false"
+                android:hint="@string/et_hint_block_height"
+                android:paddingTop="10dp"
+                android:text="56842"
+                android:textColor="@color/black8TextColor"
+                android:textColorHint="@color/hintTextColor"
+                android:textSize="14dp" />
+        </android.support.design.widget.TextInputLayout>
+
+        <android.support.design.widget.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="15dp"
+            app:hintTextAppearance="@style/TextLabel">
+
+            <android.support.design.widget.TextInputEditText
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/transparent"
+                android:id="@+id/et_time_stamp"
+                android:enabled="false"
+                android:hint="@string/et_hint_time_stamp"
+                android:paddingTop="10dp"
+                android:text="09/14/2017 18:23:12 +0800"
+                android:textColor="@color/black8TextColor"
+                android:textColorHint="@color/hintTextColor"
+                android:textSize="14dp" />
         </android.support.design.widget.TextInputLayout>
 
 
