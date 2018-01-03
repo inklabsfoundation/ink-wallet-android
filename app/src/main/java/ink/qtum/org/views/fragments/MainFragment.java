@@ -4,6 +4,8 @@ import android.content.Intent;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
+import android.view.View;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,6 +22,7 @@ import butterknife.BindView;
 import butterknife.OnClick;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.adapter.TokensAdapter;
+import ink.qtum.org.inkqtum.BuildConfig;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.rest.ApiMethods;
@@ -29,6 +32,10 @@ import ink.qtum.org.views.activities.ReceiveActivity;
 import ink.qtum.org.views.activities.TxHistoryActivity;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 import okhttp3.ResponseBody;
+
+import static ink.qtum.org.models.Extras.COIN_BALANCE_EXTRA;
+import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
+import static ink.qtum.org.models.Extras.QTUM_ID;
 
 @AutoInjector(QtumApp.class)
 public class MainFragment extends BaseFragment {
@@ -40,6 +47,10 @@ public class MainFragment extends BaseFragment {
 
     @BindView(R.id.tv_qtum_balance)
     TextView tvQtumBalance;
+
+    @BindView(R.id.ll_qtum_balance_container)
+    LinearLayout llQtumBalanceContainer;
+
 
     private TokensAdapter adapter;
 
@@ -60,8 +71,12 @@ public class MainFragment extends BaseFragment {
 
     private void initViews() {
         mAddress.setText(walletManager.getWalletFriendlyAddress());
-        getBalance();
+        initQtum();
         initList();
+    }
+
+    private void initQtum() {
+        getQtumBalance();
     }
 
     private void initList() {
@@ -73,7 +88,6 @@ public class MainFragment extends BaseFragment {
             @Override
             public void OnItemClick(int position) {
                 Intent intent = new Intent(getActivity(), TxHistoryActivity.class);
-
                 startActivity(intent);
             }
         });
@@ -82,15 +96,26 @@ public class MainFragment extends BaseFragment {
         mRecycler.setAdapter(adapter);
     }
 
-    private void getBalance() {
+
+
+    private void getQtumBalance() {
         Requestor.getBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
                 try {
                     Long balanceSatoshi = Long.parseLong(((ResponseBody) response).string());
-                    Coin balance = Coin.valueOf(balanceSatoshi);
+                    final Coin balance = Coin.valueOf(balanceSatoshi);
                     showQtumBalance(balance.toPlainString());
-                    Log.d("svcom", "balance - " + balance.toString());
+
+                    llQtumBalanceContainer.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View view) {
+                            Intent intent = new Intent(getActivity(), TxHistoryActivity.class);
+                            intent.putExtra(COIN_ID_EXTRA, QTUM_ID);
+                            intent.putExtra(COIN_BALANCE_EXTRA, balance.toPlainString());
+                            startActivity(intent);
+                        }
+                    });
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -99,7 +124,7 @@ public class MainFragment extends BaseFragment {
 
             @Override
             public void onFailure(String msg) {
-                Log.d("svcom", "balance - " + msg);
+                Log.e(BuildConfig.APPLICATION_ID, msg);
             }
         });
     }

@@ -15,4 +15,10 @@ public class Requestor {
         Log.d("svcom", "path " + call.request());
         ApiMethods.makeRequest(call, listener);
     }
+
+    public static void getTransactions(String address, ApiMethods.RequestListener listener) {
+        Call call = ApiMethods.createInsightApi().getTransactions(address);
+        Log.d("svcom", "path " + call.request());
+        ApiMethods.makeRequest(call, listener);
+    }
 }

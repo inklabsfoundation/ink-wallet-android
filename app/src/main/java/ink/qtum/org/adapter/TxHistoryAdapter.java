@@ -25,8 +25,10 @@ public class TxHistoryAdapter extends RecyclerView.Adapter<TxHistoryItemHolder> 
 
     private List<Integer> cryptoList;
     private View view;
+    private String coinId;
 
-    public TxHistoryAdapter(List<Integer> transList) {
+    public TxHistoryAdapter(List<Integer> transList, String coinId) {
+        this.coinId = coinId;
         this.cryptoList = transList;
     }
 
