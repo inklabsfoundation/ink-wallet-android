@@ -44,6 +44,9 @@
         <activity
             android:name="ink.qtum.org.views.activities.TxDetailsActivity"
             android:screenOrientation="portrait" />
+        <activity
+            android:name="ink.qtum.org.views.activities.ReceiveActivity"
+            android:screenOrientation="portrait" />
     </application>
 
 </manifest>

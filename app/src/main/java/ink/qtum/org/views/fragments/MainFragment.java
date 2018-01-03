@@ -25,6 +25,7 @@ import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.views.activities.BackupActivity;
+import ink.qtum.org.views.activities.ReceiveActivity;
 import ink.qtum.org.views.activities.TxHistoryActivity;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 import okhttp3.ResponseBody;
@@ -122,7 +123,7 @@ public class MainFragment extends BaseFragment {
 
     @OnClick(R.id.rl_receive)
     public void onReceiveClick() {
-        Toast.makeText(getContext(), "Receive", Toast.LENGTH_SHORT).show();
+        startActivity(new Intent(getActivity(), ReceiveActivity.class));
     }
 
     @OnClick(R.id.rl_send)

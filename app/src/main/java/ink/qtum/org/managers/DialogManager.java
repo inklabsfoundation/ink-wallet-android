@@ -33,6 +33,21 @@ public class DialogManager {
         dialog.show();
     }
 
+    public static void showCopySucceedDialog(){
+        MaterialDialog.Builder builder = getBaseDialog(null);
+        builder.customView(R.layout.dialog_copy_succeed, false);
+
+        final MaterialDialog dialog = builder.build();
+        dialog.findViewById(R.id.iv_close).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                dialog.dismiss();
+            }
+        });
+
+        dialog.show();
+    }
+
     private static MaterialDialog.Builder getBaseDialog(@Nullable final DialogListener listener) {
         return new MaterialDialog.Builder(QtumApp.getAppContext())
                 .positiveColor(QtumApp.getAppContext().getResources().getColor(R.color.btnBlueTextColor))
