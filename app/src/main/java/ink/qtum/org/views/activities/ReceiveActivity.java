@@ -14,6 +14,7 @@ import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.DialogManager;
 import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.utils.ClipboardUtils;
 import ink.qtum.org.utils.QrCodeUtils;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 
@@ -44,9 +45,9 @@ public class ReceiveActivity extends AToolbarActivity{
         return R.layout.activity_receive;
     }
 
-    @OnClick(R.id.btn_copy_address)
+    @OnClick(R.id.btn_copy_wallet_address)
     public void copyAddress(){
-//        ClipboardUtils.copyToClipBoard(QtumApp.getAppContext(), mWalletAddress.getText().toString());
-        DialogManager.showCopySucceedDialog();
+        ClipboardUtils.silentCopyToClipBoard(QtumApp.getAppContext(), mWalletAddress.getText().toString());
+        DialogManager.showCopySucceedDialog(this);
     }
 }

@@ -107,7 +107,7 @@ public class CreateWalletFragment extends BaseFragment {
 
     @OnClick(R.id.btn_copy_mnemonics)
     public void copyMnemonics(){
-        DialogManager.showCopyMnemonicsDialog(new DialogManager.DialogListener() {
+        DialogManager.showCopyMnemonicsDialog(getContext(), new DialogManager.DialogListener() {
             @Override
             public void onPositiveButtonClick() {
                 super.onPositiveButtonClick();

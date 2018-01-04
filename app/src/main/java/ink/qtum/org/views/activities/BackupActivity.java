@@ -39,7 +39,7 @@ public class BackupActivity extends AToolbarActivity {
 
     @OnClick(R.id.btn_copy_mnemonics)
     public void copyMnemonic() {
-        DialogManager.showCopyMnemonicsDialog(new DialogManager.DialogListener() {
+        DialogManager.showCopyMnemonicsDialog(this, new DialogManager.DialogListener() {
             @Override
             public void onPositiveButtonClick() {
                 super.onPositiveButtonClick();

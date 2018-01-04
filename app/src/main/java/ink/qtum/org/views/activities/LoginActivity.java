@@ -14,7 +14,7 @@ import ink.qtum.org.views.activities.base.BaseActivity;
  * Created by SV on 18.12.2017.
  */
 
-public class LoginActivity extends BaseActivity{
+public class LoginActivity extends BaseActivity {
 
     @BindView(R.id.btn_restore)
     AppCompatButton btnRestore;
@@ -33,12 +33,13 @@ public class LoginActivity extends BaseActivity{
     }
 
     @OnClick(R.id.btn_restore)
-    void openRestoreActivity(){
+    void openRestoreActivity() {
         Intent intent = new Intent(this, RestoreWalletActivity.class);
         startActivity(intent);
     }
+
     @OnClick(R.id.tv_create_new)
-    void openCreateActivity(){
+    void openCreateActivity() {
         Intent intent = new Intent(this, CreateWalletActivity.class);
         startActivity(intent);
     }
