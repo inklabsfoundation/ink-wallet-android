@@ -16,7 +16,7 @@ public class TransactionsListResponse {
     @SerializedName("pagesTotal")
     @Expose
     private Integer pagesTotal;
-    @SerializedName("txs")
+    @SerializedName("items")
     @Expose
     private List<Tx> txs = null;
 

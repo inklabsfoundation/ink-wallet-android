@@ -37,7 +37,7 @@
                 android:layout_weight="1"
                 android:text="JDSAKLD_DDSDSSD"
                 android:textColor="@color/black8TextColor"
-                android:textSize="16dp" />
+                android:textSize="14sp" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -61,7 +61,7 @@
             android:textColor="@color/blueTextColor"
             android:gravity="center_vertical|end"
             android:text="+12,99688 INK"
-            android:textSize="15dp"
+            android:textSize="14sp"
             android:textStyle="bold" />
 
         <ImageView

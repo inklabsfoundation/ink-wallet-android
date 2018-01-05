@@ -23,9 +23,11 @@ import ink.qtum.org.QtumApp;
 import ink.qtum.org.adapter.TxHistoryAdapter;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.models.TransactionHistory;
 import ink.qtum.org.models.response.TransactionsListResponse;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
+import ink.qtum.org.utils.QtumTransactionHistoryConverter;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 
 import static ink.qtum.org.models.Extras.COIN_BALANCE_EXTRA;
@@ -64,8 +66,6 @@ public class TxHistoryActivity extends AToolbarActivity {
         }
         if (!TextUtils.isEmpty(currentCoinId)){
             initTxList(currentCoinId);
-        } else {
-            initTxList();
         }
 
 
@@ -83,7 +83,11 @@ public class TxHistoryActivity extends AToolbarActivity {
                 closeProgress();
                 TransactionsListResponse txList = (TransactionsListResponse)response;
                 Log.d("svcom", "tx count = " + txList.getTxs().size());
-                showTxList(currentCoinId);
+                List<TransactionHistory> transactions = QtumTransactionHistoryConverter.convertToFriendlyList(txList, walletManager.getWalletFriendlyAddress());
+                for (TransactionHistory transaction : transactions) {
+                    Log.d("svcom", transaction.toString());
+                }
+                showTxList(transactions);
             }
 
             @Override
@@ -95,25 +99,9 @@ public class TxHistoryActivity extends AToolbarActivity {
         });
     }
 
-    private void initTxList() {
-        adapter = new TxHistoryAdapter(getDemoList(), INK_ID);
-        final LinearLayoutManager layoutManager = new LinearLayoutManager(this);
-        layoutManager.setOrientation(LinearLayoutManager.VERTICAL);
 
-        adapter.setItemClickListener(new TxHistoryAdapter.OnItemClickListener() {
-            @Override
-            public void OnItemClick(int position) {
-                Intent intent = new Intent(TxHistoryActivity.this, TxDetailsActivity.class);
-                startActivity(intent);
-            }
-        });
-
-        mRecycler.setLayoutManager(layoutManager);
-        mRecycler.setAdapter(adapter);
-    }
-
-    private void showTxList(String coinId){
-        adapter = new TxHistoryAdapter(getDemoList(), coinId);
+    private void showTxList(List<TransactionHistory> transactions){
+        adapter = new TxHistoryAdapter(transactions);
         final LinearLayoutManager layoutManager = new LinearLayoutManager(this);
         layoutManager.setOrientation(LinearLayoutManager.VERTICAL);
 
@@ -138,13 +126,13 @@ public class TxHistoryActivity extends AToolbarActivity {
     public void onFilterClick(View view){
         switch (view.getId()){
             case R.id.tvFilterAll:
-
+                adapter.clearFilter();
                 break;
             case R.id.tvFilterReceive:
-
+                adapter.filterReceived();
                 break;
             case R.id.tvFilterSend:
-
+                adapter.filterSent();
                 break;
         }
     }
