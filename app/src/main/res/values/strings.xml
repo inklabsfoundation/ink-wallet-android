@@ -59,4 +59,22 @@
     <string name="toolbar_title_receive">Receive</string>
     <string name="btn_copy_address">Copy address</string>
     <string name="copy_succeed">Copy Succeed!</string>
+    <string name="logout_dialog_content">You can not access to this wallet if you don\'t write down your mnemonics.</string>
+    <string name="btn_go_to_backup">Go to Backup</string>
+    <string name="title_warning">Warning</string>
+    <string name="btn_next">Next</string>
+    <string name="send_title_address">Address:</string>
+    <string name="send_title_address_hint_">Input address, long press to paste</string>
+    <string name="send_amount_title">Amount:</string>
+    <string name="send_description_title">Description:</string>
+    <string name="send_fees_title">Fees:</string>
+    <string name="send_checkbox_standard">Standard</string>
+    <string name="send_checkbox_custom">Custom</string>
+    <string name="send_tx_speed_slow">Slow</string>
+    <string name="send_tx_speed_quick">Quick</string>
+    <string name="toolbar_title_send">Send</string>
+    <string name="btn_confirm">Confirm</string>
+    <string name="send_fees_receiver_address">Other party\'s address:</string>
+    <string name="transfer_fail">Transfer Fail!</string>
+    <string name="succeeded">Succeeded!</string>
 </resources>

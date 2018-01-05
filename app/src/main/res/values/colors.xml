@@ -18,6 +18,7 @@
     <color name="blueTextColor">@color/colorAccent</color>
     <color name="toolbar_text_color">#ffffff</color>
     <color name="black8TextColor">#393939</color>
+    <color name="black6TextColor">#4e4e4e</color>
     <color name="turquoiseTextColor">@color/turquoiseColor</color>
     <color name="hintTextColor">#a6a6a6</color>
 
@@ -32,4 +33,5 @@
     <color name="drawer_bg">#3d4256</color>
     <color name="drawerMenuTextColor">#ececec</color>
     <color name="turquoiseBtnBgColor">@color/turquoiseColor</color>
+    <color name="send_confirm_title_text_color">#9e9e9e</color>
 </resources>

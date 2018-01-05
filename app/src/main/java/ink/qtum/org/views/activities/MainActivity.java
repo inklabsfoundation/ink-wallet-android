@@ -1,5 +1,6 @@
 package ink.qtum.org.views.activities;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.support.design.widget.NavigationView;
 import android.support.v4.app.Fragment;
@@ -12,7 +13,9 @@ import android.view.MenuItem;
 import android.widget.Toast;
 
 import butterknife.BindView;
+import butterknife.OnClick;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.DialogManager;
 import ink.qtum.org.views.activities.base.BaseActivity;
 import ink.qtum.org.views.fragments.FeedbackFragment;
 import ink.qtum.org.views.fragments.LanguageFragment;
@@ -114,5 +117,23 @@ public class MainActivity extends BaseActivity {
                 break;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    @OnClick(R.id.btn_log_out)
+    public void logOut(){
+        DialogManager.showLogOutDialog(this, new DialogManager.DialogListener() {
+            @Override
+            public void onPositiveButtonClick() {
+                super.onPositiveButtonClick();
+                mDrawerLayout.closeDrawers();
+                startActivity(new Intent(MainActivity.this, BackupActivity.class));
+            }
+
+            @Override
+            public void onNegativeButtonClick() {
+                super.onNegativeButtonClick();
+                finish();
+            }
+        });
     }
 }

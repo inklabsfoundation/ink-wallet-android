@@ -7,7 +7,6 @@ import android.util.Log;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import org.bitcoinj.core.Coin;
 
@@ -29,6 +28,7 @@ import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.views.activities.BackupActivity;
 import ink.qtum.org.views.activities.ReceiveActivity;
+import ink.qtum.org.views.activities.SendTxActivity;
 import ink.qtum.org.views.activities.TxHistoryActivity;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 import okhttp3.ResponseBody;
@@ -153,6 +153,6 @@ public class MainFragment extends BaseFragment {
 
     @OnClick(R.id.rl_send)
     public void onSendClick() {
-        Toast.makeText(getContext(), "Send", Toast.LENGTH_SHORT).show();
+        startActivity(new Intent(getActivity(), SendTxActivity.class));
     }
 }
