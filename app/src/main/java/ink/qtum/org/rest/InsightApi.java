@@ -15,6 +15,7 @@ public interface InsightApi {
     @GET("insight-api/addr/{address}/balance")
     Call<ResponseBody> getBalance(@Path("address") String address);
 
-    @GET("/insight-api/txs/")
-    Call<TransactionsListResponse> getTransactions(@Query("address") String address);
+    //TODO: implement per-page history loading
+    @GET("/insight-api/addrs/{address}/txs?from=0&to=50")
+    Call<TransactionsListResponse> getTransactions(@Path("address") String address);
 }

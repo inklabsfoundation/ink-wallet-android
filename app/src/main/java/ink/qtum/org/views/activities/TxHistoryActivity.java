@@ -23,14 +23,17 @@ import ink.qtum.org.QtumApp;
 import ink.qtum.org.adapter.TxHistoryAdapter;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.models.TransactionHistory;
 import ink.qtum.org.models.response.TransactionsListResponse;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
+import ink.qtum.org.utils.QtumTransactionHistoryConverter;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 
 import static ink.qtum.org.models.Extras.COIN_BALANCE_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
 import static ink.qtum.org.models.Extras.INK_ID;
+import static ink.qtum.org.models.Extras.TX_HISTORY_EXTRA;
 
 /**
  * Created by v_alekseev on 28.12.17.
@@ -64,8 +67,6 @@ public class TxHistoryActivity extends AToolbarActivity {
         }
         if (!TextUtils.isEmpty(currentCoinId)){
             initTxList(currentCoinId);
-        } else {
-            initTxList();
         }
 
 
@@ -76,51 +77,38 @@ public class TxHistoryActivity extends AToolbarActivity {
 
     private void initTxList(final String currentCoinId) {
         mCurrencyName.setText(currentCoinId);
-        showProgress("Loading transactions");
+        showProgress(getString(R.string.loading_transactions));
         Requestor.getTransactions(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
                 closeProgress();
                 TransactionsListResponse txList = (TransactionsListResponse)response;
-                Log.d("svcom", "tx count = " + txList.getTxs().size());
-                showTxList(currentCoinId);
+                List<TransactionHistory> transactions = QtumTransactionHistoryConverter.convertToFriendlyList(txList, walletManager.getWalletFriendlyAddress());
+                for (TransactionHistory transaction : transactions) {
+                    Log.d("svcom", transaction.toString());
+                }
+                showTxList(transactions);
             }
 
             @Override
             public void onFailure(String msg) {
                 closeProgress();
-                Log.d("svcom", "failure - " + msg);
                 Toast.makeText(TxHistoryActivity.this, msg, Toast.LENGTH_LONG).show();
             }
         });
     }
 
-    private void initTxList() {
-        adapter = new TxHistoryAdapter(getDemoList(), INK_ID);
+
+    private void showTxList(List<TransactionHistory> transactions){
+        adapter = new TxHistoryAdapter(transactions);
         final LinearLayoutManager layoutManager = new LinearLayoutManager(this);
         layoutManager.setOrientation(LinearLayoutManager.VERTICAL);
 
         adapter.setItemClickListener(new TxHistoryAdapter.OnItemClickListener() {
             @Override
-            public void OnItemClick(int position) {
+            public void OnItemClick(TransactionHistory item) {
                 Intent intent = new Intent(TxHistoryActivity.this, TxDetailsActivity.class);
-                startActivity(intent);
-            }
-        });
-
-        mRecycler.setLayoutManager(layoutManager);
-        mRecycler.setAdapter(adapter);
-    }
-
-    private void showTxList(String coinId){
-        adapter = new TxHistoryAdapter(getDemoList(), coinId);
-        final LinearLayoutManager layoutManager = new LinearLayoutManager(this);
-        layoutManager.setOrientation(LinearLayoutManager.VERTICAL);
-
-        adapter.setItemClickListener(new TxHistoryAdapter.OnItemClickListener() {
-            @Override
-            public void OnItemClick(int position) {
-                Intent intent = new Intent(TxHistoryActivity.this, TxDetailsActivity.class);
+                intent.putExtra(TX_HISTORY_EXTRA, item);
                 startActivity(intent);
             }
         });
@@ -138,23 +126,15 @@ public class TxHistoryActivity extends AToolbarActivity {
     public void onFilterClick(View view){
         switch (view.getId()){
             case R.id.tvFilterAll:
-
+                adapter.clearFilter();
                 break;
             case R.id.tvFilterReceive:
-
+                adapter.filterReceived();
                 break;
             case R.id.tvFilterSend:
-
+                adapter.filterSent();
                 break;
         }
-    }
-
-    private List<Integer> getDemoList() {
-        List<Integer> list = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            list.add(i);
-        }
-        return list;
     }
 
 }

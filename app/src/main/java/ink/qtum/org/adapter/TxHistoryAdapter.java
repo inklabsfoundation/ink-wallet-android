@@ -8,40 +8,71 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 import butterknife.BindView;
 import butterknife.ButterKnife;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.models.TransactionHistory;
+import ink.qtum.org.utils.TextUtils;
+
+import static ink.qtum.org.models.Constants.BALANCE_SHOW_PATTERN;
 
 public class TxHistoryAdapter extends RecyclerView.Adapter<TxHistoryItemHolder> {
 
     public interface OnItemClickListener {
-        void OnItemClick(int position);
+        void OnItemClick(TransactionHistory item);
     }
 
     OnItemClickListener listener;
 
-    private List<Integer> cryptoList;
+    private List<TransactionHistory> originalTxList;
+    private List<TransactionHistory> filteredTxList;
     private View view;
-    private String coinId;
 
-    public TxHistoryAdapter(List<Integer> transList, String coinId) {
-        this.coinId = coinId;
-        this.cryptoList = transList;
+    public TxHistoryAdapter(List<TransactionHistory> transList) {
+        this.originalTxList = transList;
+        filteredTxList = new ArrayList<>(originalTxList);
     }
 
-    public TxHistoryAdapter() {
-        this.cryptoList = new ArrayList<>();
+    public void filterReceived(){
+        filteredTxList.clear();
+        for (TransactionHistory tx : originalTxList) {
+            if (tx.isInTx()){
+                filteredTxList.add(tx);
+            }
+        }
+        notifyDataSetChanged();
+    }
+
+    public void filterSent(){
+        filteredTxList.clear();
+        for (TransactionHistory tx : originalTxList) {
+            if (!tx.isInTx()){
+                filteredTxList.add(tx);
+            }
+        }
+        notifyDataSetChanged();
+    }
+
+    public void clearFilter(){
+        filteredTxList.clear();
+        filteredTxList.addAll(originalTxList);
+        notifyDataSetChanged();
     }
 
     public void setItemClickListener(OnItemClickListener listener) {
         this.listener = listener;
     }
 
-    public void updateList(List<Integer> transList) {
-        this.cryptoList = transList;
+    public void updateList(List<TransactionHistory> transList) {
+        this.originalTxList = transList;
         notifyDataSetChanged();
     }
 
@@ -53,31 +84,42 @@ public class TxHistoryAdapter extends RecyclerView.Adapter<TxHistoryItemHolder> 
 
     @Override
     public void onBindViewHolder(TxHistoryItemHolder holder, final int position) {
-
-        if (isTransactionIncome(position)){
+        final TransactionHistory item = filteredTxList.get(position);
+        char txSign;
+        if (isTransactionIncome(position)) {
             holder.ivStatus.setImageDrawable(view.getResources().getDrawable(R.drawable.ic_incoming_transaction));
             holder.tvBalance.setTextColor(view.getResources().getColor(R.color.blueTextColor));
+            txSign = '+';
         } else {
             holder.ivStatus.setImageDrawable(view.getResources().getDrawable(R.drawable.ic_outgoing_transaction));
             holder.tvBalance.setTextColor(view.getResources().getColor(R.color.turquoiseColor));
+            txSign = '-';
         }
+        DecimalFormatSymbols symbols = DecimalFormatSymbols.getInstance();
+        symbols.setDecimalSeparator('.');
+        DecimalFormat decimalFormat = new DecimalFormat(BALANCE_SHOW_PATTERN, symbols);
+        holder.tvBalance.setText(String.format("%s%s %s", txSign, decimalFormat.format(item.getValue()),
+                item.getCoinId()));
+        holder.tvHash.setText(TextUtils.txHashToShort(item.getTxHash()));
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault());
+        holder.tvDate.setText(dateFormat.format(new Date(item.getTimestamp())));
         holder.vRoot.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 if (listener != null) {
-                    listener.OnItemClick(position);
+                    listener.OnItemClick(item);
                 }
             }
         });
     }
 
     private boolean isTransactionIncome(int position) {
-        return position % 2 == 0;
+        return filteredTxList.get(position).isInTx();
     }
 
     @Override
     public int getItemCount() {
-        return cryptoList.size();
+        return filteredTxList.size();
     }
 
 }

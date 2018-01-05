@@ -3,62 +3,50 @@ package ink.qtum.org.models.response;
 import com.google.gson.annotations.Expose;
 import com.google.gson.annotations.SerializedName;
 
+import java.math.BigDecimal;
+
+
 public class Vout {
 
     @SerializedName("value")
     @Expose
-    private String value;
-    @SerializedName("n")
+    private BigDecimal value;
+    @SerializedName("scriptPubKey")
     @Expose
-    private Integer n;
-    @SerializedName("spentTxId")
-    @Expose
-    private String spentTxId;
-    @SerializedName("spentIndex")
-    @Expose
-    private Integer spentIndex;
-    @SerializedName("spentHeight")
-    @Expose
-    private Integer spentHeight;
+    private ScriptPubKey scriptPubKey;
 
-    public String getValue() {
+    private boolean isOwnAddress = false;
+
+    public boolean isOwnAddress() {
+        return isOwnAddress;
+    }
+
+    public void setOwnAddress(boolean ownAddress) {
+        isOwnAddress = ownAddress;
+    }
+
+
+    public BigDecimal getValue() {
         return value;
     }
 
-    public void setValue(String value) {
+    public void setValue(BigDecimal value) {
         this.value = value;
     }
 
-    public Integer getN() {
-        return n;
+    public ScriptPubKey getScriptPubKey() {
+        return scriptPubKey;
     }
 
-    public void setN(Integer n) {
-        this.n = n;
+    public void setScriptPubKey(ScriptPubKey scriptPubKey) {
+        this.scriptPubKey = scriptPubKey;
     }
 
-    public String getSpentTxId() {
-        return spentTxId;
+    public String getAddress() {
+        if (scriptPubKey != null && scriptPubKey.getAddresses() != null) {
+            return scriptPubKey.getAddresses().get(0);
+        } else {
+            return "";
+        }
     }
-
-    public void setSpentTxId(String spentTxId) {
-        this.spentTxId = spentTxId;
-    }
-
-    public Integer getSpentIndex() {
-        return spentIndex;
-    }
-
-    public void setSpentIndex(Integer spentIndex) {
-        this.spentIndex = spentIndex;
-    }
-
-    public Integer getSpentHeight() {
-        return spentHeight;
-    }
-
-    public void setSpentHeight(Integer spentHeight) {
-        this.spentHeight = spentHeight;
-    }
-
 }

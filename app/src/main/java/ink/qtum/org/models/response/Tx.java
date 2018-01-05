@@ -5,6 +5,7 @@ package ink.qtum.org.models.response;
  */
 
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import com.google.gson.annotations.Expose;
@@ -38,22 +39,29 @@ public class Tx {
     private Integer confirmations;
     @SerializedName("time")
     @Expose
-    private Integer time;
-    @SerializedName("blocktime")
-    @Expose
-    private Integer blocktime;
+    private long time;
     @SerializedName("valueOut")
     @Expose
-    private Double valueOut;
+    private BigDecimal valueOut;
     @SerializedName("size")
     @Expose
     private Integer size;
     @SerializedName("valueIn")
     @Expose
-    private Double valueIn;
+    private BigDecimal valueIn;
     @SerializedName("fees")
     @Expose
-    private Double fees;
+    private BigDecimal fees;
+
+    private BigDecimal changeInBalance;
+
+    public BigDecimal getChangeInBalance() {
+        return changeInBalance;
+    }
+
+    public void setChangeInBalance(BigDecimal changeInBalance) {
+        this.changeInBalance = changeInBalance;
+    }
 
     public String getTxid() {
         return txid;
@@ -119,27 +127,19 @@ public class Tx {
         this.confirmations = confirmations;
     }
 
-    public Integer getTime() {
+    public long getTime() {
         return time;
     }
 
-    public void setTime(Integer time) {
+    public void setTime(long time) {
         this.time = time;
     }
 
-    public Integer getBlocktime() {
-        return blocktime;
-    }
-
-    public void setBlocktime(Integer blocktime) {
-        this.blocktime = blocktime;
-    }
-
-    public Double getValueOut() {
+    public BigDecimal getValueOut() {
         return valueOut;
     }
 
-    public void setValueOut(Double valueOut) {
+    public void setValueOut(BigDecimal valueOut) {
         this.valueOut = valueOut;
     }
 
@@ -151,19 +151,19 @@ public class Tx {
         this.size = size;
     }
 
-    public Double getValueIn() {
+    public BigDecimal getValueIn() {
         return valueIn;
     }
 
-    public void setValueIn(Double valueIn) {
+    public void setValueIn(BigDecimal valueIn) {
         this.valueIn = valueIn;
     }
 
-    public Double getFees() {
+    public BigDecimal getFees() {
         return fees;
     }
 
-    public void setFees(Double fees) {
+    public void setFees(BigDecimal fees) {
         this.fees = fees;
     }
 

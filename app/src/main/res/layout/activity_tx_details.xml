@@ -16,7 +16,7 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="15dp">
 
-            <ImageView
+            <android.support.v7.widget.AppCompatImageView
                 android:id="@+id/iv_currency_logo"
                 android:layout_width="50dp"
                 android:layout_height="50dp"
@@ -24,7 +24,7 @@
                 android:layout_marginTop="20dp"
                 android:adjustViewBounds="false"
                 android:paddingBottom="5dp"
-                android:src="@drawable/vec_icon_qtum" />
+                app:srcCompat="@drawable/vec_icon_qtum"/>
 
             <TextView
                 android:id="@+id/tv_balance"
@@ -67,6 +67,8 @@
                 android:layout_height="wrap_content"
                 android:id="@+id/et_from_address"
                 android:background="@color/transparent"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:enabled="false"
                 android:hint="@string/et_hint_from"
                 android:paddingTop="10dp"
@@ -88,6 +90,8 @@
                 android:background="@color/transparent"
                 android:enabled="false"
                 android:id="@+id/et_to_address"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:hint="@string/et_hint_to"
                 android:paddingTop="10dp"
                 android:text="Q_rococoAsgSDFjgARtgjAjGFkgfvgfsbsrt"
@@ -109,6 +113,8 @@
                 android:id="@+id/et_fees"
                 android:enabled="false"
                 android:hint="@string/et_hint_fees"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:paddingTop="10dp"
                 android:text="8.88"
                 android:textColor="@color/black8TextColor"
@@ -129,6 +135,8 @@
                 android:id="@+id/et_description"
                 android:enabled="false"
                 android:hint="@string/et_hint_description"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:paddingTop="10dp"
                 android:text="sasfdfds\nsf\nherfgdrgddghhs df sfg hs h fh asdfghthycfj "
                 android:textColor="@color/black8TextColor"
@@ -156,6 +164,8 @@
                 android:enabled="false"
                 android:hint="@string/et_hint_tx_hash"
                 android:id="@+id/et_tx_hash"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:paddingTop="10dp"
                 android:text="tx_sSf$@43g24qg34Gh34qg4f43v3g44gv34"
                 android:textColor="@color/black8TextColor"
@@ -175,6 +185,8 @@
                 android:background="@color/transparent"
                 android:id="@+id/et_block_height"
                 android:enabled="false"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:hint="@string/et_hint_block_height"
                 android:paddingTop="10dp"
                 android:text="56842"
@@ -192,6 +204,8 @@
             <android.support.design.widget.TextInputEditText
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:background="@color/transparent"
                 android:id="@+id/et_time_stamp"
                 android:enabled="false"
