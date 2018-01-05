@@ -1,6 +1,7 @@
 package ink.qtum.org.managers;
 
 
+import android.content.Context;
 import android.content.DialogInterface;
 import android.support.annotation.Nullable;
 import android.view.View;
@@ -12,8 +13,8 @@ import ink.qtum.org.inkqtum.R;
 
 public class DialogManager {
 
-    public static void showCopyMnemonicsDialog(final DialogListener listener) {
-        MaterialDialog.Builder builder = getBaseDialog(listener);
+    public static void showCopyMnemonicsDialog(Context context, final DialogListener listener) {
+        MaterialDialog.Builder builder = getBaseDialog(context, listener);
         builder.content(R.string.copy_mnemonics_attention_content)
                 .positiveText(R.string.btn_still_copy)
                 .negativeText(R.string.btn_give_up)
@@ -33,8 +34,23 @@ public class DialogManager {
         dialog.show();
     }
 
-    private static MaterialDialog.Builder getBaseDialog(@Nullable final DialogListener listener) {
-        return new MaterialDialog.Builder(QtumApp.getAppContext())
+    public static void showCopySucceedDialog(Context context) {
+        MaterialDialog.Builder builder = getBaseDialog(context, null);
+        builder.customView(R.layout.dialog_copy_succeed, false);
+
+        final MaterialDialog dialog = builder.build();
+        dialog.findViewById(R.id.iv_close).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                dialog.dismiss();
+            }
+        });
+
+        dialog.show();
+    }
+
+    private static MaterialDialog.Builder getBaseDialog(Context context, @Nullable final DialogListener listener) {
+        return new MaterialDialog.Builder(context)
                 .positiveColor(QtumApp.getAppContext().getResources().getColor(R.color.btnBlueTextColor))
                 .negativeColor(QtumApp.getAppContext().getResources().getColor(R.color.lightGrayTextColor))
                 .callback(new MaterialDialog.ButtonCallback() {
@@ -81,15 +97,20 @@ public class DialogManager {
     }
 
     public abstract static class DialogListener {
-        public void onPositiveButtonClick() {}
+        public void onPositiveButtonClick() {
+        }
 
-        public void onNegativeButtonClick() {}
+        public void onNegativeButtonClick() {
+        }
 
-        public void onAnyButtonClick() {}
+        public void onAnyButtonClick() {
+        }
 
-        public void onNeutralButtonClick() {}
+        public void onNeutralButtonClick() {
+        }
 
-        public void onDismiss() {}
+        public void onDismiss() {
+        }
 
     }
 

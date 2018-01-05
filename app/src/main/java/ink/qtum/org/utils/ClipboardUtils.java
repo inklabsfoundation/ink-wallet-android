@@ -19,4 +19,10 @@ public final class ClipboardUtils {
         clipboardManager.setPrimaryClip(clipData);
         Toast.makeText(context, R.string.copied_to_clipboard, Toast.LENGTH_SHORT).show();
     }
+
+    public  static void silentCopyToClipBoard(Context context, String text){
+        ClipboardManager clipboardManager = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clipData = ClipData.newPlainText(context.getString(R.string.address), text);
+        clipboardManager.setPrimaryClip(clipData);
+    }
 }

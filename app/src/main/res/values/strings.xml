@@ -56,4 +56,7 @@
     <string name="et_hint_tx_hash">Tx hash:</string>
     <string name="et_hint_block_height">Block height:</string>
     <string name="et_hint_time_stamp">Time stamp:</string>
+    <string name="toolbar_title_receive">Receive</string>
+    <string name="btn_copy_address">Copy address</string>
+    <string name="copy_succeed">Copy Succeed!</string>
 </resources>

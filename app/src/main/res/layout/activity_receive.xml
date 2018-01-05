@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:layout_width="150dp"
+        android:id="@+id/qr_image_view"
+        android:layout_height="150dp"
+        android:layout_above="@+id/center_divider"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="40dp"
+        android:adjustViewBounds="true"
+        android:src="@drawable/vec_icon_qtum" />
+
+    <View
+        android:id="@+id/center_divider"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_centerInParent="true" />
+
+    <TextView
+        android:id="@+id/tv_wallet_address"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/center_divider"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="40dp"
+        android:background="@drawable/gray_contour"
+        android:gravity="center"
+        android:paddingBottom="5dp"
+        android:paddingLeft="15dp"
+        android:paddingRight="15dp"
+        android:paddingTop="5dp"
+        android:layout_marginRight="40dp"
+        android:layout_marginLeft="40dp"
+        android:textColor="@color/blackTextColor"
+        android:textSize="14dp"
+        android:text="QcSDghaT54jy54$yhREghsRGFWHveSDfgDFh56yuh4%^4tb" />
+
+    <Button
+        style="@style/BtnStyle.Blue"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:id="@+id/btn_copy_wallet_address"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="40dp"
+        android:text="@string/btn_copy_address" />
+
+</RelativeLayout>

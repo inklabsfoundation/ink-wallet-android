@@ -26,7 +26,7 @@ public class QtumApp extends Application {
     public void onCreate() {
         super.onCreate();
         appComponent = buildAppComponent();
-        appContext = getApplicationContext();
+        appContext = this;
     }
 
     public static QtumAppComponent getAppComponent() {
