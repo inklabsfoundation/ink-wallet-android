@@ -9,4 +9,6 @@ public interface Extras {
     String COIN_BALANCE_EXTRA = "COIN_BALANCE_EXTRA";
     String QTUM_ID = "QTUM";
     String INK_ID = "INK";
+
+    String TX_HISTORY_EXTRA = "TX_HISTORY_EXTRA";
 }

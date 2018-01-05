@@ -76,12 +76,6 @@ public class MainActivity extends BaseActivity {
     }
 
     private void navigateToFragment(Fragment fragment) {
-//        getSupportFragmentManager().popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
-
-//        FragmentTransaction fragmentTransaction = getSupportFragmentManager().beginTransaction();
-//        fragmentTransaction.replace(R.id.fl_main_root, fragment);
-//        fragmentTransaction.commit();
-
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
                 .replace(R.id.fl_main_root, fragment)

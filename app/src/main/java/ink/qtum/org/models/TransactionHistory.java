@@ -2,13 +2,14 @@ package ink.qtum.org.models;
 
 import org.bitcoinj.core.Coin;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 
 /**
  * Created by SV on 03.01.2018.
  */
 
-public class TransactionHistory {
+public class TransactionHistory implements Serializable {
     private String coinId;
     private String fromAddress;
     private String toAddress;

@@ -27,7 +27,7 @@ import static ink.qtum.org.models.Constants.BALANCE_SHOW_PATTERN;
 public class TxHistoryAdapter extends RecyclerView.Adapter<TxHistoryItemHolder> {
 
     public interface OnItemClickListener {
-        void OnItemClick(int position);
+        void OnItemClick(TransactionHistory item);
     }
 
     OnItemClickListener listener;
@@ -84,7 +84,7 @@ public class TxHistoryAdapter extends RecyclerView.Adapter<TxHistoryItemHolder> 
 
     @Override
     public void onBindViewHolder(TxHistoryItemHolder holder, final int position) {
-        TransactionHistory item = filteredTxList.get(position);
+        final TransactionHistory item = filteredTxList.get(position);
         char txSign;
         if (isTransactionIncome(position)) {
             holder.ivStatus.setImageDrawable(view.getResources().getDrawable(R.drawable.ic_incoming_transaction));
@@ -107,7 +107,7 @@ public class TxHistoryAdapter extends RecyclerView.Adapter<TxHistoryItemHolder> 
             @Override
             public void onClick(View view) {
                 if (listener != null) {
-                    listener.OnItemClick(position);
+                    listener.OnItemClick(item);
                 }
             }
         });

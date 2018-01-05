@@ -59,4 +59,5 @@
     <string name="toolbar_title_receive">Receive</string>
     <string name="btn_copy_address">Copy address</string>
     <string name="copy_succeed">Copy Succeed!</string>
+    <string name="loading_transactions">Loading transactions</string>
 </resources>

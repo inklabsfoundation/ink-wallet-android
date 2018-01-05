@@ -33,6 +33,7 @@ import ink.qtum.org.views.activities.base.AToolbarActivity;
 import static ink.qtum.org.models.Extras.COIN_BALANCE_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
 import static ink.qtum.org.models.Extras.INK_ID;
+import static ink.qtum.org.models.Extras.TX_HISTORY_EXTRA;
 
 /**
  * Created by v_alekseev on 28.12.17.
@@ -76,13 +77,12 @@ public class TxHistoryActivity extends AToolbarActivity {
 
     private void initTxList(final String currentCoinId) {
         mCurrencyName.setText(currentCoinId);
-        showProgress("Loading transactions");
+        showProgress(getString(R.string.loading_transactions));
         Requestor.getTransactions(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
                 closeProgress();
                 TransactionsListResponse txList = (TransactionsListResponse)response;
-                Log.d("svcom", "tx count = " + txList.getTxs().size());
                 List<TransactionHistory> transactions = QtumTransactionHistoryConverter.convertToFriendlyList(txList, walletManager.getWalletFriendlyAddress());
                 for (TransactionHistory transaction : transactions) {
                     Log.d("svcom", transaction.toString());
@@ -93,7 +93,6 @@ public class TxHistoryActivity extends AToolbarActivity {
             @Override
             public void onFailure(String msg) {
                 closeProgress();
-                Log.d("svcom", "failure - " + msg);
                 Toast.makeText(TxHistoryActivity.this, msg, Toast.LENGTH_LONG).show();
             }
         });
@@ -107,8 +106,9 @@ public class TxHistoryActivity extends AToolbarActivity {
 
         adapter.setItemClickListener(new TxHistoryAdapter.OnItemClickListener() {
             @Override
-            public void OnItemClick(int position) {
+            public void OnItemClick(TransactionHistory item) {
                 Intent intent = new Intent(TxHistoryActivity.this, TxDetailsActivity.class);
+                intent.putExtra(TX_HISTORY_EXTRA, item);
                 startActivity(intent);
             }
         });
@@ -135,14 +135,6 @@ public class TxHistoryActivity extends AToolbarActivity {
                 adapter.filterSent();
                 break;
         }
-    }
-
-    private List<Integer> getDemoList() {
-        List<Integer> list = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            list.add(i);
-        }
-        return list;
     }
 
 }
