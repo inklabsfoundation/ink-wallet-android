@@ -73,7 +73,7 @@ public class CreateWalletFragment extends BaseFragment {
             @Override
             public void onWalletCreated(Wallet wallet) {
                 tvAddress.setText(walletManager.getWalletFriendlyAddress());
-                tvMnemonics.setText(walletManager.getPrivateKey());
+                tvMnemonics.setText(walletManager.getMnemonic());
             }
         });
     }

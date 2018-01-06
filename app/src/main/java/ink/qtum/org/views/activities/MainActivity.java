@@ -9,10 +9,17 @@ import android.support.v7.widget.Toolbar;
 import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.widget.Button;
 import android.widget.Toast;
 
+import javax.inject.Inject;
+
+import autodagger.AutoInjector;
 import butterknife.BindView;
+import butterknife.OnClick;
+import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.views.activities.base.BaseActivity;
 import ink.qtum.org.views.fragments.FeedbackFragment;
 import ink.qtum.org.views.fragments.LanguageFragment;
@@ -21,6 +28,9 @@ import ink.qtum.org.views.fragments.QandAFragment;
 import ink.qtum.org.views.fragments.TermsOfUsageFragment;
 import ink.qtum.org.views.fragments.VersionInformFragment;
 
+import static ink.qtum.org.models.Extras.ACTION_RESTORE_SAVED;
+
+@AutoInjector(QtumApp.class)
 public class MainActivity extends BaseActivity {
 
     @BindView(R.id.drawer_layout)
@@ -29,12 +39,28 @@ public class MainActivity extends BaseActivity {
     NavigationView mNavigationView;
     @BindView(R.id.main_toolbar)
     Toolbar mToolbar;
+    @BindView(R.id.btn_log_out)
+    Button btnLogOut;
+
+    @Inject
+    SharedManager sharedManager;
 
     @Override
     protected void init(Bundle savedInstanceState) {
+        QtumApp.getAppComponent().inject(this);
         setupSideMenu();
         initToolbar();
-        navigateToFragment(new MainFragment());
+        String action = getIntent().getAction();
+        if (action != null && action.equals(ACTION_RESTORE_SAVED)){
+            MainFragment mainFragment = new MainFragment();
+            Bundle args = new Bundle();
+            args.putBoolean(ACTION_RESTORE_SAVED, true);
+            mainFragment.setArguments(args);
+            navigateToFragment(mainFragment);
+
+        } else {
+            navigateToFragment(new MainFragment());
+        }
     }
 
     @Override
@@ -101,12 +127,19 @@ public class MainActivity extends BaseActivity {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case android.R.id.home:
-                mDrawerLayout.openDrawer(Gravity.LEFT);
+                mDrawerLayout.openDrawer(Gravity.START);
                 break;
             case R.id.toolbar_menu_settings:
                 Toast.makeText(getApplicationContext(), "Code scan", Toast.LENGTH_SHORT).show();
                 break;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    @OnClick(R.id.btn_log_out)
+    void onLogOutClick(){
+        sharedManager.clearLastSyncedBlock();
+        openLoginActivity();
+        finish();
     }
 }

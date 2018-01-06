@@ -11,4 +11,5 @@ public interface Extras {
     String INK_ID = "INK";
 
     String TX_HISTORY_EXTRA = "TX_HISTORY_EXTRA";
+    String ACTION_RESTORE_SAVED = "ACTION_RESTORE_SAVED";
 }

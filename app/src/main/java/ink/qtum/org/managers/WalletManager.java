@@ -13,8 +13,11 @@ import org.bitcoinj.wallet.Wallet;
 
 import java.util.HashSet;
 
+import javax.inject.Inject;
+
 import autodagger.AutoInjector;
 import ink.qtum.org.QtumApp;
+import ink.qtum.org.utils.CryptoUtils;
 import ink.qtum.org.utils.FileUtils;
 
 import static ink.qtum.org.models.Constants.BIP_39_WORDLIST_ASSET;
@@ -26,6 +29,9 @@ import static ink.qtum.org.models.Constants.BIP_39_WORDLIST_ASSET;
 @AutoInjector(QtumApp.class)
 public class WalletManager {
 
+    @Inject
+    SharedManager sharedManager;
+
     private Wallet wallet;
     private String walletFriendlyAddress;
     private Coin myBalance;
@@ -35,6 +41,7 @@ public class WalletManager {
     private HashSet<String> mBip39Words;
 
     public WalletManager(Context context) {
+        QtumApp.getAppComponent().inject(this);
         this.context = context;
         mBip39Words = FileUtils.readToSet(context, BIP_39_WORDLIST_ASSET);
     }
@@ -45,13 +52,13 @@ public class WalletManager {
         DeterministicSeed seed = wallet.getKeyChainSeed();
 
         mnemonicKey = Joiner.on(" ").join(seed.getMnemonicCode());
-
+        sharedManager.setLastSyncedBlock(CryptoUtils.encodeBase64(mnemonicKey));
         walletFriendlyAddress = wallet.currentReceiveAddress().toString();
         callback.onWalletCreated(wallet);
 
     }
 
-    public String getPrivateKey() {
+    public String getMnemonic() {
         return mnemonicKey;
     }
 
@@ -69,11 +76,9 @@ public class WalletManager {
 
         wallet = Wallet.fromSeed(params, seed);
         mnemonicKey = Joiner.on(" ").join(seed.getMnemonicCode());
-
+        sharedManager.setLastSyncedBlock(CryptoUtils.encodeBase64(mnemonicKey));
         walletFriendlyAddress = wallet.currentReceiveAddress().toString();
 
         callback.onWalletCreated(wallet);
-
-
     }
 }

@@ -6,6 +6,7 @@ import javax.inject.Singleton;
 
 import dagger.Module;
 import dagger.Provides;
+import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.managers.WalletManager;
 
 /**
@@ -31,6 +32,12 @@ public class AppModule {
     @Singleton
     WalletManager provideWalletManager(Context context) {
         return new WalletManager(context);
+    }
+
+    @Provides
+    @Singleton
+    SharedManager provideSharedManager(){
+        return new SharedManager();
     }
 }
 

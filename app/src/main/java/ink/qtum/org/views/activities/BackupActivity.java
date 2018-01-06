@@ -29,7 +29,7 @@ public class BackupActivity extends AToolbarActivity {
     protected void init(Bundle savedInstanceState) {
         QtumApp.getAppComponent().inject(this);
         setToolBarTitle(getString(R.string.title_backup));
-        tvMnemonics.setText(walletManager.getPrivateKey());
+        tvMnemonics.setText(walletManager.getMnemonic());
     }
 
     @Override
