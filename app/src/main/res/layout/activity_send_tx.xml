@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:orientation="vertical"
+        android:padding="10dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:layout_marginTop="10dp"
+            android:text="@string/send_title_address"
+            android:textColor="@color/black6TextColor"
+            android:textStyle="bold" />
+
+        <EditText
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/et_send_tx_address"
+            android:background="@drawable/gray_contour"
+            android:hint="@string/send_title_address_hint_"
+            android:inputType="text"
+            android:padding="10dp"
+            android:textColor="@color/black8TextColor"
+            android:textSize="14dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:layout_marginTop="15dp"
+            android:text="@string/send_amount_title"
+            android:textColor="@color/black6TextColor"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:weightSum="10">
+
+            <EditText
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginRight="5dp"
+                android:layout_weight="4"
+                android:id="@+id/et_send_tx_amount"
+                android:background="@drawable/gray_contour"
+                android:hint="Max amount: 10000.000000"
+                android:inputType="number"
+                android:lines="1"
+                android:maxLines="1"
+                android:padding="10dp"
+                android:singleLine="true"
+                android:textColor="@color/black8TextColor"
+                android:textSize="14dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="5dp"
+                android:layout_weight="6"
+                android:background="@drawable/gray_contour"
+                android:hint="INK"
+                android:padding="10dp"
+                android:textColor="@color/black8TextColor"
+                android:textSize="14dp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:layout_marginTop="15dp"
+            android:text="@string/send_description_title"
+            android:textColor="@color/black6TextColor"
+            android:textStyle="bold" />
+
+        <EditText
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/gray_contour"
+            android:id="@+id/et_tx_description"
+            android:inputType="textMultiLine"
+            android:lines="6"
+            android:padding="10dp"
+            android:textColor="@color/black8TextColor"
+            android:textSize="14dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:layout_marginTop="15dp"
+            android:text="@string/send_fees_title"
+            android:textColor="@color/black6TextColor"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <CheckBox
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:id="@+id/cb_tx_fees_standard"
+                android:text="@string/send_checkbox_standard"
+                android:textColor="@color/black8TextColor"
+                android:textSize="16dp" />
+
+            <CheckBox
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
+                android:id="@+id/cb_tx_fees_custom"
+                android:text="@string/send_checkbox_custom"
+                android:textColor="@color/black8TextColor"
+                android:textSize="16dp" />
+
+        </RadioGroup>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="15dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/send_tx_speed_slow"
+                android:textAlignment="center"
+                android:textColor="@color/black8TextColor"
+                android:textSize="16dp" />
+
+            <SeekBar
+                android:layout_width="wrap_content"
+                android:id="@+id/sb_tx_speed"
+                android:max="50"
+                android:layout_height="match_parent"
+                android:layout_weight="10" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/send_tx_speed_quick"
+                android:textAlignment="center"
+                android:textColor="@color/black8TextColor"
+                android:textSize="16dp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:id="@+id/tv_tx_speed_value"
+            android:layout_height="wrap_content"
+            android:text="0.00 INK"
+            android:textAlignment="center"
+            android:textColor="@color/dark_gray_text_color"
+            android:textSize="12dp" />
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="10dp">
+
+            <android.support.v7.widget.AppCompatButton
+                style="@style/BtnStyle.Blue"
+                android:id="@+id/btn_next_step_of_send"
+                android:layout_width="140dp"
+                android:layout_height="wrap_content"
+                android:layout_centerInParent="true"
+                android:layout_marginBottom="8dp"
+                android:layout_marginEnd="8dp"
+                android:layout_marginStart="8dp"
+                android:text="@string/btn_next"
+                android:textAllCaps="false" />
+
+        </RelativeLayout>
+
+
+    </LinearLayout>
+</ScrollView>

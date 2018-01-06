@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.support.annotation.Nullable;
 import android.view.View;
+import android.widget.TextView;
 
 import com.afollestad.materialdialogs.MaterialDialog;
 
@@ -39,6 +40,7 @@ public class DialogManager {
         builder.customView(R.layout.dialog_copy_succeed, false);
 
         final MaterialDialog dialog = builder.build();
+        ((TextView)dialog.findViewById(R.id.tv_succeed_text)).setText(R.string.copy_succeed);
         dialog.findViewById(R.id.iv_close).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -46,6 +48,66 @@ public class DialogManager {
             }
         });
 
+        dialog.show();
+    }
+
+    public static void showSucceedDialog(Context context) {
+        MaterialDialog.Builder builder = getBaseDialog(context, null);
+        builder.customView(R.layout.dialog_copy_succeed, false);
+
+        final MaterialDialog dialog = builder.build();
+        ((TextView)dialog.findViewById(R.id.tv_succeed_text)).setText(R.string.succeeded);
+        dialog.findViewById(R.id.iv_close).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                dialog.dismiss();
+            }
+        });
+
+        dialog.show();
+    }
+
+    public static void showTransferFailDialog(Context context) {
+        MaterialDialog.Builder builder = getBaseDialog(context, null);
+        builder.customView(R.layout.dialog_fail, false);
+
+        final MaterialDialog dialog = builder.build();
+        ((TextView) dialog.findViewById(R.id.tv_fail_text)).setText(R.string.transfer_fail);
+        dialog.findViewById(R.id.iv_close).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                dialog.dismiss();
+            }
+        });
+
+        dialog.show();
+    }
+
+    public static void showLogOutDialog(Context context, final DialogListener listener) {
+        MaterialDialog.Builder builder = getBaseDialog(context, listener);
+        builder.content(R.string.logout_dialog_content)
+                .title(R.string.title_warning)
+                .positiveText(R.string.btn_go_to_backup)
+                .negativeText("Understand, Log out")
+                .positiveColor(QtumApp.getAppContext().getResources().getColor(R.color.btnBlueTextColor))
+                .negativeColor(QtumApp.getAppContext().getResources().getColor(R.color.lightGrayTextColor))
+                .callback(new MaterialDialog.ButtonCallback() {
+                    @Override
+                    public void onNegative(MaterialDialog dialog) {
+                        listener.onNegativeButtonClick();
+
+                        super.onNegative(dialog);
+                    }
+
+                    @Override
+                    public void onPositive(MaterialDialog dialog) {
+                        listener.onPositiveButtonClick();
+
+                        super.onPositive(dialog);
+                    }
+                });
+        MaterialDialog dialog = builder.build();
+        dialog.getTitleView().setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
         dialog.show();
     }
 

@@ -1,5 +1,6 @@
 package ink.qtum.org.views.activities;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.support.design.widget.NavigationView;
 import android.support.v4.app.Fragment;
@@ -20,6 +21,7 @@ import butterknife.OnClick;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.SharedManager;
+import ink.qtum.org.managers.DialogManager;
 import ink.qtum.org.views.activities.base.BaseActivity;
 import ink.qtum.org.views.fragments.FeedbackFragment;
 import ink.qtum.org.views.fragments.LanguageFragment;
@@ -51,7 +53,7 @@ public class MainActivity extends BaseActivity {
         setupSideMenu();
         initToolbar();
         String action = getIntent().getAction();
-        if (action != null && action.equals(ACTION_RESTORE_SAVED)){
+        if (action != null && action.equals(ACTION_RESTORE_SAVED)) {
             MainFragment mainFragment = new MainFragment();
             Bundle args = new Bundle();
             args.putBoolean(ACTION_RESTORE_SAVED, true);
@@ -137,9 +139,22 @@ public class MainActivity extends BaseActivity {
     }
 
     @OnClick(R.id.btn_log_out)
-    void onLogOutClick(){
-        sharedManager.clearLastSyncedBlock();
-        openLoginActivity();
-        finish();
+    public void logOut() {
+        DialogManager.showLogOutDialog(this, new DialogManager.DialogListener() {
+            @Override
+            public void onPositiveButtonClick() {
+                super.onPositiveButtonClick();
+                mDrawerLayout.closeDrawers();
+                startActivity(new Intent(MainActivity.this, BackupActivity.class));
+            }
+
+            @Override
+            public void onNegativeButtonClick() {
+                super.onNegativeButtonClick();
+                sharedManager.clearLastSyncedBlock();
+                openLoginActivity();
+                finish();
+            }
+        });
     }
 }

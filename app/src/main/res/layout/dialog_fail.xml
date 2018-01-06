@@ -16,23 +16,36 @@
         android:adjustViewBounds="false"
         android:src="@drawable/ic_action_close" />
 
-    <ImageView
-        android:id="@+id/imageView"
+    <RelativeLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:id="@+id/relative_layout"
         android:layout_below="@+id/iv_close"
         android:layout_centerHorizontal="true"
         android:layout_marginBottom="20dp"
-        android:layout_marginTop="10dp"
-        android:src="@drawable/ic_succeeded_icon" />
+        android:layout_marginTop="10dp">
+
+        <ImageView
+            android:id="@+id/imageView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:src="@drawable/ic_unsuccess_icon" />
+
+        <ImageView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:src="@drawable/ic_unsuccess_icon_2" />
+    </RelativeLayout>
 
     <TextView
         android:layout_width="wrap_content"
-        android:id="@+id/tv_succeed_text"
+        android:id="@+id/tv_fail_text"
         android:layout_height="wrap_content"
-        android:layout_below="@+id/imageView"
+        android:layout_below="@+id/relative_layout"
         android:layout_centerHorizontal="true"
-        android:text="@string/copy_succeed"
+        android:text="Fail!"
         android:textColor="@color/black8TextColor" />
     <!--</RelativeLayout>-->
 </RelativeLayout>
