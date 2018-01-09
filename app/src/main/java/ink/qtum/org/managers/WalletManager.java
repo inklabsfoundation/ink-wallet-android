@@ -63,8 +63,8 @@ public class WalletManager {
     }
 
     public String getWalletFriendlyAddress() {
-        return "QPKacYwu6iXMytVVzwtZP7G4iKe9bmr4op";
-//        return wallet.currentReceiveAddress().toString();
+//        return "QPKacYwu6iXMytVVzwtZP7G4iKe9bmr4op";
+        return wallet.currentReceiveAddress().toString();
     }
 
     public void restoreWallet(String mnemonicCode, WalletCreationCallback callback) {

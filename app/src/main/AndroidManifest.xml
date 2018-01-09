@@ -19,6 +19,7 @@
         <activity
             android:name="ink.qtum.org.views.activities.LoginActivity"
             android:screenOrientation="portrait"
+            android:noHistory="true"
             android:theme="@style/AppTheme.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
