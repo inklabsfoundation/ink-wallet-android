@@ -1,8 +1,12 @@
 package ink.qtum.org.views.activities;
 
 
+import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.Gravity;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -13,6 +17,8 @@ import android.widget.TextView;
 import butterknife.BindView;
 import butterknife.OnClick;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.models.Extras;
+import ink.qtum.org.models.RequestCode;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 
 public class SendTxActivity extends AToolbarActivity {
@@ -40,7 +46,30 @@ public class SendTxActivity extends AToolbarActivity {
     protected void init(Bundle savedInstanceState) {
         setToolBarTitle(getString(R.string.toolbar_title_send));
 
+        if (getIntent().getExtras() != null) {
+            String walletNumber = getIntent().getExtras().getString(Extras.WALLET_NUMBER, "");
+            etAddress.setText(walletNumber);
+        }
+
         setSeekBarListener();
+    }
+
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.toolbar_menu, menu);
+        return super.onCreateOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.toolbar_menu_qr_scan:
+                Intent intent = new Intent(this, QrCodeScanActivity.class);
+                startActivityForResult(intent, RequestCode.QR_CODE_REQUEST_CODE);
+                break;
+        }
+        return super.onOptionsItemSelected(item);
     }
 
     private void setSeekBarListener() {
@@ -88,5 +117,18 @@ public class SendTxActivity extends AToolbarActivity {
     @OnClick(R.id.btn_next_step_of_send)
     public void goToSendConfirm() {
         startActivity(new Intent(this, SendConfirmActivity.class));
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+
+        if (requestCode == RequestCode.QR_CODE_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK) {
+                String result = data.getStringExtra(Extras.QR_CODE_RESULT);
+                etAddress.setText(result);
+            }
+        }
+
+        super.onActivityResult(requestCode, resultCode, data);
     }
 }

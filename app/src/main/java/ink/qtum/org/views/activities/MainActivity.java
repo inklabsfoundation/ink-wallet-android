@@ -1,5 +1,6 @@
 package ink.qtum.org.views.activities;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.design.widget.NavigationView;
@@ -10,12 +11,13 @@ import android.support.v7.widget.Toolbar;
 import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.widget.Toast;
 
 import butterknife.BindView;
 import butterknife.OnClick;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.DialogManager;
+import ink.qtum.org.models.Extras;
+import ink.qtum.org.models.RequestCode;
 import ink.qtum.org.views.activities.base.BaseActivity;
 import ink.qtum.org.views.fragments.FeedbackFragment;
 import ink.qtum.org.views.fragments.LanguageFragment;
@@ -106,15 +108,16 @@ public class MainActivity extends BaseActivity {
             case android.R.id.home:
                 mDrawerLayout.openDrawer(Gravity.LEFT);
                 break;
-            case R.id.toolbar_menu_settings:
-                Toast.makeText(getApplicationContext(), "Code scan", Toast.LENGTH_SHORT).show();
+            case R.id.toolbar_menu_qr_scan:
+                Intent intent = new Intent(this, QrCodeScanActivity.class);
+                startActivityForResult(intent, RequestCode.QR_CODE_REQUEST_CODE);
                 break;
         }
         return super.onOptionsItemSelected(item);
     }
 
     @OnClick(R.id.btn_log_out)
-    public void logOut(){
+    public void logOut() {
         DialogManager.showLogOutDialog(this, new DialogManager.DialogListener() {
             @Override
             public void onPositiveButtonClick() {
@@ -129,5 +132,20 @@ public class MainActivity extends BaseActivity {
                 finish();
             }
         });
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+
+        if (requestCode == RequestCode.QR_CODE_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK) {
+                String result = data.getStringExtra(Extras.QR_CODE_RESULT);
+                Intent intent = new Intent(this, SendTxActivity.class);
+                intent.putExtra(Extras.WALLET_NUMBER, result);
+                startActivity(intent);
+            }
+        }
+
+        super.onActivityResult(requestCode, resultCode, data);
     }
 }

@@ -2,4 +2,5 @@
 <resources>
     <dimen name="dimen_16dp">16dp</dimen>
     <dimen name="dimen_8dp">8dp</dimen>
+    <dimen name="qr_scan_frame_size">280dp</dimen>
 </resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <declare-styleable name="FrameView">
+        <attr name="frame_thickness" format="dimension" />
+        <attr name="frame_size" format="fraction" />
+        <attr name="frame_color" format="color" />
+    </declare-styleable>
+
+</resources>
