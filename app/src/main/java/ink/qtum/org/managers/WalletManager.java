@@ -7,6 +7,7 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 
 import org.bitcoinj.core.Address;
+import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.InsufficientMoneyException;
 import org.bitcoinj.core.NetworkParameters;
@@ -183,6 +184,15 @@ public class WalletManager {
 
     public void sendTx(String rawTx, ApiMethods.RequestListener listener){
         Requestor.sendRawTx(rawTx, listener);
+    }
+
+    public boolean isValidQtumAddress(String address){
+        try {
+            Address.fromBase58(params, address);
+            return true;
+        } catch (AddressFormatException e){
+            return false;
+        }
     }
 
 }
