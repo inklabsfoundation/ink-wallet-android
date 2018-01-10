@@ -21,4 +21,17 @@ public class Requestor {
         Log.d("svcom", "path " + call.request());
         ApiMethods.makeRequest(call, listener);
     }
+
+    public static void getUTXOList(String address, ApiMethods.RequestListener listener) {
+        Call call = ApiMethods.createInsightApi().getUTXOByAddress(address);
+        Log.d("Request", "path " + call.request());
+        ApiMethods.makeRequest(call, listener);
+    }
+
+    public static void sendRawTx(String rawTx, ApiMethods.RequestListener listener){
+        Call call = ApiMethods.createInsightApi().sendRawTx(rawTx);
+        Log.d("Request", "path " + call.request());
+        ApiMethods.makeRequest(call, listener);
+    }
+
 }

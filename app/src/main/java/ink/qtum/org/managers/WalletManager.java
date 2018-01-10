@@ -1,22 +1,38 @@
 package ink.qtum.org.managers;
 
 import android.content.Context;
+import android.util.Log;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 
+import org.bitcoinj.core.Address;
 import org.bitcoinj.core.Coin;
+import org.bitcoinj.core.InsufficientMoneyException;
 import org.bitcoinj.core.NetworkParameters;
+import org.bitcoinj.core.Sha256Hash;
+import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.UTXO;
+import org.bitcoinj.core.UTXOProvider;
+import org.bitcoinj.core.UTXOProviderException;
 import org.bitcoinj.params.QtumMainNetParams;
+import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.wallet.DeterministicSeed;
+import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
+import org.spongycastle.util.encoders.Hex;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 
 import javax.inject.Inject;
 
 import autodagger.AutoInjector;
 import ink.qtum.org.QtumApp;
+import ink.qtum.org.models.response.UtxoItemResponse;
+import ink.qtum.org.rest.ApiMethods;
+import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.utils.CryptoUtils;
 import ink.qtum.org.utils.FileUtils;
 
@@ -80,5 +96,93 @@ public class WalletManager {
         walletFriendlyAddress = wallet.currentReceiveAddress().toString();
 
         callback.onWalletCreated(wallet);
+
+        Requestor.getUTXOList(wallet.currentReceiveAddress().toString(), new ApiMethods.RequestListener() {
+            @Override
+            public void onSuccess(Object response) {
+                setUTXO((List<UtxoItemResponse>)response);
+            }
+
+            @Override
+            public void onFailure(String msg) {
+
+            }
+        });
     }
+
+    private void setUTXO(List<UtxoItemResponse> utxoList) {
+
+        Address a = wallet.currentReceiveAddress();
+        final List<UTXO> utxos = new ArrayList<>();
+
+        Log.d("svcom", "resp size - " + utxoList.size());
+        for (UtxoItemResponse utxo : utxoList) {
+            Sha256Hash hash = Sha256Hash.wrap(utxo.getTxid());
+            utxos.add(new UTXO(hash, utxo.getVout(), Coin.valueOf(utxo.getSatoshis()),
+                    utxo.getHeight(), false, ScriptBuilder.createOutputScript(a)));
+        }
+        for (UTXO u : utxos) {
+            Log.d("svcom", "u - " + u.getValue().toFriendlyString());
+        }
+
+        UTXOProvider utxoProvider = new UTXOProvider() {
+            @Override
+            public List<UTXO> getOpenTransactionOutputs(List<Address> addresses) throws UTXOProviderException {
+                return utxos;
+            }
+
+            @Override
+            public int getChainHeadHeight() throws UTXOProviderException {
+                return Integer.MAX_VALUE;
+            }
+
+            @Override
+            public NetworkParameters getParams() {
+                return wallet.getParams();
+            }
+        };
+        wallet.setUTXOProvider(utxoProvider);
+    }
+
+    public static String SMALL_SENDING = "insufficientMoney";
+    public static String NOT_ENOUGH_MONEY = "notEnough";
+
+    public String generateQtumHexTx(String toAddress, long sumInSatoshi, long feeInSatoshi) {
+        Address RECEIVER = Address.fromBase58(params, toAddress);
+
+        Coin AMOUNT = Coin.valueOf(sumInSatoshi);
+        Coin FEE = Coin.valueOf(feeInSatoshi);
+
+        Log.d("svcom", "tx - amount = " + AMOUNT.toFriendlyString() + " fee = " + FEE.toFriendlyString());
+        /**
+         * available default fee
+         * Transaction.REFERENCE_DEFAULT_MIN_TX_FEE;
+         * Transaction.DEFAULT_TX_FEE;
+         */
+        SendRequest sendRequest = SendRequest.to(RECEIVER, AMOUNT);
+        sendRequest.changeAddress = wallet.currentReceiveAddress();
+        sendRequest.feePerKb = FEE;
+
+
+        Transaction trx = null;
+        String hex = "";
+        try {
+            trx = wallet.sendCoinsOffline(sendRequest);
+            Log.d("svcom", "size = " + trx.bitcoinSerialize().length);
+            hex = Hex.toHexString(trx.bitcoinSerialize());
+            Log.d("svcom", "hex: " + hex);
+        } catch (InsufficientMoneyException e) {
+            e.printStackTrace();
+            return NOT_ENOUGH_MONEY;
+        } catch (Wallet.DustySendRequested e) {
+            e.printStackTrace();
+            return SMALL_SENDING;
+        }
+        return hex;
+    }
+
+    public void sendTx(String rawTx, ApiMethods.RequestListener listener){
+        Requestor.sendRawTx(rawTx, listener);
+    }
+
 }

@@ -1,9 +1,14 @@
 package ink.qtum.org.rest;
 
+import java.util.List;
+
 import ink.qtum.org.models.response.TransactionsListResponse;
+import ink.qtum.org.models.response.UtxoItemResponse;
 import okhttp3.ResponseBody;
 import retrofit2.Call;
+import retrofit2.http.Field;
 import retrofit2.http.GET;
+import retrofit2.http.POST;
 import retrofit2.http.Path;
 import retrofit2.http.Query;
 
@@ -18,4 +23,10 @@ public interface InsightApi {
     //TODO: implement per-page history loading
     @GET("/insight-api/addrs/{address}/txs?from=0&to=50")
     Call<TransactionsListResponse> getTransactions(@Path("address") String address);
+
+    @GET("/insight-api/addr/{address}/utxo")
+    Call<List<UtxoItemResponse>> getUTXOByAddress(@Path("address") String address);
+
+    @POST("/insight-api/tx/send")
+    Call<ResponseBody> sendRawTx(@Field("rawtx") String rawTx);
 }
