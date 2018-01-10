@@ -4,9 +4,11 @@ import android.support.annotation.Nullable;
 import android.util.Log;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import ink.qtum.org.models.Constants;
+import ink.qtum.org.models.response.UtxoItemResponse;
 import okhttp3.OkHttpClient;
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -24,7 +26,6 @@ public class ApiMethods {
 
         void onFailure(String msg);
     }
-
 
 
     static InsightApi createInsightApi() {
@@ -88,4 +89,5 @@ public class ApiMethods {
                      }
         );
     }
+
 }

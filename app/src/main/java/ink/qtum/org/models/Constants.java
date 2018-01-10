@@ -10,5 +10,7 @@ public class Constants {
     public final static String INSIGHT_API_BASE_URL = "https://explorer.qtum.org";
 
     public final static String BALANCE_SHOW_PATTERN = "#,##0.####";
+    public static final String LAST_SYNCED_BLOCK = "LAST_SYNCED_BLOCK";
+    public static final String QTUM_SHARED_PREFS = "QTUM_SHARED_PREFS";
 
 }

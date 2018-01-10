@@ -9,6 +9,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.bitcoinj.core.Coin;
+import org.bitcoinj.wallet.Wallet;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -23,9 +24,13 @@ import ink.qtum.org.QtumApp;
 import ink.qtum.org.adapter.TokensAdapter;
 import ink.qtum.org.inkqtum.BuildConfig;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.SharedManager;
+import ink.qtum.org.managers.WalletCreationCallback;
 import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
+import ink.qtum.org.utils.CryptoUtils;
+import ink.qtum.org.utils.TextUtils;
 import ink.qtum.org.views.activities.BackupActivity;
 import ink.qtum.org.views.activities.ReceiveActivity;
 import ink.qtum.org.views.activities.SendTxActivity;
@@ -33,6 +38,7 @@ import ink.qtum.org.views.activities.TxHistoryActivity;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 import okhttp3.ResponseBody;
 
+import static ink.qtum.org.models.Extras.ACTION_RESTORE_SAVED;
 import static ink.qtum.org.models.Extras.COIN_BALANCE_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
 import static ink.qtum.org.models.Extras.QTUM_ID;
@@ -57,6 +63,9 @@ public class MainFragment extends BaseFragment {
     @Inject
     WalletManager walletManager;
 
+    @Inject
+    SharedManager sharedManager;
+
     @Override
     protected int getLayout() {
         return R.layout.fragment_main;
@@ -65,8 +74,23 @@ public class MainFragment extends BaseFragment {
     @Override
     protected void init() {
         QtumApp.getAppComponent().inject(this);
+        if (getArguments() != null) {
+            if (getArguments().getBoolean(ACTION_RESTORE_SAVED)
+                    && !android.text.TextUtils.isEmpty(sharedManager.getLastSyncedBlock())) {
+                restoreSavedWallet();
+            }
+        } else {
+            initViews();
+        }
+    }
 
-        initViews();
+    private void restoreSavedWallet() {
+        walletManager.restoreWallet(CryptoUtils.decodeBase64(sharedManager.getLastSyncedBlock()), new WalletCreationCallback() {
+            @Override
+            public void onWalletCreated(Wallet wallet) {
+                initViews();
+            }
+        });
     }
 
     private void initViews() {
@@ -95,7 +119,6 @@ public class MainFragment extends BaseFragment {
         mRecycler.setLayoutManager(layoutManager);
         mRecycler.setAdapter(adapter);
     }
-
 
 
     private void getQtumBalance() {

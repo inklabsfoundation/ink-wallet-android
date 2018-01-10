@@ -78,4 +78,5 @@
     <string name="transfer_fail">Transfer Fail!</string>
     <string name="succeeded">Succeeded!</string>
     <string name="loading_transactions">Loading transactions</string>
+    <string name="invalid_qtum_address">Invalid QTUM Address</string>
 </resources>

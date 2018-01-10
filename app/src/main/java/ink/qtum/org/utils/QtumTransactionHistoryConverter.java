@@ -26,20 +26,30 @@ public class QtumTransactionHistoryConverter {
             transaction.setFees(tx.getFees());
             transaction.setTimestamp(tx.getTime() * 1000L);
             transaction.setTxHash(tx.getTxid());
-            transaction.setValue(tx.getValueOut());
             transaction.setCoinId(QTUM_ID);
             if (isInTx(tx, ownAddres)) {
                 transaction.setFromAddress(tx.getVin().get(0).getAddr());
                 transaction.setToAddress(ownAddres);
                 transaction.setIsInTx(true);
+                transaction.setValue(getInTxValue(tx, ownAddres));
             } else {
                 transaction.setFromAddress(ownAddres);
                 transaction.setToAddress(tx.getVout().get(0).getAddress());
                 transaction.setIsInTx(false);
+                transaction.setValue(tx.getValueOut());
             }
             transactions.add(transaction);
         }
         return transactions;
+    }
+
+    private static BigDecimal getInTxValue(Tx tx, String ownAddress) {
+        for (Vout vout : tx.getVout()) {
+            if (vout.getAddress().equals(ownAddress)){
+                return vout.getValue();
+            }
+        }
+        return null;
     }
 
     private static boolean isInTx(Tx tx, String ownAddress) {

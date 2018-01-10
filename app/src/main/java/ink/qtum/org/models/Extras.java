@@ -11,7 +11,7 @@ public interface Extras {
     String INK_ID = "INK";
 
     String TX_HISTORY_EXTRA = "TX_HISTORY_EXTRA";
-
     String QR_CODE_RESULT = "qrCodeResult";
     String WALLET_NUMBER = "walletNumber";
+    String ACTION_RESTORE_SAVED = "ACTION_RESTORE_SAVED";
 }
