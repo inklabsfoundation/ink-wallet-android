@@ -79,4 +79,18 @@
     <string name="succeeded">Succeeded!</string>
     <string name="loading_transactions">Loading transactions</string>
     <string name="invalid_qtum_address">Invalid QTUM Address</string>
+    <string name="toolbar_title_feedback">Feedback</string>
+    <string name="toolbar_title_q_and_a"><![CDATA[Q&A]]></string>
+    <string name="toolbar_title_terms_of_usage">Terms of Usage</string>
+    <string name="toolbar_title_version_inform">Version Inform</string>
+    <string name="toolbar_title_language">Language</string>
+
+
+    <string name="terms_of_usage_text">
+        <![CDATA[
+        <p><strong>1. Who May Use the Services</strong><br/>You may use the Services only if you agree to form a binding contract with Twitter and are not a person barred from receiving services under the laws of the applicable jurisdiction. In any case, you must be at least 13 years old to use the Services. If you are accepting these Terms and using the Services on behalf of a company, organization, government, of other legal entity, you represent and warrant that you are authorized to do so.</p>
+        <p><strong>2. Privacy</strong><br/>You may use the Services only if you agree to form a binding contract with Twitter and are not a person barred from receiving services under the laws of the applicable jurisdiction. In any case, you must be at least 13 years old to use the Services</p>
+        <p><strong>3. Content on the Services</strong><br/>You are responsible for your use of the Services and for any Content you provide, including compliance with applicable laws, rules.</p>
+        ]]>
+    </string>
 </resources>

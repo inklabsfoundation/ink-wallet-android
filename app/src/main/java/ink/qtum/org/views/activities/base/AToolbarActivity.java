@@ -18,7 +18,6 @@ public abstract class AToolbarActivity extends BaseActivity {
     protected TextView title;
     protected Toolbar toolBar;
 
-
     @Override
     protected void createLayout() {
 
@@ -34,9 +33,9 @@ public abstract class AToolbarActivity extends BaseActivity {
 
     }
 
-    public void enableBackButton(){
+    public void enableBackButton() {
         ActionBar toolbar = getSupportActionBar();
-        if (toolbar != null){
+        if (toolbar != null) {
             toolbar.setDisplayHomeAsUpEnabled(true);
             toolbar.setHomeButtonEnabled(true);
         }
@@ -47,8 +46,8 @@ public abstract class AToolbarActivity extends BaseActivity {
     protected void initToolbar() {
         toolBar = (Toolbar) findViewById(R.id.toolbar_main);
         if (toolBar != null) {
-//            title = (TextView) findViewById(R.id.tv_toolbar_title);
-
+            title = (TextView) findViewById(R.id.tv_toolbar_title);
+toolBar.setTitle("");
             setSupportActionBar(toolBar);
 
             initBackButton();
@@ -72,19 +71,11 @@ public abstract class AToolbarActivity extends BaseActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    protected void setToolBarTitle(int titleId) {
-        toolBar.setTitle(titleId);
-        toolBar.setTitleTextColor(getResources().getColor(R.color.toolbar_text_color));
-//        title.setText(resId);
-    }
-
     protected void setToolBarTitle(CharSequence title) {
         if (title != null) {
-            toolBar.setTitle(title);
-//            this.title.setText(title);
+            this.title.setText(title);
         } else {
-//            setTitle(getTitle().toString() + " " + title);
-            toolBar.setTitle(" ");
+            this.title.setText(" ");
         }
         toolBar.setTitleTextColor(getResources().getColor(R.color.toolbar_text_color));
     }

@@ -30,8 +30,8 @@ import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.utils.CryptoUtils;
-import ink.qtum.org.utils.TextUtils;
 import ink.qtum.org.views.activities.BackupActivity;
+import ink.qtum.org.views.activities.MainActivity;
 import ink.qtum.org.views.activities.ReceiveActivity;
 import ink.qtum.org.views.activities.SendTxActivity;
 import ink.qtum.org.views.activities.TxHistoryActivity;
@@ -82,6 +82,12 @@ public class MainFragment extends BaseFragment {
         } else {
             initViews();
         }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        ((MainActivity)getActivity()).setToolbarTitle(" ");
     }
 
     private void restoreSavedWallet() {
