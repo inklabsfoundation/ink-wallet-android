@@ -1,5 +1,6 @@
 package ink.qtum.org.utils;
 
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,13 +35,33 @@ public class QtumTransactionHistoryConverter {
                 transaction.setValue(getInTxValue(tx, ownAddres));
             } else {
                 transaction.setFromAddress(ownAddres);
-                transaction.setToAddress(tx.getVout().get(0).getAddress());
+                transaction.setToAddress(getOutToAddress(tx, ownAddres));
                 transaction.setIsInTx(false);
-                transaction.setValue(tx.getValueOut());
+                transaction.setValue(getOutValue(tx, ownAddres));
             }
             transactions.add(transaction);
         }
         return transactions;
+    }
+
+    private static BigDecimal getOutValue(Tx tx, String ownAddres) {
+        for (Vout vout : tx.getVout()) {
+            if (!android.text.TextUtils.isEmpty(vout.getAddress())
+                    && !vout.getAddress().equals(ownAddres)){
+                return vout.getValue();
+            }
+        }
+        return null;
+    }
+
+    private static String getOutToAddress(Tx tx, String ownAddres) {
+        for (Vout vout : tx.getVout()) {
+            if (!android.text.TextUtils.isEmpty(vout.getAddress())
+                    && !vout.getAddress().equals(ownAddres)){
+                return vout.getAddress();
+            }
+        }
+        return null;
     }
 
     private static BigDecimal getInTxValue(Tx tx, String ownAddress) {

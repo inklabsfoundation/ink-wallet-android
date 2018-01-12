@@ -5,12 +5,8 @@ import android.content.DialogInterface;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import org.bitcoinj.core.Coin;
-
-import java.io.IOException;
-import java.util.Random;
 
 import javax.inject.Inject;
 
@@ -24,7 +20,6 @@ import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.models.response.SendTxResponse;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
-import okhttp3.ResponseBody;
 
 import static ink.qtum.org.models.Extras.AMOUNT_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
@@ -48,9 +43,10 @@ public class SendConfirmActivity extends AToolbarActivity {
 
     private String address;
     private long amount;
-    private long fee;
+    private long feePerKb;
     private String txHex;
     private String coinId;
+    private int txSizeBytes;
 
 
     @Override
@@ -61,18 +57,26 @@ public class SendConfirmActivity extends AToolbarActivity {
             coinId = getIntent().getExtras().getString(COIN_ID_EXTRA);
             address = getIntent().getExtras().getString(WALLET_NUMBER_EXTRA, "");
             amount = getIntent().getExtras().getLong(AMOUNT_EXTRA);
-            fee = getIntent().getExtras().getLong(FEE_EXTRA);
+            feePerKb = getIntent().getExtras().getLong(FEE_EXTRA);
         }
 
+        generateRawTx();
+
+
+    }
+
+    private void generateRawTx() {
+        txHex = walletManager.generateQtumHexTx(address, amount, feePerKb);
+        txSizeBytes = txHex.length() / 2;
+        Log.d("svcom", "lenght str - " + txSizeBytes);
         updateViews();
-
-
     }
 
     private void updateViews() {
         tvReceiverAddress.setText(address);
         tvSendingAmount.setText(String.format("%s %s", Coin.valueOf(amount).toPlainString(), coinId));
-        txHex = walletManager.generateQtumHexTx(address, amount, fee);
+        long txFee = feePerKb / 1024 * txSizeBytes;
+        tvFeesSum.setText(String.format("%s %s", Coin.valueOf(txFee).toPlainString(), coinId));
     }
 
     @Override

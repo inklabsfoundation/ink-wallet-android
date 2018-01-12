@@ -82,12 +82,6 @@ public class MainFragment extends BaseFragment {
         }
     }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-        ((MainActivity)getActivity()).setToolbarTitle(" ");
-    }
-
     private void restoreSavedWallet() {
         walletManager.restoreWallet(CryptoUtils.decodeBase64(sharedManager.getLastSyncedBlock()), new WalletCreationCallback() {
             @Override
@@ -161,6 +155,7 @@ public class MainFragment extends BaseFragment {
     @Override
     public void onResume() {
         super.onResume();
+        ((MainActivity)getActivity()).setToolbarTitle(" ");
         initViews();
     }
 
