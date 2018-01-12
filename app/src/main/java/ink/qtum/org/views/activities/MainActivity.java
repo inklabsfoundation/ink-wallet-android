@@ -168,7 +168,7 @@ public class MainActivity extends BaseActivity {
             if (resultCode == Activity.RESULT_OK) {
                 String result = data.getStringExtra(Extras.QR_CODE_RESULT);
                 Intent intent = new Intent(this, SendTxActivity.class);
-                intent.putExtra(Extras.WALLET_NUMBER, result);
+                intent.putExtra(Extras.WALLET_NUMBER_EXTRA, result);
                 startActivity(intent);
             }
         }

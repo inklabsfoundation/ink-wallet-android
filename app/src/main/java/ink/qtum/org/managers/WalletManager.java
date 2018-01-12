@@ -153,8 +153,8 @@ public class WalletManager {
 
         Coin AMOUNT = Coin.valueOf(sumInSatoshi);
         Coin FEE = Coin.valueOf(feeInSatoshi);
-
         Log.d("svcom", "tx - amount = " + AMOUNT.toFriendlyString() + " fee = " + FEE.toFriendlyString());
+        Log.d("svcom", "tx - amount = " + AMOUNT.toFriendlyString() + " fee = " + feeInSatoshi);
         /**
          * available default fee
          * Transaction.REFERENCE_DEFAULT_MIN_TX_FEE;
@@ -169,8 +169,9 @@ public class WalletManager {
         String hex = "";
         try {
             trx = wallet.sendCoinsOffline(sendRequest);
-            Log.d("svcom", "size = " + trx.bitcoinSerialize().length);
+            Log.d( "svcom", "size = " + trx.bitcoinSerialize().length);
             hex = Hex.toHexString(trx.bitcoinSerialize());
+
             Log.d("svcom", "hex: " + hex);
         } catch (InsufficientMoneyException e) {
             e.printStackTrace();

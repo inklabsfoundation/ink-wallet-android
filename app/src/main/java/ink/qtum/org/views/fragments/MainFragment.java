@@ -79,8 +79,6 @@ public class MainFragment extends BaseFragment {
                     && !android.text.TextUtils.isEmpty(sharedManager.getLastSyncedBlock())) {
                 restoreSavedWallet();
             }
-        } else {
-            initViews();
         }
     }
 
@@ -94,9 +92,11 @@ public class MainFragment extends BaseFragment {
     }
 
     private void initViews() {
-        mAddress.setText(walletManager.getWalletFriendlyAddress());
-        initQtum();
-        initList();
+        if (!android.text.TextUtils.isEmpty(walletManager.getWalletFriendlyAddress())) {
+            mAddress.setText(walletManager.getWalletFriendlyAddress());
+            initQtum();
+            initList();
+        }
     }
 
     private void initQtum() {
@@ -150,6 +150,12 @@ public class MainFragment extends BaseFragment {
                 Log.e(BuildConfig.APPLICATION_ID, msg);
             }
         });
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        initViews();
     }
 
     private void showQtumBalance(String balance) {
