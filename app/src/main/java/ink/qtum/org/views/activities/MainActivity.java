@@ -121,6 +121,10 @@ public class MainActivity extends BaseActivity {
         mToolbar.setTitleTextColor(getResources().getColor(R.color.toolbar_text_color));
     }
 
+    public void setToolbarTitle(String text){
+        mToolbar.setTitle(text);
+    }
+
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.toolbar_menu, menu);
