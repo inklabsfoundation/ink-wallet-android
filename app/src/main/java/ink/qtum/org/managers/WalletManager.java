@@ -13,16 +13,22 @@ import org.bitcoinj.core.InsufficientMoneyException;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.TransactionOutput;
 import org.bitcoinj.core.UTXO;
 import org.bitcoinj.core.UTXOProvider;
 import org.bitcoinj.core.UTXOProviderException;
 import org.bitcoinj.params.QtumMainNetParams;
+import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
+import org.bitcoinj.script.ScriptOpCodes;
 import org.bitcoinj.wallet.DeterministicSeed;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
 import org.spongycastle.util.encoders.Hex;
 
+import java.io.UnsupportedEncodingException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -38,6 +44,7 @@ import ink.qtum.org.utils.CryptoUtils;
 import ink.qtum.org.utils.FileUtils;
 
 import static ink.qtum.org.models.Constants.BIP_39_WORDLIST_ASSET;
+import static org.bitcoinj.script.ScriptOpCodes.OP_RETURN;
 
 /**
  * Created by SV on 21.12.2017.
@@ -161,14 +168,31 @@ public class WalletManager {
          * Transaction.DEFAULT_TX_FEE;
          */
         SendRequest sendRequest = SendRequest.to(RECEIVER, AMOUNT);
+        sendRequest.shuffleOutputs = false;
         sendRequest.changeAddress = wallet.currentReceiveAddress();
         sendRequest.feePerKb = FEE;
+        sendRequest.shuffleOutputs = false;
+
 
 
         Transaction trx = null;
         String hex = "";
         try {
             trx = wallet.sendCoinsOffline(sendRequest);
+
+            String description = "hello from SV";
+            ScriptBuilder sb = new ScriptBuilder();
+
+            Script descriptionScript = sb.op(OP_RETURN).data(description.getBytes()).build();
+
+            TransactionOutput output = new TransactionOutput(params, null, Coin.ZERO, descriptionScript.getProgram());
+            trx.addOutput(output);
+
+
+            byte[] bytes = description.getBytes();
+            Log.d("svcom", "bytes - " + bytes);
+            Log.d("svcom", "decode bytes - " + (new String(bytes, "UTF-8")));
+
             Log.d( "svcom", "size = " + trx.bitcoinSerialize().length);
             hex = Hex.toHexString(trx.bitcoinSerialize());
 
@@ -176,7 +200,7 @@ public class WalletManager {
         } catch (InsufficientMoneyException e) {
             e.printStackTrace();
             return NOT_ENOUGH_MONEY;
-        } catch (Wallet.DustySendRequested e) {
+        } catch (Wallet.DustySendRequested|UnsupportedEncodingException e) {
             e.printStackTrace();
             return SMALL_SENDING;
         }
