@@ -51,7 +51,7 @@ public class DialogManager {
         dialog.show();
     }
 
-    public static void showSucceedDialog(Context context) {
+    public static void showSucceedDialog(Context context, DialogInterface.OnDismissListener listener) {
         MaterialDialog.Builder builder = getBaseDialog(context, null);
         builder.customView(R.layout.dialog_copy_succeed, false);
 
@@ -64,10 +64,12 @@ public class DialogManager {
             }
         });
 
+        dialog.setOnDismissListener(listener);
+
         dialog.show();
     }
 
-    public static void showTransferFailDialog(Context context) {
+    public static void showTransferFailDialog(Context context, DialogInterface.OnDismissListener listener) {
         MaterialDialog.Builder builder = getBaseDialog(context, null);
         builder.customView(R.layout.dialog_fail, false);
 
@@ -80,6 +82,7 @@ public class DialogManager {
             }
         });
 
+        dialog.setOnDismissListener(listener);
         dialog.show();
     }
 

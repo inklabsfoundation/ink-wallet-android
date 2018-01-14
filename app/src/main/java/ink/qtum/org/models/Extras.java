@@ -12,6 +12,8 @@ public interface Extras {
 
     String TX_HISTORY_EXTRA = "TX_HISTORY_EXTRA";
     String QR_CODE_RESULT = "qrCodeResult";
-    String WALLET_NUMBER = "walletNumber";
+    String WALLET_NUMBER_EXTRA = "walletNumber";
+    String AMOUNT_EXTRA = "AMOUNT_EXTRA";
+    String FEE_EXTRA = "FEE_EXTRA";
     String ACTION_RESTORE_SAVED = "ACTION_RESTORE_SAVED";
 }

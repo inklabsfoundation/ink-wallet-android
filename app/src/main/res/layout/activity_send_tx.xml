@@ -14,6 +14,8 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="10dp"
             android:layout_marginTop="10dp"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
             android:text="@string/send_title_address"
             android:textColor="@color/black6TextColor"
             android:textStyle="bold" />
@@ -51,8 +53,8 @@
                 android:layout_weight="4"
                 android:id="@+id/et_send_tx_amount"
                 android:background="@drawable/gray_contour"
-                android:hint="Max amount: 10000.000000"
-                android:inputType="number"
+                android:hint="@string/max_amount"
+                android:inputType="numberDecimal"
                 android:lines="1"
                 android:maxLines="1"
                 android:padding="10dp"
@@ -61,12 +63,13 @@
                 android:textSize="14dp" />
 
             <TextView
+                android:id="@+id/tv_coin_id"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginLeft="5dp"
                 android:layout_weight="6"
+                android:enabled="false"
                 android:background="@drawable/gray_contour"
-                android:hint="INK"
                 android:padding="10dp"
                 android:textColor="@color/black8TextColor"
                 android:textSize="14dp" />

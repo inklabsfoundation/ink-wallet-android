@@ -53,6 +53,7 @@
             android:screenOrientation="portrait" />
         <activity
             android:name="ink.qtum.org.views.activities.SendConfirmActivity"
+            android:noHistory="true"
             android:screenOrientation="portrait" />
         <activity
             android:name="ink.qtum.org.views.activities.QrCodeScanActivity"

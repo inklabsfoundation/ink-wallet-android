@@ -79,6 +79,10 @@
     <string name="succeeded">Succeeded!</string>
     <string name="loading_transactions">Loading transactions</string>
     <string name="invalid_qtum_address">Invalid QTUM Address</string>
+    <string name="max_amount">Max amount:</string>
+    <string name="amout_cant_be_more_balance">Amount can\'t be more then balance</string>
+    <string name="wrong_qtum_address">Wrong QTUM address</string>
+    <string name="dust_transaction">Dust transaction</string>
     <string name="toolbar_title_feedback">Feedback</string>
     <string name="toolbar_title_q_and_a"><![CDATA[Q&A]]></string>
     <string name="toolbar_title_terms_of_usage">Terms of Usage</string>

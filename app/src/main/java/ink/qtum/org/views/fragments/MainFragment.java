@@ -85,8 +85,6 @@ public class MainFragment extends BaseFragment {
                     && !android.text.TextUtils.isEmpty(sharedManager.getLastSyncedBlock())) {
                 restoreSavedWallet();
             }
-        } else {
-            initViews();
         }
     }
 
@@ -94,6 +92,7 @@ public class MainFragment extends BaseFragment {
     public void onResume() {
         super.onResume();
         ((MainActivity) getActivity()).setToolbarTitle(" ");
+        initViews();
     }
 
     private void restoreSavedWallet() {
@@ -106,10 +105,12 @@ public class MainFragment extends BaseFragment {
     }
 
     private void initViews() {
-        mAddress.setText(walletManager.getWalletFriendlyAddress());
-        initQtum();
-        initINK();
-        initList();
+        if (!android.text.TextUtils.isEmpty(walletManager.getWalletFriendlyAddress())) {
+            mAddress.setText(walletManager.getWalletFriendlyAddress());
+            initQtum();
+            initINK();
+            initList();
+        }
     }
 
     private void initQtum() {

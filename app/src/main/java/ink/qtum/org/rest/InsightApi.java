@@ -4,10 +4,12 @@ import java.util.List;
 
 import ink.qtum.org.models.response.TransactionsInkListResponse;
 import ink.qtum.org.models.response.TransactionsQtumListResponse;
+import ink.qtum.org.models.response.SendTxResponse;
 import ink.qtum.org.models.response.UtxoItemResponse;
 import okhttp3.ResponseBody;
 import retrofit2.Call;
 import retrofit2.http.Field;
+import retrofit2.http.FormUrlEncoded;
 import retrofit2.http.GET;
 import retrofit2.http.POST;
 import retrofit2.http.Path;
@@ -29,7 +31,8 @@ public interface InsightApi {
     Call<List<UtxoItemResponse>> getUTXOByAddress(@Path("address") String address);
 
     @POST("/insight-api/tx/send")
-    Call<ResponseBody> sendRawTx(@Field("rawtx") String rawTx);
+    @FormUrlEncoded
+    Call<SendTxResponse> sendRawTx(@Field("rawtx") String rawTx);
 
     @GET("/insight-api/tokens/{token}/addresses/{address}/balance")
     Call <ResponseBody> getTokenBalance(@Path("token") String token, @Path("address") String address);
