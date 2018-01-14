@@ -15,7 +15,7 @@
             android:layout_marginBottom="30dp"
             android:layout_marginStart="10dp"
             android:layout_marginTop="30dp"
-            android:src="@drawable/ic_fragment_logo_main_info"
+            app:srcCompat="@drawable/ic_fragment_logo_main_info"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
@@ -37,7 +37,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
-                android:src="@drawable/ic_backup_diskette"
+                app:srcCompat="@drawable/ic_backup_diskette"
                 app:layout_constraintBottom_toBottomOf="@+id/textView5"
                 app:layout_constraintEnd_toStartOf="@+id/textView5"
                 app:layout_constraintTop_toTopOf="@+id/textView5" />
@@ -136,7 +136,7 @@
                 android:layout_margin="4dp"
                 android:padding="2dp"
                 android:adjustViewBounds="true"
-                android:src="@drawable/vec_icon_qtum" />
+                app:srcCompat="@drawable/vec_icon_qtum" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -150,6 +150,55 @@
 
             <TextView
                 android:id="@+id/tv_qtum_balance"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_weight="4"
+                android:textStyle="bold"
+                android:textSize="16dp"
+                android:layout_marginRight="10dp"
+                android:gravity="center_vertical|end"
+                android:text="--.--" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#dddddd" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/ll_ink_balance_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_margin="@dimen/dimen_8dp"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_margin="4dp"
+                android:padding="2dp"
+                android:adjustViewBounds="true"
+                app:srcCompat="@drawable/ic_icon_ink" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_weight="4"
+                android:layout_marginLeft="12dp"
+                android:textSize="16dp"
+                android:textColor="@color/black8TextColor"
+                android:gravity="center_vertical"
+                android:text="@string/ink" />
+
+            <TextView
+                android:id="@+id/tv_ink_balance"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
                 android:layout_weight="4"

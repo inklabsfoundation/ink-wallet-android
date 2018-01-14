@@ -7,8 +7,6 @@ import android.text.TextUtils;
 import android.view.View;
 import android.widget.TextView;
 
-import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -18,8 +16,6 @@ import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.models.TransactionHistory;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 
-import static ink.qtum.org.models.Constants.BALANCE_SHOW_PATTERN;
-import static ink.qtum.org.models.Extras.COIN_BALANCE_EXTRA;
 import static ink.qtum.org.models.Extras.INK_ID;
 import static ink.qtum.org.models.Extras.QTUM_ID;
 import static ink.qtum.org.models.Extras.TX_HISTORY_EXTRA;
@@ -64,16 +60,13 @@ public class TxDetailsActivity extends AToolbarActivity {
     }
 
     private void showTxInfo() {
-        DecimalFormatSymbols symbols = DecimalFormatSymbols.getInstance();
-        symbols.setDecimalSeparator('.');
-        DecimalFormat decimalFormat = new DecimalFormat(BALANCE_SHOW_PATTERN, symbols);
-        tvBalance.setText(decimalFormat.format(txHistoryItem.getValue()));
+        tvBalance.setText(txHistoryItem.getFriendlyValue());
         mCoinName.setText(txHistoryItem.getCoinId());
         showIcon(txHistoryItem.getCoinId());
         mAddressFrom.setText(txHistoryItem.getFromAddress());
         mAddressTo.setText(txHistoryItem.getToAddress());
         mFees.setText(txHistoryItem.getFees().toPlainString());
-        if (TextUtils.equals(txHistoryItem.getCoinId(), QTUM_ID)){
+        if (TextUtils.equals(txHistoryItem.getCoinId(), QTUM_ID) || TextUtils.equals(txHistoryItem.getCoinId(), INK_ID)){
             mDescription.setVisibility(View.INVISIBLE);
         }
         mTxHash.setText(txHistoryItem.getTxHash());

@@ -30,6 +30,7 @@ import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.utils.CryptoUtils;
+import ink.qtum.org.utils.TransactionHistoryConverter;
 import ink.qtum.org.views.activities.BackupActivity;
 import ink.qtum.org.views.activities.MainActivity;
 import ink.qtum.org.views.activities.ReceiveActivity;
@@ -41,6 +42,7 @@ import okhttp3.ResponseBody;
 import static ink.qtum.org.models.Extras.ACTION_RESTORE_SAVED;
 import static ink.qtum.org.models.Extras.COIN_BALANCE_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
+import static ink.qtum.org.models.Extras.INK_ID;
 import static ink.qtum.org.models.Extras.QTUM_ID;
 
 @AutoInjector(QtumApp.class)
@@ -53,9 +55,13 @@ public class MainFragment extends BaseFragment {
 
     @BindView(R.id.tv_qtum_balance)
     TextView tvQtumBalance;
-
     @BindView(R.id.ll_qtum_balance_container)
     LinearLayout llQtumBalanceContainer;
+
+    @BindView(R.id.tv_ink_balance)
+    TextView tvInkBalance;
+    @BindView(R.id.ll_ink_balance_container)
+    LinearLayout llInkBalanceContainer;
 
 
     private TokensAdapter adapter;
@@ -87,7 +93,7 @@ public class MainFragment extends BaseFragment {
     @Override
     public void onResume() {
         super.onResume();
-        ((MainActivity)getActivity()).setToolbarTitle(" ");
+        ((MainActivity) getActivity()).setToolbarTitle(" ");
     }
 
     private void restoreSavedWallet() {
@@ -102,11 +108,16 @@ public class MainFragment extends BaseFragment {
     private void initViews() {
         mAddress.setText(walletManager.getWalletFriendlyAddress());
         initQtum();
+        initINK();
         initList();
     }
 
     private void initQtum() {
         getQtumBalance();
+    }
+
+    private void initINK() {
+        getInkBalance();
     }
 
     private void initList() {
@@ -125,7 +136,6 @@ public class MainFragment extends BaseFragment {
         mRecycler.setLayoutManager(layoutManager);
         mRecycler.setAdapter(adapter);
     }
-
 
     private void getQtumBalance() {
         Requestor.getBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
@@ -158,8 +168,42 @@ public class MainFragment extends BaseFragment {
         });
     }
 
+    private void getInkBalance() {
+        Requestor.getInkBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
+            @Override
+            public void onSuccess(Object response) {
+                try {
+                    String inkBalanceStr = ((ResponseBody) response).string();
+                    final String balance = TransactionHistoryConverter.getFriendlyValueInk(inkBalanceStr);
+                    showInkBalance(balance);
+
+                    llInkBalanceContainer.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View view) {
+                            Intent intent = new Intent(getActivity(), TxHistoryActivity.class);
+                            intent.putExtra(COIN_ID_EXTRA, INK_ID);
+                            intent.putExtra(COIN_BALANCE_EXTRA, balance);
+                            startActivity(intent);
+                        }
+                    });
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            @Override
+            public void onFailure(String msg) {
+                Log.e(BuildConfig.APPLICATION_ID, msg);
+            }
+        });
+    }
+
     private void showQtumBalance(String balance) {
         tvQtumBalance.setText(balance);
+    }
+
+    private void showInkBalance(String balance) {
+        tvInkBalance.setText(balance);
     }
 
     private List<Integer> getDemoList() {

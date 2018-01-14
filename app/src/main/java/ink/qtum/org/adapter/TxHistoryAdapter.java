@@ -8,8 +8,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -21,8 +19,6 @@ import butterknife.ButterKnife;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.models.TransactionHistory;
 import ink.qtum.org.utils.TextUtils;
-
-import static ink.qtum.org.models.Constants.BALANCE_SHOW_PATTERN;
 
 public class TxHistoryAdapter extends RecyclerView.Adapter<TxHistoryItemHolder> {
 
@@ -95,10 +91,8 @@ public class TxHistoryAdapter extends RecyclerView.Adapter<TxHistoryItemHolder> 
             holder.tvBalance.setTextColor(view.getResources().getColor(R.color.turquoiseColor));
             txSign = '-';
         }
-        DecimalFormatSymbols symbols = DecimalFormatSymbols.getInstance();
-        symbols.setDecimalSeparator('.');
-        DecimalFormat decimalFormat = new DecimalFormat(BALANCE_SHOW_PATTERN, symbols);
-        holder.tvBalance.setText(String.format("%s%s %s", txSign, decimalFormat.format(item.getValue()),
+
+        holder.tvBalance.setText(String.format("%s%s %s", txSign, item.getFriendlyValue(),
                 item.getCoinId()));
         holder.tvHash.setText(TextUtils.txHashToShort(item.getTxHash()));
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault());

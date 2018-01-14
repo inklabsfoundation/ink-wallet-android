@@ -1,25 +1,36 @@
-package ink.qtum.org.models;
+package ink.qtum.org.models.response;
+
+
+import com.google.gson.annotations.Expose;
+import com.google.gson.annotations.SerializedName;
 
 import org.bitcoinj.core.Coin;
 
-import java.io.Serializable;
 import java.math.BigDecimal;
 
-/**
- * Created by SV on 03.01.2018.
- */
+public class TxInk {
 
-public class TransactionHistory implements Serializable {
     private String coinId;
+    @SerializedName("from")
+    @Expose
     private String fromAddress;
+    @SerializedName("to")
+    @Expose
     private String toAddress;
-    private long timestamp;
+    @SerializedName("block_date_time")
+    @Expose
+    private String timestamp;
     private BigDecimal fees;
-    private BigDecimal rawValue;
-    private String friendlyValue;
+    @SerializedName("value")
+    @Expose
+    private String value;
     private long valueSat;
+    @SerializedName("tx_hash")
+    @Expose
     private String txHash;
     private String description;
+    @SerializedName("block_height")
+    @Expose
     private int blockHeight;
     private boolean isInTx;
 
@@ -55,11 +66,11 @@ public class TransactionHistory implements Serializable {
         this.toAddress = toAddress;
     }
 
-    public long getTimestamp() {
+    public String getTimestamp() {
         return timestamp;
     }
 
-    public void setTimestamp(long timestamp) {
+    public void setTimestamp(String timestamp) {
         this.timestamp = timestamp;
     }
 
@@ -71,12 +82,12 @@ public class TransactionHistory implements Serializable {
         this.fees = fees;
     }
 
-    public BigDecimal getRawValue() {
-        return rawValue;
+    public String getValue() {
+        return value;
     }
 
-    public void setRawValue(BigDecimal rawValue) {
-        this.rawValue = rawValue;
+    public void setValue(String value) {
+        this.value = value;
     }
 
     public long getValueSat() {
@@ -115,14 +126,7 @@ public class TransactionHistory implements Serializable {
     public String toString() {
         return "from - " + fromAddress + "\n"
                 + "to - " + toAddress + "\n"
-                + "rawValue - " + Coin.parseCoin(rawValue.toString());
+                + "value - " + Coin.parseCoin(value.toString());
     }
 
-    public String getFriendlyValue() {
-        return friendlyValue;
-    }
-
-    public void setFriendlyValue(String friendlyValue) {
-        this.friendlyValue = friendlyValue;
-    }
 }

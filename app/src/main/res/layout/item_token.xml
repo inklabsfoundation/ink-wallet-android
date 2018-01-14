@@ -29,7 +29,7 @@
             android:textSize="16dp"
             android:textColor="@color/black8TextColor"
             android:gravity="center_vertical"
-            android:text="INK" />
+            android:text="Test" />
 
         <TextView
             android:layout_width="wrap_content"

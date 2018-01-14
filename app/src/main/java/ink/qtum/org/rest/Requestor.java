@@ -2,6 +2,7 @@ package ink.qtum.org.rest;
 
 import android.util.Log;
 
+import ink.qtum.org.models.Constants;
 import retrofit2.Call;
 
 /**
@@ -31,6 +32,18 @@ public class Requestor {
     public static void sendRawTx(String rawTx, ApiMethods.RequestListener listener){
         Call call = ApiMethods.createInsightApi().sendRawTx(rawTx);
         Log.d("Request", "path " + call.request());
+        ApiMethods.makeRequest(call, listener);
+    }
+
+    public static void getInkBalance(String address, ApiMethods.RequestListener listener) {
+        Call call = ApiMethods.createInsightApi().getTokenBalance(Constants.INK_CONTRACT_ADDRESS_BASE58, address);
+        Log.d("svcom", "path " + call.request());
+        ApiMethods.makeRequest(call, listener);
+    }
+
+    public static void getInkTransactions(String address, ApiMethods.RequestListener listener) {
+        Call call = ApiMethods.createInsightApi().getTokenTransactions(Constants.INK_CONTRACT_ADDRESS_BASE58, address);
+        Log.d("svcom", "path " + call.request());
         ApiMethods.makeRequest(call, listener);
     }
 
