@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: org.bitcoinj.wallet.KeyChainGroupTest
--------------------------------------------------------------------------------
-Tests run: 29, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.347 sec - in org.bitcoinj.wallet.KeyChainGroupTest
