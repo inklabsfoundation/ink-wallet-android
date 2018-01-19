@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>NioClient.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.net</a> &gt; <span class="el_source">NioClient.java</span></div><h1>NioClient.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.net;
+
+import com.google.common.base.*;
+import com.google.common.util.concurrent.*;
+import org.slf4j.*;
+
+import java.io.*;
+import java.net.*;
+import java.nio.*;
+
+/**
+ * Creates a simple connection to a server using a {@link StreamConnection} to process data.
+ */
+public class NioClient implements MessageWriteTarget {
+<span class="fc" id="L32">    private static final Logger log = LoggerFactory.getLogger(NioClient.class);</span>
+
+    private final Handler handler;
+<span class="fc" id="L35">    private final NioClientManager manager = new NioClientManager();</span>
+
+    class Handler extends AbstractTimeoutHandler implements StreamConnection {
+        private final StreamConnection upstreamConnection;
+        private MessageWriteTarget writeTarget;
+<span class="fc" id="L40">        private boolean closeOnOpen = false;</span>
+<span class="fc" id="L41">        private boolean closeCalled = false;</span>
+<span class="fc" id="L42">        Handler(StreamConnection upstreamConnection, int connectTimeoutMillis) {</span>
+<span class="fc" id="L43">            this.upstreamConnection = upstreamConnection;</span>
+<span class="fc" id="L44">            setSocketTimeout(connectTimeoutMillis);</span>
+<span class="fc" id="L45">            setTimeoutEnabled(true);</span>
+<span class="fc" id="L46">        }</span>
+
+        @Override
+        protected synchronized void timeoutOccurred() {
+<span class="nc" id="L50">            closeOnOpen = true;</span>
+<span class="nc" id="L51">            connectionClosed();</span>
+<span class="nc" id="L52">        }</span>
+
+        @Override
+        public synchronized void connectionClosed() {
+<span class="fc" id="L56">            manager.stopAsync();</span>
+<span class="pc bpc" id="L57" title="1 of 2 branches missed.">            if (!closeCalled) {</span>
+<span class="fc" id="L58">                closeCalled = true;</span>
+<span class="fc" id="L59">                upstreamConnection.connectionClosed();</span>
+            }
+<span class="fc" id="L61">        }</span>
+
+        @Override
+        public synchronized void connectionOpened() {
+<span class="pc bpc" id="L65" title="1 of 2 branches missed.">            if (!closeOnOpen)</span>
+<span class="fc" id="L66">                upstreamConnection.connectionOpened();</span>
+<span class="fc" id="L67">        }</span>
+
+        @Override
+        public int receiveBytes(ByteBuffer buff) throws Exception {
+<span class="fc" id="L71">            return upstreamConnection.receiveBytes(buff);</span>
+        }
+
+        @Override
+        public synchronized void setWriteTarget(MessageWriteTarget writeTarget) {
+<span class="pc bpc" id="L76" title="1 of 2 branches missed.">            if (closeOnOpen)</span>
+<span class="nc" id="L77">                writeTarget.closeConnection();</span>
+            else {
+<span class="fc" id="L79">                setTimeoutEnabled(false);</span>
+<span class="fc" id="L80">                this.writeTarget = writeTarget;</span>
+<span class="fc" id="L81">                upstreamConnection.setWriteTarget(writeTarget);</span>
+            }
+<span class="fc" id="L83">        }</span>
+
+        @Override
+        public int getMaxMessageSize() {
+<span class="fc" id="L87">            return upstreamConnection.getMaxMessageSize();</span>
+        }
+    }
+
+    /**
+     * &lt;p&gt;Creates a new client to the given server address using the given {@link StreamConnection} to decode the data.
+     * The given connection &lt;b&gt;MUST&lt;/b&gt; be unique to this object. This does not block while waiting for the connection to
+     * open, but will call either the {@link StreamConnection#connectionOpened()} or
+     * {@link StreamConnection#connectionClosed()} callback on the created network event processing thread.&lt;/p&gt;
+     *
+     * @param connectTimeoutMillis The connect timeout set on the connection (in milliseconds). 0 is interpreted as no
+     *                             timeout.
+     */
+    public NioClient(final SocketAddress serverAddress, final StreamConnection parser,
+<span class="fc" id="L101">                     final int connectTimeoutMillis) throws IOException {</span>
+<span class="fc" id="L102">        manager.startAsync();</span>
+<span class="fc" id="L103">        manager.awaitRunning();</span>
+<span class="fc" id="L104">        handler = new Handler(parser, connectTimeoutMillis);</span>
+<span class="fc" id="L105">        Futures.addCallback(manager.openConnection(serverAddress, handler), new FutureCallback&lt;SocketAddress&gt;() {</span>
+            @Override
+            public void onSuccess(SocketAddress result) {
+<span class="fc" id="L108">            }</span>
+
+            @Override
+            public void onFailure(Throwable t) {
+<span class="nc" id="L112">                log.error(&quot;Connect to {} failed: {}&quot;, serverAddress, Throwables.getRootCause(t));</span>
+<span class="nc" id="L113">            }</span>
+        });
+<span class="fc" id="L115">    }</span>
+
+    @Override
+    public void closeConnection() {
+<span class="nc" id="L119">        handler.writeTarget.closeConnection();</span>
+<span class="nc" id="L120">    }</span>
+
+    @Override
+    public synchronized void writeBytes(byte[] message) throws IOException {
+<span class="nc" id="L124">        handler.writeTarget.writeBytes(message);</span>
+<span class="nc" id="L125">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

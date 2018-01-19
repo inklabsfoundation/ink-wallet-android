@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>LocalTransactionSigner.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.signers</a> &gt; <span class="el_source">LocalTransactionSigner.java</span></div><h1>LocalTransactionSigner.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 Kosta Korenkov
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.signers;
+
+import java.util.EnumSet;
+import org.bitcoinj.core.ECKey;
+import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.TransactionInput;
+import org.bitcoinj.crypto.DeterministicKey;
+import org.bitcoinj.crypto.TransactionSignature;
+import org.bitcoinj.script.Script;
+import org.bitcoinj.script.ScriptException;
+import org.bitcoinj.script.Script.VerifyFlag;
+import org.bitcoinj.wallet.KeyBag;
+import org.bitcoinj.wallet.RedeemData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * &lt;p&gt;{@link TransactionSigner} implementation for signing inputs using keys from provided {@link org.bitcoinj.wallet.KeyBag}.&lt;/p&gt;
+ * &lt;p&gt;This signer doesn't create input scripts for tx inputs. Instead it expects inputs to contain scripts with
+ * empty sigs and replaces one of the empty sigs with calculated signature.
+ * &lt;/p&gt;
+ * &lt;p&gt;This signer is always implicitly added into every wallet and it is the first signer to be executed during tx
+ * completion. As the first signer to create a signature, it stores derivation path of the signing key in a given
+ * {@link org.bitcoinj.signers.TransactionSigner.ProposedTransaction} object that will be also passed then to the next signer in chain. This allows other
+ * signers to use correct signing key for P2SH inputs, because all the keys involved in a single P2SH address have
+ * the same derivation path.&lt;/p&gt;
+ * &lt;p&gt;This signer always uses {@link org.bitcoinj.core.Transaction.SigHash#ALL} signing mode.&lt;/p&gt;
+ */
+<span class="fc" id="L45">public class LocalTransactionSigner extends StatelessTransactionSigner {</span>
+<span class="fc" id="L46">    private static final Logger log = LoggerFactory.getLogger(LocalTransactionSigner.class);</span>
+
+    /**
+     * Verify flags that are safe to use when testing if an input is already
+     * signed.
+     */
+<span class="fc" id="L52">    private static final EnumSet&lt;VerifyFlag&gt; MINIMUM_VERIFY_FLAGS = EnumSet.of(VerifyFlag.P2SH,</span>
+        VerifyFlag.NULLDUMMY);
+
+    @Override
+    public boolean isReady() {
+<span class="fc" id="L57">        return true;</span>
+    }
+
+    @Override
+    public boolean signInputs(ProposedTransaction propTx, KeyBag keyBag) {
+<span class="fc" id="L62">        Transaction tx = propTx.partialTx;</span>
+<span class="fc" id="L63">        int numInputs = tx.getInputs().size();</span>
+<span class="fc bfc" id="L64" title="All 2 branches covered.">        for (int i = 0; i &lt; numInputs; i++) {</span>
+<span class="fc" id="L65">            TransactionInput txIn = tx.getInput(i);</span>
+<span class="fc bfc" id="L66" title="All 2 branches covered.">            if (txIn.getConnectedOutput() == null) {</span>
+<span class="fc" id="L67">                log.warn(&quot;Missing connected output, assuming input {} is already signed.&quot;, i);</span>
+<span class="fc" id="L68">                continue;</span>
+            }
+
+            try {
+                // We assume if its already signed, its hopefully got a SIGHASH type that will not invalidate when
+                // we sign missing pieces (to check this would require either assuming any signatures are signing
+                // standard output types or a way to get processed signatures out of script execution)
+<span class="fc" id="L75">                txIn.getScriptSig().correctlySpends(tx, i, txIn.getConnectedOutput().getScriptPubKey(), MINIMUM_VERIFY_FLAGS);</span>
+<span class="fc" id="L76">                log.warn(&quot;Input {} already correctly spends output, assuming SIGHASH type used will be safe and skipping signing.&quot;, i);</span>
+<span class="fc" id="L77">                continue;</span>
+<span class="fc" id="L78">            } catch (ScriptException e) {</span>
+                // Expected.
+            }
+
+<span class="fc" id="L82">            RedeemData redeemData = txIn.getConnectedRedeemData(keyBag);</span>
+
+<span class="fc" id="L84">            Script scriptPubKey = txIn.getConnectedOutput().getScriptPubKey();</span>
+
+            // For P2SH inputs we need to share derivation path of the signing key with other signers, so that they
+            // use correct key to calculate their signatures.
+            // Married keys all have the same derivation path, so we can safely just take first one here.
+<span class="fc" id="L89">            ECKey pubKey = redeemData.keys.get(0);</span>
+<span class="fc bfc" id="L90" title="All 2 branches covered.">            if (pubKey instanceof DeterministicKey)</span>
+<span class="fc" id="L91">                propTx.keyPaths.put(scriptPubKey, (((DeterministicKey) pubKey).getPath()));</span>
+
+            ECKey key;
+            // locate private key in redeem data. For pay-to-address and pay-to-key inputs RedeemData will always contain
+            // only one key (with private bytes). For P2SH inputs RedeemData will contain multiple keys, one of which MAY
+            // have private bytes
+<span class="fc bfc" id="L97" title="All 2 branches covered.">            if ((key = redeemData.getFullKey()) == null) {</span>
+<span class="fc" id="L98">                log.warn(&quot;No local key found for input {}&quot;, i);</span>
+<span class="fc" id="L99">                continue;</span>
+            }
+
+<span class="fc" id="L102">            Script inputScript = txIn.getScriptSig();</span>
+            // script here would be either a standard CHECKSIG program for pay-to-address or pay-to-pubkey inputs or
+            // a CHECKMULTISIG program for P2SH inputs
+<span class="fc" id="L105">            byte[] script = redeemData.redeemScript.getProgram();</span>
+            try {
+<span class="fc" id="L107">                TransactionSignature signature = tx.calculateSignature(i, key, script, Transaction.SigHash.ALL, false);</span>
+
+                // at this point we have incomplete inputScript with OP_0 in place of one or more signatures. We already
+                // have calculated the signature using the local key and now need to insert it in the correct place
+                // within inputScript. For pay-to-address and pay-to-key script there is only one signature and it always
+                // goes first in an inputScript (sigIndex = 0). In P2SH input scripts we need to figure out our relative
+                // position relative to other signers.  Since we don't have that information at this point, and since
+                // we always run first, we have to depend on the other signers rearranging the signatures as needed.
+                // Therefore, always place as first signature.
+<span class="fc" id="L116">                int sigIndex = 0;</span>
+<span class="fc" id="L117">                inputScript = scriptPubKey.getScriptSigWithSignature(inputScript, signature.encodeToBitcoin(), sigIndex);</span>
+<span class="fc" id="L118">                txIn.setScriptSig(inputScript);</span>
+<span class="nc" id="L119">            } catch (ECKey.KeyIsEncryptedException e) {</span>
+<span class="nc" id="L120">                throw e;</span>
+<span class="nc" id="L121">            } catch (ECKey.MissingPrivateKeyException e) {</span>
+<span class="nc" id="L122">                log.warn(&quot;No private key in keypair for input {}&quot;, i);</span>
+<span class="fc" id="L123">            }</span>
+
+        }
+<span class="fc" id="L126">        return true;</span>
+    }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

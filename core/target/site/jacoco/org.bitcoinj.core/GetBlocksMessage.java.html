@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>GetBlocksMessage.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">GetBlocksMessage.java</span></div><h1>GetBlocksMessage.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ * Copyright 2015 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * &lt;p&gt;Represents the &quot;getblocks&quot; P2P network message, which requests the hashes of the parts of the block chain we're
+ * missing. Those blocks can then be downloaded with a {@link GetDataMessage}.&lt;/p&gt;
+ * 
+ * &lt;p&gt;Instances of this class are not safe for use by multiple threads.&lt;/p&gt;
+ */
+public class GetBlocksMessage extends Message {
+
+    protected long version;
+    protected List&lt;Sha256Hash&gt; locator;
+    protected Sha256Hash stopHash;
+
+    public GetBlocksMessage(NetworkParameters params, List&lt;Sha256Hash&gt; locator, Sha256Hash stopHash) {
+<span class="fc" id="L38">        super(params);</span>
+<span class="fc" id="L39">        this.version = protocolVersion;</span>
+<span class="fc" id="L40">        this.locator = locator;</span>
+<span class="fc" id="L41">        this.stopHash = stopHash;</span>
+<span class="fc" id="L42">    }</span>
+
+    public GetBlocksMessage(NetworkParameters params, byte[] payload) throws ProtocolException {
+<span class="fc" id="L45">        super(params, payload, 0);</span>
+<span class="fc" id="L46">    }</span>
+
+    @Override
+    protected void parse() throws ProtocolException {
+<span class="fc" id="L50">        cursor = offset;</span>
+<span class="fc" id="L51">        version = readUint32();</span>
+<span class="fc" id="L52">        int startCount = (int) readVarInt();</span>
+<span class="pc bpc" id="L53" title="1 of 2 branches missed.">        if (startCount &gt; 500)</span>
+<span class="nc" id="L54">            throw new ProtocolException(&quot;Number of locators cannot be &gt; 500, received: &quot; + startCount);</span>
+<span class="fc" id="L55">        length = cursor - offset + ((startCount + 1) * 32);</span>
+<span class="fc" id="L56">        locator = new ArrayList&lt;&gt;(startCount);</span>
+<span class="fc bfc" id="L57" title="All 2 branches covered.">        for (int i = 0; i &lt; startCount; i++) {</span>
+<span class="fc" id="L58">            locator.add(readHash());</span>
+        }
+<span class="fc" id="L60">        stopHash = readHash();</span>
+<span class="fc" id="L61">    }</span>
+
+    public List&lt;Sha256Hash&gt; getLocator() {
+<span class="fc" id="L64">        return locator;</span>
+    }
+
+    public Sha256Hash getStopHash() {
+<span class="fc" id="L68">        return stopHash;</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="nc" id="L73">        return &quot;getblocks: &quot; + Utils.SPACE_JOINER.join(locator);</span>
+    }
+
+    @Override
+    protected void bitcoinSerializeToStream(OutputStream stream) throws IOException {
+        // Version, for some reason.
+<span class="fc" id="L79">        Utils.uint32ToByteStreamLE(params.getProtocolVersionNum(NetworkParameters.ProtocolVersion.CURRENT), stream);</span>
+        // Then a vector of block hashes. This is actually a &quot;block locator&quot;, a set of block
+        // identifiers that spans the entire chain with exponentially increasing gaps between
+        // them, until we end up at the genesis block. See CBlockLocator::Set()
+<span class="fc" id="L83">        stream.write(new VarInt(locator.size()).encode());</span>
+<span class="fc bfc" id="L84" title="All 2 branches covered.">        for (Sha256Hash hash : locator) {</span>
+            // Have to reverse as wire format is little endian.
+<span class="fc" id="L86">            stream.write(hash.getReversedBytes());</span>
+<span class="fc" id="L87">        }</span>
+        // Next, a block ID to stop at.
+<span class="fc" id="L89">        stream.write(stopHash.getReversedBytes());</span>
+<span class="fc" id="L90">    }</span>
+
+    @Override
+    public boolean equals(Object o) {
+<span class="nc bnc" id="L94" title="All 2 branches missed.">        if (this == o) return true;</span>
+<span class="nc bnc" id="L95" title="All 4 branches missed.">        if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="nc" id="L96">        GetBlocksMessage other = (GetBlocksMessage) o;</span>
+<span class="nc bnc" id="L97" title="All 4 branches missed.">        return version == other.version &amp;&amp; stopHash.equals(other.stopHash) &amp;&amp;</span>
+<span class="nc bnc" id="L98" title="All 4 branches missed.">            locator.size() == other.locator.size() &amp;&amp; locator.containsAll(other.locator); // ignores locator ordering</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L103">        int hashCode = (int)version ^ &quot;getblocks&quot;.hashCode() ^ stopHash.hashCode();</span>
+<span class="nc bnc" id="L104" title="All 2 branches missed.">        for (Sha256Hash aLocator : locator) hashCode ^= aLocator.hashCode(); // ignores locator ordering</span>
+<span class="nc" id="L105">        return hashCode;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

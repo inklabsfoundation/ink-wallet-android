@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>Address.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">Address.java</span></div><h1>Address.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ * Copyright 2014 Giannis Dzegoutanis
+ * Copyright 2015 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+
+import org.bitcoinj.params.Networks;
+import org.bitcoinj.script.Script;
+
+import javax.annotation.Nullable;
+
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
+
+/**
+ * &lt;p&gt;A Bitcoin address looks like 1MsScoe2fTJoq4ZPdQgqyhgWeoNamYPevy and is derived from an elliptic curve public key
+ * plus a set of network parameters. Not to be confused with a {@link PeerAddress} or {@link AddressMessage}
+ * which are about network (TCP) addresses.&lt;/p&gt;
+ *
+ * &lt;p&gt;A standard address is built by taking the RIPE-MD160 hash of the public key bytes, with a version prefix and a
+ * checksum suffix, then encoding it textually as base58. The version prefix is used to both denote the network for
+ * which the address is valid (see {@link NetworkParameters}, and also to indicate how the bytes inside the address
+ * should be interpreted. Whilst almost all addresses today are hashes of public keys, another (currently unsupported
+ * type) can contain a hash of a script instead.&lt;/p&gt;
+ */
+public class Address extends VersionedChecksummedBytes {
+    /**
+     * An address is a RIPEMD160 hash of a public key, therefore is always 160 bits or 20 bytes.
+     */
+    public static final int LENGTH = 20;
+
+    private transient NetworkParameters params;
+
+    /**
+     * Construct an address from parameters, the address version, and the hash160 form. Example:&lt;p&gt;
+     *
+     * &lt;pre&gt;new Address(MainNetParams.get(), NetworkParameters.getAddressHeader(), Hex.decode(&quot;4a22c3c4cbb31e4d03b15550636762bda0baf85a&quot;));&lt;/pre&gt;
+     */
+    public Address(NetworkParameters params, int version, byte[] hash160) throws WrongNetworkException {
+<span class="fc" id="L58">        super(version, hash160);</span>
+<span class="fc" id="L59">        checkNotNull(params);</span>
+<span class="pc bpc" id="L60" title="1 of 2 branches missed.">        checkArgument(hash160.length == 20, &quot;Addresses are 160-bit hashes, so you must provide 20 bytes&quot;);</span>
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">        if (!isAcceptableVersion(params, version))</span>
+<span class="nc" id="L62">            throw new WrongNetworkException(version, params.getAcceptableAddressCodes());</span>
+<span class="fc" id="L63">        this.params = params;</span>
+<span class="fc" id="L64">    }</span>
+
+    /** Returns an Address that represents the given P2SH script hash. */
+    public static Address fromP2SHHash(NetworkParameters params, byte[] hash160) {
+        try {
+<span class="fc" id="L69">            return new Address(params, params.getP2SHHeader(), hash160);</span>
+<span class="nc" id="L70">        } catch (WrongNetworkException e) {</span>
+<span class="nc" id="L71">            throw new RuntimeException(e);  // Cannot happen.</span>
+        }
+    }
+
+    /** Returns an Address that represents the script hash extracted from the given scriptPubKey */
+    public static Address fromP2SHScript(NetworkParameters params, Script scriptPubKey) {
+<span class="fc" id="L77">        checkArgument(scriptPubKey.isPayToScriptHash(), &quot;Not a P2SH script&quot;);</span>
+<span class="fc" id="L78">        return fromP2SHHash(params, scriptPubKey.getPubKeyHash());</span>
+    }
+
+    /**
+     * Construct an address from its Base58 representation.
+     * @param params
+     *            The expected NetworkParameters or null if you don't want validation.
+     * @param base58
+     *            The textual form of the address, such as &quot;17kzeh4N8g49GFvdDzSf8PjaPfyoD1MndL&quot;.
+     * @throws AddressFormatException
+     *             if the given base58 doesn't parse or the checksum is invalid
+     * @throws WrongNetworkException
+     *             if the given address is valid but for a different chain (eg testnet vs mainnet)
+     */
+    public static Address fromBase58(@Nullable NetworkParameters params, String base58) throws AddressFormatException {
+<span class="fc" id="L93">        return new Address(params, base58);</span>
+    }
+
+    /**
+     * Construct an address from parameters and the hash160 form. Example:&lt;p&gt;
+     *
+     * &lt;pre&gt;new Address(MainNetParams.get(), Hex.decode(&quot;4a22c3c4cbb31e4d03b15550636762bda0baf85a&quot;));&lt;/pre&gt;
+     */
+    public Address(NetworkParameters params, byte[] hash160) {
+<span class="fc" id="L102">        super(params.getAddressHeader(), hash160);</span>
+<span class="pc bpc" id="L103" title="1 of 2 branches missed.">        checkArgument(hash160.length == 20, &quot;Addresses are 160-bit hashes, so you must provide 20 bytes&quot;);</span>
+<span class="fc" id="L104">        this.params = params;</span>
+<span class="fc" id="L105">    }</span>
+
+    /** @deprecated Use {@link #fromBase58(NetworkParameters, String)} */
+    @Deprecated
+    public Address(@Nullable NetworkParameters params, String address) throws AddressFormatException {
+<span class="fc" id="L110">        super(address);</span>
+<span class="fc bfc" id="L111" title="All 2 branches covered.">        if (params != null) {</span>
+<span class="fc bfc" id="L112" title="All 2 branches covered.">            if (!isAcceptableVersion(params, version)) {</span>
+<span class="fc" id="L113">                throw new WrongNetworkException(version, params.getAcceptableAddressCodes());</span>
+            }
+<span class="fc" id="L115">            this.params = params;</span>
+        } else {
+<span class="fc" id="L117">            NetworkParameters paramsFound = null;</span>
+<span class="fc bfc" id="L118" title="All 2 branches covered.">            for (NetworkParameters p : Networks.get()) {</span>
+<span class="fc bfc" id="L119" title="All 2 branches covered.">                if (isAcceptableVersion(p, version)) {</span>
+<span class="fc" id="L120">                    paramsFound = p;</span>
+<span class="fc" id="L121">                    break;</span>
+                }
+<span class="fc" id="L123">            }</span>
+<span class="fc bfc" id="L124" title="All 2 branches covered.">            if (paramsFound == null)</span>
+<span class="fc" id="L125">                throw new AddressFormatException(&quot;No network found for &quot; + address);</span>
+
+<span class="fc" id="L127">            this.params = paramsFound;</span>
+        }
+<span class="fc" id="L129">    }</span>
+
+    /** The (big endian) 20 byte hash that is the core of a Bitcoin address. */
+    public byte[] getHash160() {
+<span class="fc" id="L133">        return bytes;</span>
+    }
+
+    /**
+     * Returns true if this address is a Pay-To-Script-Hash (P2SH) address.
+     * See also https://github.com/bitcoin/bips/blob/master/bip-0013.mediawiki: Address Format for pay-to-script-hash
+     */
+    public boolean isP2SHAddress() {
+<span class="fc" id="L141">        final NetworkParameters parameters = getParameters();</span>
+<span class="pc bpc" id="L142" title="1 of 4 branches missed.">        return parameters != null &amp;&amp; this.version == parameters.p2shHeader;</span>
+    }
+
+    /**
+     * Examines the version byte of the address and attempts to find a matching NetworkParameters. If you aren't sure
+     * which network the address is intended for (eg, it was provided by a user), you can use this to decide if it is
+     * compatible with the current wallet. You should be able to handle a null response from this method. Note that the
+     * parameters returned is not necessarily the same as the one the Address was created with.
+     *
+     * @return a NetworkParameters representing the network the address is intended for.
+     */
+    public NetworkParameters getParameters() {
+<span class="fc" id="L154">        return params;</span>
+    }
+
+    /**
+     * Given an address, examines the version byte and attempts to find a matching NetworkParameters. If you aren't sure
+     * which network the address is intended for (eg, it was provided by a user), you can use this to decide if it is
+     * compatible with the current wallet.
+     * @return a NetworkParameters of the address
+     * @throws AddressFormatException if the string wasn't of a known version
+     */
+    public static NetworkParameters getParametersFromAddress(String address) throws AddressFormatException {
+        try {
+<span class="fc" id="L166">            return Address.fromBase58(null, address).getParameters();</span>
+<span class="nc" id="L167">        } catch (WrongNetworkException e) {</span>
+<span class="nc" id="L168">            throw new RuntimeException(e);  // Cannot happen.</span>
+        }
+    }
+
+    /**
+     * Check if a given address version is valid given the NetworkParameters.
+     */
+    private static boolean isAcceptableVersion(NetworkParameters params, int version) {
+<span class="fc bfc" id="L176" title="All 2 branches covered.">        for (int v : params.getAcceptableAddressCodes()) {</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">            if (version == v) {</span>
+<span class="fc" id="L178">                return true;</span>
+            }
+        }
+<span class="fc" id="L181">        return false;</span>
+    }
+
+    /**
+     * This implementation narrows the return type to &lt;code&gt;Address&lt;/code&gt;.
+     */
+    @Override
+    public Address clone() throws CloneNotSupportedException {
+<span class="fc" id="L189">        return (Address) super.clone();</span>
+    }
+
+    // Java serialization
+
+    private void writeObject(ObjectOutputStream out) throws IOException {
+<span class="fc" id="L195">        out.defaultWriteObject();</span>
+<span class="fc" id="L196">        out.writeUTF(params.id);</span>
+<span class="fc" id="L197">    }</span>
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+<span class="fc" id="L200">        in.defaultReadObject();</span>
+<span class="fc" id="L201">        params = NetworkParameters.fromID(in.readUTF());</span>
+<span class="fc" id="L202">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

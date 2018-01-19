@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: org.bitcoinj.core.MemoryFullPrunedBlockChainTest
+-------------------------------------------------------------------------------
+Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.443 sec - in org.bitcoinj.core.MemoryFullPrunedBlockChainTest

@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>PostgresFullPrunedBlockStore.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.store</a> &gt; <span class="el_source">PostgresFullPrunedBlockStore.java</span></div><h1>PostgresFullPrunedBlockStore.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 BitPOS Pty Ltd.
+ * Copyright 2014 Andreas Schildbach
+ * Copyright 2014 Kalpesh Parmar
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.store;
+
+import org.bitcoinj.core.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * &lt;p&gt;A full pruned block store using the Postgres database engine. As an added bonus an address index is calculated,
+ * so you can use {@link #calculateBalanceForAddress(org.bitcoinj.core.Address)} to quickly look up
+ * the quantity of bitcoins controlled by that address.&lt;/p&gt;
+ */
+public class PostgresFullPrunedBlockStore extends DatabaseFullPrunedBlockStore {
+<span class="nc" id="L41">    private static final Logger log = LoggerFactory.getLogger(PostgresFullPrunedBlockStore.class);</span>
+
+    private static final String POSTGRES_DUPLICATE_KEY_ERROR_CODE = &quot;23505&quot;;
+    private static final String DATABASE_DRIVER_CLASS = &quot;org.postgresql.Driver&quot;;
+    private static final String DATABASE_CONNECTION_URL_PREFIX = &quot;jdbc:postgresql://&quot;;
+
+    // create table SQL
+    private static final String CREATE_SETTINGS_TABLE = &quot;CREATE TABLE settings (\n&quot; +
+            &quot;    name character varying(32) NOT NULL,\n&quot; +
+            &quot;    value bytea,\n&quot; +
+            &quot;    CONSTRAINT setting_pk PRIMARY KEY (name)\n&quot; +
+            &quot;)\n&quot;;
+
+    private static final String CREATE_HEADERS_TABLE = &quot;CREATE TABLE headers (\n&quot; +
+            &quot;    hash bytea NOT NULL,\n&quot; +
+            &quot;    chainwork bytea NOT NULL,\n&quot; +
+            &quot;    height integer NOT NULL,\n&quot; +
+            &quot;    header bytea NOT NULL,\n&quot; +
+            &quot;    wasundoable boolean NOT NULL,\n&quot; +
+            &quot;    CONSTRAINT headers_pk PRIMARY KEY (hash)\n&quot; +
+            &quot;)\n&quot;;
+
+    private static final String CREATE_UNDOABLE_TABLE = &quot;CREATE TABLE undoableblocks (\n&quot; +
+            &quot;    hash bytea NOT NULL,\n&quot; +
+            &quot;    height integer NOT NULL,\n&quot; +
+            &quot;    txoutchanges bytea,\n&quot; +
+            &quot;    transactions bytea,\n&quot; +
+            &quot;    CONSTRAINT undoableblocks_pk PRIMARY KEY (hash)\n&quot; +
+            &quot;)\n&quot;;
+
+    private static final String CREATE_OPEN_OUTPUT_TABLE = &quot;CREATE TABLE openoutputs (\n&quot; +
+            &quot;    hash bytea NOT NULL,\n&quot; +
+            &quot;    index integer NOT NULL,\n&quot; +
+            &quot;    height integer NOT NULL,\n&quot; +
+            &quot;    value bigint NOT NULL,\n&quot; +
+            &quot;    scriptbytes bytea NOT NULL,\n&quot; +
+            &quot;    toaddress character varying(35),\n&quot; +
+            &quot;    addresstargetable smallint,\n&quot; +
+            &quot;    coinbase boolean,\n&quot; +
+            &quot;    CONSTRAINT openoutputs_pk PRIMARY KEY (hash,index)\n&quot; +
+            &quot;)\n&quot;;
+
+    // Some indexes to speed up inserts
+    private static final String CREATE_OUTPUTS_ADDRESS_MULTI_INDEX      = &quot;CREATE INDEX openoutputs_hash_index_num_height_toaddress_idx ON openoutputs USING btree (hash, index, height, toaddress)&quot;;
+    private static final String CREATE_OUTPUTS_TOADDRESS_INDEX          = &quot;CREATE INDEX openoutputs_toaddress_idx ON openoutputs USING btree (toaddress)&quot;;
+    private static final String CREATE_OUTPUTS_ADDRESSTARGETABLE_INDEX  = &quot;CREATE INDEX openoutputs_addresstargetable_idx ON openoutputs USING btree (addresstargetable)&quot;;
+    private static final String CREATE_OUTPUTS_HASH_INDEX               = &quot;CREATE INDEX openoutputs_hash_idx ON openoutputs USING btree (hash)&quot;;
+    private static final String CREATE_UNDOABLE_TABLE_INDEX             = &quot;CREATE INDEX undoableblocks_height_idx ON undoableBlocks USING btree (height)&quot;;
+
+    private static final String SELECT_UNDOABLEBLOCKS_EXISTS_SQL        = &quot;select 1 from undoableblocks where hash = ?&quot;;
+
+    /**
+     * Creates a new PostgresFullPrunedBlockStore.
+     *
+     * @param params A copy of the NetworkParameters used
+     * @param fullStoreDepth The number of blocks of history stored in full (something like 1000 is pretty safe)
+     * @param hostname The hostname of the database to connect to
+     * @param dbName The database to connect to
+     * @param username The database username
+     * @param password The password to the database
+     * @throws BlockStoreException if the database fails to open for any reason
+     */
+    public PostgresFullPrunedBlockStore(NetworkParameters params, int fullStoreDepth, String hostname, String dbName,
+                                        String username, String password) throws BlockStoreException {
+<span class="nc" id="L105">        super(params, DATABASE_CONNECTION_URL_PREFIX + hostname + &quot;/&quot; + dbName, fullStoreDepth, username, password, null);</span>
+<span class="nc" id="L106">    }</span>
+
+    /**
+     * &lt;p&gt;Create a new PostgresFullPrunedBlockStore, storing the tables in the schema specified.  You may want to
+     * specify a schema to avoid name collisions, or just to keep the database better organized.  The schema is not
+     * required, and if one is not provided than the default schema for the username will be used.  See
+     * &lt;a href=&quot;http://www.postgres.org/docs/9.3/static/ddl-schemas.html&quot;&gt;the postgres schema docs&lt;/a&gt; for more on
+     * schemas.&lt;/p&gt;
+     *
+     * @param params A copy of the NetworkParameters used.
+     * @param fullStoreDepth The number of blocks of history stored in full (something like 1000 is pretty safe).
+     * @param hostname The hostname of the database to connect to.
+     * @param dbName The database to connect to.
+     * @param username The database username.
+     * @param password The password to the database.
+     * @param schemaName The name of the schema to put the tables in.  May be null if no schema is being used.
+     * @throws BlockStoreException If the database fails to open for any reason.
+     */
+    public PostgresFullPrunedBlockStore(NetworkParameters params, int fullStoreDepth, String hostname, String dbName,
+                                        String username, String password, @Nullable String schemaName) throws BlockStoreException {
+<span class="nc" id="L126">        super(params, DATABASE_CONNECTION_URL_PREFIX + hostname + &quot;/&quot; + dbName, fullStoreDepth, username, password, schemaName);</span>
+<span class="nc" id="L127">    }</span>
+
+    @Override
+    protected String getDuplicateKeyErrorCode() {
+<span class="nc" id="L131">        return POSTGRES_DUPLICATE_KEY_ERROR_CODE;</span>
+    }
+
+    @Override
+    protected List&lt;String&gt; getCreateTablesSQL() {
+<span class="nc" id="L136">        List&lt;String&gt; sqlStatements = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L137">        sqlStatements.add(CREATE_SETTINGS_TABLE);</span>
+<span class="nc" id="L138">        sqlStatements.add(CREATE_HEADERS_TABLE);</span>
+<span class="nc" id="L139">        sqlStatements.add(CREATE_UNDOABLE_TABLE);</span>
+<span class="nc" id="L140">        sqlStatements.add(CREATE_OPEN_OUTPUT_TABLE);</span>
+<span class="nc" id="L141">        return sqlStatements;</span>
+    }
+
+    @Override
+    protected List&lt;String&gt; getCreateIndexesSQL() {
+<span class="nc" id="L146">        List&lt;String&gt; sqlStatements = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L147">        sqlStatements.add(CREATE_UNDOABLE_TABLE_INDEX);</span>
+<span class="nc" id="L148">        sqlStatements.add(CREATE_OUTPUTS_ADDRESS_MULTI_INDEX);</span>
+<span class="nc" id="L149">        sqlStatements.add(CREATE_OUTPUTS_ADDRESSTARGETABLE_INDEX);</span>
+<span class="nc" id="L150">        sqlStatements.add(CREATE_OUTPUTS_HASH_INDEX);</span>
+<span class="nc" id="L151">        sqlStatements.add(CREATE_OUTPUTS_TOADDRESS_INDEX);</span>
+<span class="nc" id="L152">        return sqlStatements;</span>
+    }
+
+    @Override
+    protected List&lt;String&gt; getCreateSchemeSQL() {
+<span class="nc" id="L157">        List&lt;String&gt; sqlStatements = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L158">        sqlStatements.add(&quot;CREATE SCHEMA IF NOT EXISTS &quot; + schemaName);</span>
+<span class="nc" id="L159">        sqlStatements.add(&quot;set search_path to '&quot; + schemaName +&quot;'&quot;);</span>
+<span class="nc" id="L160">        return sqlStatements;</span>
+    }
+
+    @Override
+    protected String getDatabaseDriverClass() {
+<span class="nc" id="L165">        return DATABASE_DRIVER_CLASS;</span>
+    }
+
+    @Override
+    public void put(StoredBlock storedBlock, StoredUndoableBlock undoableBlock) throws BlockStoreException {
+<span class="nc" id="L170">        maybeConnect();</span>
+        // We skip the first 4 bytes because (on mainnet) the minimum target has 4 0-bytes
+<span class="nc" id="L172">        byte[] hashBytes = new byte[28];</span>
+<span class="nc" id="L173">        System.arraycopy(storedBlock.getHeader().getHash().getBytes(), 4, hashBytes, 0, 28);</span>
+<span class="nc" id="L174">        int height = storedBlock.getHeight();</span>
+<span class="nc" id="L175">        byte[] transactions = null;</span>
+<span class="nc" id="L176">        byte[] txOutChanges = null;</span>
+        try {
+<span class="nc" id="L178">            ByteArrayOutputStream bos = new ByteArrayOutputStream();</span>
+<span class="nc bnc" id="L179" title="All 2 branches missed.">            if (undoableBlock.getTxOutChanges() != null) {</span>
+<span class="nc" id="L180">                undoableBlock.getTxOutChanges().serializeToStream(bos);</span>
+<span class="nc" id="L181">                txOutChanges = bos.toByteArray();</span>
+            } else {
+<span class="nc" id="L183">                int numTxn = undoableBlock.getTransactions().size();</span>
+<span class="nc" id="L184">                bos.write(0xFF &amp; numTxn);</span>
+<span class="nc" id="L185">                bos.write(0xFF &amp; (numTxn &gt;&gt; 8));</span>
+<span class="nc" id="L186">                bos.write(0xFF &amp; (numTxn &gt;&gt; 16));</span>
+<span class="nc" id="L187">                bos.write(0xFF &amp; (numTxn &gt;&gt; 24));</span>
+<span class="nc bnc" id="L188" title="All 2 branches missed.">                for (Transaction tx : undoableBlock.getTransactions())</span>
+<span class="nc" id="L189">                    tx.bitcoinSerialize(bos);</span>
+<span class="nc" id="L190">                transactions = bos.toByteArray();</span>
+            }
+<span class="nc" id="L192">            bos.close();</span>
+<span class="nc" id="L193">        } catch (IOException e) {</span>
+<span class="nc" id="L194">            throw new BlockStoreException(e);</span>
+<span class="nc" id="L195">        }</span>
+
+
+        try {
+<span class="nc bnc" id="L199" title="All 2 branches missed.">            if (log.isDebugEnabled())</span>
+<span class="nc" id="L200">                log.debug(&quot;Looking for undoable block with hash: &quot; + Utils.HEX.encode(hashBytes));</span>
+
+<span class="nc" id="L202">            PreparedStatement findS = conn.get().prepareStatement(SELECT_UNDOABLEBLOCKS_EXISTS_SQL);</span>
+<span class="nc" id="L203">            findS.setBytes(1, hashBytes);</span>
+
+<span class="nc" id="L205">            ResultSet rs = findS.executeQuery();</span>
+<span class="nc bnc" id="L206" title="All 2 branches missed.">            if (rs.next())</span>
+            {
+                // We already have this output, update it.
+<span class="nc" id="L209">                findS.close();</span>
+
+                // Postgres insert-or-updates are very complex (and finnicky).  This level of transaction isolation
+                // seems to work for bitcoinj
+<span class="nc" id="L213">                PreparedStatement s =</span>
+<span class="nc" id="L214">                        conn.get().prepareStatement(getUpdateUndoableBlocksSQL());</span>
+<span class="nc" id="L215">                s.setBytes(3, hashBytes);</span>
+
+<span class="nc bnc" id="L217" title="All 2 branches missed.">                if (log.isDebugEnabled())</span>
+<span class="nc" id="L218">                    log.debug(&quot;Updating undoable block with hash: &quot; + Utils.HEX.encode(hashBytes));</span>
+
+<span class="nc bnc" id="L220" title="All 2 branches missed.">                if (transactions == null) {</span>
+<span class="nc" id="L221">                    s.setBytes(1, txOutChanges);</span>
+<span class="nc" id="L222">                    s.setNull(2, Types.BINARY);</span>
+                } else {
+<span class="nc" id="L224">                    s.setNull(1, Types.BINARY);</span>
+<span class="nc" id="L225">                    s.setBytes(2, transactions);</span>
+                }
+<span class="nc" id="L227">                s.executeUpdate();</span>
+<span class="nc" id="L228">                s.close();</span>
+
+<span class="nc" id="L230">                return;</span>
+            }
+
+<span class="nc" id="L233">            PreparedStatement s =</span>
+<span class="nc" id="L234">                    conn.get().prepareStatement(getInsertUndoableBlocksSQL());</span>
+<span class="nc" id="L235">            s.setBytes(1, hashBytes);</span>
+<span class="nc" id="L236">            s.setInt(2, height);</span>
+
+<span class="nc bnc" id="L238" title="All 2 branches missed.">            if (log.isDebugEnabled())</span>
+<span class="nc" id="L239">                log.debug(&quot;Inserting undoable block with hash: &quot; + Utils.HEX.encode(hashBytes)  + &quot; at height &quot; + height);</span>
+
+<span class="nc bnc" id="L241" title="All 2 branches missed.">            if (transactions == null) {</span>
+<span class="nc" id="L242">                s.setBytes(3, txOutChanges);</span>
+<span class="nc" id="L243">                s.setNull(4, Types.BINARY);</span>
+            } else {
+<span class="nc" id="L245">                s.setNull(3, Types.BINARY);</span>
+<span class="nc" id="L246">                s.setBytes(4, transactions);</span>
+            }
+<span class="nc" id="L248">            s.executeUpdate();</span>
+<span class="nc" id="L249">            s.close();</span>
+            try {
+<span class="nc" id="L251">                putUpdateStoredBlock(storedBlock, true);</span>
+<span class="nc" id="L252">            } catch (SQLException e) {</span>
+<span class="nc" id="L253">                throw new BlockStoreException(e);</span>
+<span class="nc" id="L254">            }</span>
+<span class="nc" id="L255">        } catch (SQLException e) {</span>
+<span class="nc bnc" id="L256" title="All 2 branches missed.">            if (!e.getSQLState().equals(POSTGRES_DUPLICATE_KEY_ERROR_CODE))</span>
+<span class="nc" id="L257">                throw new BlockStoreException(e);</span>
+<span class="nc" id="L258">        }</span>
+
+<span class="nc" id="L260">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

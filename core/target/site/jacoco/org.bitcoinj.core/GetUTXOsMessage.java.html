@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>GetUTXOsMessage.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">GetUTXOsMessage.java</span></div><h1>GetUTXOsMessage.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 the bitcoinj authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import com.google.common.base.Objects;
+import com.google.common.collect.ImmutableList;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.List;
+
+/**
+ * &lt;p&gt;This command is supported only by &lt;a href=&quot;http://github.com/bitcoinxt/bitcoinxt&quot;&gt;Bitcoin XT&lt;/a&gt; nodes, which
+ * advertise themselves using the second service bit flag. It requests a query of the UTXO set keyed by a set of
+ * outpoints (i.e. tx hash and output index). The result contains a bitmap of spentness flags, and the contents of
+ * the associated outputs if they were found. The results aren't authenticated by anything, so the peer could lie,
+ * or a man in the middle could swap out its answer for something else. Please consult
+ * &lt;a href=&quot;https://github.com/bitcoin/bips/blob/master/bip-0065.mediawiki&quot;&gt;BIP 65&lt;/a&gt; for more information on this
+ * message.&lt;/p&gt;
+ *
+ * &lt;p&gt;Note that this message does not let you query the UTXO set by address, script or any other criteria. The
+ * reason is that Bitcoin nodes don't calculate the necessary database indexes to answer such queries, to save
+ * space and time. If you want to look up unspent outputs by address, you can either query a block explorer site,
+ * or you can use the {@link FullPrunedBlockChain} class to build the required indexes yourself. Bear in that it will
+ * be quite slow and disk intensive to do that!&lt;/p&gt;
+ * 
+ * &lt;p&gt;Instances of this class are not safe for use by multiple threads.&lt;/p&gt;
+ */
+public class GetUTXOsMessage extends Message {
+    public static final int MIN_PROTOCOL_VERSION = 70002;
+    /** Bitmask of service flags required for a node to support this command (0x3) */
+    public static final long SERVICE_FLAGS_REQUIRED = 3;
+
+    private boolean includeMempool;
+    private ImmutableList&lt;TransactionOutPoint&gt; outPoints;
+
+    public GetUTXOsMessage(NetworkParameters params, List&lt;TransactionOutPoint&gt; outPoints, boolean includeMempool) {
+<span class="fc" id="L52">        super(params);</span>
+<span class="fc" id="L53">        this.outPoints = ImmutableList.copyOf(outPoints);</span>
+<span class="fc" id="L54">        this.includeMempool = includeMempool;</span>
+<span class="fc" id="L55">    }</span>
+
+    public GetUTXOsMessage(NetworkParameters params, byte[] payloadBytes) {
+<span class="fc" id="L58">        super(params, payloadBytes, 0);</span>
+<span class="fc" id="L59">    }</span>
+
+    @Override
+    protected void parse() throws ProtocolException {
+<span class="pc bpc" id="L63" title="1 of 2 branches missed.">        includeMempool = readBytes(1)[0] == 1;</span>
+<span class="fc" id="L64">        long numOutpoints = readVarInt();</span>
+<span class="fc" id="L65">        ImmutableList.Builder&lt;TransactionOutPoint&gt; list = ImmutableList.builder();</span>
+<span class="fc bfc" id="L66" title="All 2 branches covered.">        for (int i = 0; i &lt; numOutpoints; i++) {</span>
+<span class="fc" id="L67">            TransactionOutPoint outPoint = new TransactionOutPoint(params, payload, cursor);</span>
+<span class="fc" id="L68">            list.add(outPoint);</span>
+<span class="fc" id="L69">            cursor += outPoint.getMessageSize();</span>
+        }
+<span class="fc" id="L71">        outPoints = list.build();</span>
+<span class="fc" id="L72">        length = cursor;</span>
+<span class="fc" id="L73">    }</span>
+
+    public boolean getIncludeMempool() {
+<span class="nc" id="L76">        return includeMempool;</span>
+    }
+
+    public ImmutableList&lt;TransactionOutPoint&gt; getOutPoints() {
+<span class="fc" id="L80">        return outPoints;</span>
+    }
+
+    @Override
+    protected void bitcoinSerializeToStream(OutputStream stream) throws IOException {
+<span class="pc bpc" id="L85" title="1 of 2 branches missed.">        stream.write(new byte[]{includeMempool ? (byte) 1 : 0});  // include mempool.</span>
+<span class="fc" id="L86">        stream.write(new VarInt(outPoints.size()).encode());</span>
+<span class="fc bfc" id="L87" title="All 2 branches covered.">        for (TransactionOutPoint outPoint : outPoints) {</span>
+<span class="fc" id="L88">            outPoint.bitcoinSerializeToStream(stream);</span>
+<span class="fc" id="L89">        }</span>
+<span class="fc" id="L90">    }</span>
+
+    @Override
+    public boolean equals(Object o) {
+<span class="nc bnc" id="L94" title="All 2 branches missed.">        if (this == o) return true;</span>
+<span class="nc bnc" id="L95" title="All 4 branches missed.">        if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="nc" id="L96">        GetUTXOsMessage other = (GetUTXOsMessage) o;</span>
+<span class="nc bnc" id="L97" title="All 4 branches missed.">        return includeMempool == other.includeMempool &amp;&amp; outPoints.equals(other.outPoints);</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L102">        return Objects.hashCode(includeMempool, outPoints);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

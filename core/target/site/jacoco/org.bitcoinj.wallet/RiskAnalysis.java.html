@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>RiskAnalysis.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.wallet</a> &gt; <span class="el_source">RiskAnalysis.java</span></div><h1>RiskAnalysis.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.wallet;
+
+import org.bitcoinj.core.Transaction;
+
+import java.util.List;
+
+/**
+ * &lt;p&gt;A RiskAnalysis represents an analysis of how likely it is that a transaction (and its dependencies) represents a
+ * possible double spending attack. The wallet will create these to decide whether or not to accept a pending
+ * transaction. Look at {@link DefaultRiskAnalysis} to see what is currently considered risky.&lt;/p&gt;
+ *
+ * &lt;p&gt;The intention here is that implementing classes can expose more information and detail about the result, for
+ * app developers. The core code needs only to know whether it's OK or not.&lt;/p&gt;
+ *
+ * &lt;p&gt;A factory interface is provided. The wallet will use this to analyze new pending transactions.&lt;/p&gt;
+ */
+public interface RiskAnalysis {
+<span class="pc" id="L34">    enum Result {</span>
+<span class="fc" id="L35">        OK,</span>
+<span class="fc" id="L36">        NON_FINAL,</span>
+<span class="fc" id="L37">        NON_STANDARD</span>
+    }
+
+    Result analyze();
+
+    interface Analyzer {
+        RiskAnalysis create(Wallet wallet, Transaction tx, List&lt;Transaction&gt; dependencies);
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

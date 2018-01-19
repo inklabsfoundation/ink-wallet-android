@@ -1,0 +1,1430 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>DeterministicKeyChain.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.wallet</a> &gt; <span class="el_source">DeterministicKeyChain.java</span></div><h1>DeterministicKeyChain.java</h1><pre class="source lang-java linenums">/*
+ * Copyright by the original author or authors.
+ * 
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.wallet;
+
+import org.bitcoinj.core.BloomFilter;
+import org.bitcoinj.core.ECKey;
+import org.bitcoinj.core.NetworkParameters;
+import org.bitcoinj.core.Utils;
+import org.bitcoinj.crypto.*;
+import org.bitcoinj.script.Script;
+import org.bitcoinj.utils.Threading;
+import org.bitcoinj.wallet.listeners.KeyChainEventListener;
+
+import com.google.common.base.Stopwatch;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
+import com.google.protobuf.ByteString;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.spongycastle.crypto.params.KeyParameter;
+
+import javax.annotation.Nullable;
+import java.math.BigInteger;
+import java.security.SecureRandom;
+import java.util.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.locks.ReentrantLock;
+
+import static com.google.common.base.Preconditions.*;
+import static com.google.common.collect.Lists.newArrayList;
+import static com.google.common.collect.Lists.newLinkedList;
+
+/**
+ * &lt;p&gt;A deterministic key chain is a {@link KeyChain} that uses the
+ * &lt;a href=&quot;https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki&quot;&gt;BIP 32 standard&lt;/a&gt;, as implemented by
+ * {@link org.bitcoinj.crypto.DeterministicHierarchy}, to derive all the keys in the keychain from a master seed.
+ * This type of wallet is extremely convenient and flexible. Although backing up full wallet files is always a good
+ * idea, to recover money only the root seed needs to be preserved and that is a number small enough that it can be
+ * written down on paper or, when represented using a BIP 39 {@link org.bitcoinj.crypto.MnemonicCode},
+ * dictated over the phone (possibly even memorized).&lt;/p&gt;
+ *
+ * &lt;p&gt;Deterministic key chains have other advantages: parts of the key tree can be selectively revealed to allow
+ * for auditing, and new public keys can be generated without access to the private keys, yielding a highly secure
+ * configuration for web servers which can accept payments into a wallet but not spend from them. This does not work
+ * quite how you would expect due to a quirk of elliptic curve mathematics and the techniques used to deal with it.
+ * A watching wallet is not instantiated using the public part of the master key as you may imagine. Instead, you
+ * need to take the account key (first child of the master key) and provide the public part of that to the watching
+ * wallet instead. You can do this by calling {@link #getWatchingKey()} and then serializing it with
+ * {@link org.bitcoinj.crypto.DeterministicKey#serializePubB58(org.bitcoinj.core.NetworkParameters)}. The resulting &quot;xpub...&quot; string encodes
+ * sufficient information about the account key to create a watching chain via
+ * {@link org.bitcoinj.crypto.DeterministicKey#deserializeB58(org.bitcoinj.crypto.DeterministicKey, String, org.bitcoinj.core.NetworkParameters)}
+ * (with null as the first parameter) and then
+ * {@link DeterministicKeyChain#DeterministicKeyChain(org.bitcoinj.crypto.DeterministicKey)}.&lt;/p&gt;
+ *
+ * &lt;p&gt;This class builds on {@link org.bitcoinj.crypto.DeterministicHierarchy} and
+ * {@link org.bitcoinj.crypto.DeterministicKey} by adding support for serialization to and from protobufs,
+ * and encryption of parts of the key tree. Internally it arranges itself as per the BIP 32 spec, with the seed being
+ * used to derive a master key, which is then used to derive an account key, the account key is used to derive two
+ * child keys called the &lt;i&gt;internal&lt;/i&gt; and &lt;i&gt;external&lt;/i&gt; parent keys (for change and handing out addresses respectively)
+ * and finally the actual leaf keys that users use hanging off the end. The leaf keys are special in that they don't
+ * internally store the private part at all, instead choosing to rederive the private key from the parent when
+ * needed for signing. This simplifies the design for encrypted key chains.&lt;/p&gt;
+ *
+ * &lt;p&gt;The key chain manages a &lt;i&gt;lookahead zone&lt;/i&gt;. This zone is required because when scanning the chain, you don't
+ * know exactly which keys might receive payments. The user may have handed out several addresses and received payments
+ * on them, but for latency reasons the block chain is requested from remote peers in bulk, meaning you must
+ * &quot;look ahead&quot; when calculating keys to put in the Bloom filter. The default lookahead zone is 100 keys, meaning if
+ * the user hands out more than 100 addresses and receives payment on them before the chain is next scanned, some
+ * transactions might be missed. 100 is a reasonable choice for consumer wallets running on CPU constrained devices.
+ * For industrial wallets that are receiving keys all the time, a higher value is more appropriate. Ideally DKC and the
+ * wallet would know how to adjust this value automatically, but that's not implemented at the moment.&lt;/p&gt;
+ *
+ * &lt;p&gt;In fact the real size of the lookahead zone is larger than requested, by default, it's one third larger. This
+ * is because the act of deriving new keys means recalculating the Bloom filters and this is an expensive operation.
+ * Thus, to ensure we don't have to recalculate on every single new key/address requested or seen we add more buffer
+ * space and only extend the lookahead zone when that buffer is exhausted. For example with a lookahead zone of 100
+ * keys, you can request 33 keys before more keys will be calculated and the Bloom filter rebuilt and rebroadcast.
+ * But even when you are requesting the 33rd key, you will still be looking 100 keys ahead.
+ * &lt;/p&gt;
+ * 
+ * @author Andreas Schildbach
+ */
+@SuppressWarnings(&quot;PublicStaticCollectionField&quot;)
+public class DeterministicKeyChain implements EncryptableKeyChain {
+<span class="fc" id="L100">    private static final Logger log = LoggerFactory.getLogger(DeterministicKeyChain.class);</span>
+    public static final String DEFAULT_PASSPHRASE_FOR_MNEMONIC = &quot;&quot;;
+
+<span class="fc" id="L103">    protected final ReentrantLock lock = Threading.lock(&quot;DeterministicKeyChain&quot;);</span>
+
+    private DeterministicHierarchy hierarchy;
+    @Nullable private DeterministicKey rootKey;
+    @Nullable private DeterministicSeed seed;
+    @Nullable private ImmutableList&lt;ChildNumber&gt; accountPath;
+
+    // Paths through the key tree. External keys are ones that are communicated to other parties. Internal keys are
+    // keys created for change addresses, coinbases, mixing, etc - anything that isn't communicated. The distinction
+    // is somewhat arbitrary but can be useful for audits. The first number is the &quot;account number&quot; but we don't use
+    // that feature yet. In future we might hand out different accounts for cases where we wish to hand payers
+    // a payment request that can generate lots of addresses independently.
+    // The account path may be overridden by subclasses.
+<span class="fc" id="L116">    public static final ImmutableList&lt;ChildNumber&gt; ACCOUNT_ZERO_PATH = ImmutableList.of(ChildNumber.ZERO_HARDENED);</span>
+    // m / 44' / 0' / 0'
+<span class="fc" id="L118">    public static final ImmutableList&lt;ChildNumber&gt; BIP44_ACCOUNT_ZERO_PATH = ImmutableList.of(new ChildNumber(44, true),</span>
+            ChildNumber.ZERO_HARDENED, ChildNumber.ZERO_HARDENED);
+<span class="fc" id="L120">    public static final ImmutableList&lt;ChildNumber&gt; EXTERNAL_SUBPATH = ImmutableList.of(ChildNumber.ZERO);</span>
+<span class="fc" id="L121">    public static final ImmutableList&lt;ChildNumber&gt; INTERNAL_SUBPATH = ImmutableList.of(ChildNumber.ONE);</span>
+
+    // We try to ensure we have at least this many keys ready and waiting to be handed out via getKey().
+    // See docs for getLookaheadSize() for more info on what this is for. The -1 value means it hasn't been calculated
+    // yet. For new chains it's set to whatever the default is, unless overridden by setLookaheadSize. For deserialized
+    // chains, it will be calculated on demand from the number of loaded keys.
+    private static final int LAZY_CALCULATE_LOOKAHEAD = -1;
+<span class="fc" id="L128">    protected int lookaheadSize = 100;</span>
+    // The lookahead threshold causes us to batch up creation of new keys to minimize the frequency of Bloom filter
+    // regenerations, which are expensive and will (in future) trigger chain download stalls/retries. One third
+    // is an efficiency tradeoff.
+<span class="fc" id="L132">    protected int lookaheadThreshold = calcDefaultLookaheadThreshold();</span>
+
+    private int calcDefaultLookaheadThreshold() {
+<span class="fc" id="L135">        return lookaheadSize / 3;</span>
+    }
+
+    // The parent keys for external keys (handed out to other people) and internal keys (used for change addresses).
+    private DeterministicKey externalParentKey, internalParentKey;
+    // How many keys on each path have actually been used. This may be fewer than the number that have been deserialized
+    // or held in memory, because of the lookahead zone.
+    private int issuedExternalKeys, issuedInternalKeys;
+    // A counter that is incremented each time a key in the lookahead threshold zone is marked as used and lookahead
+    // is triggered. The Wallet/KCG reads these counters and combines them so it can tell the Peer whether to throw
+    // away the current block (and any future blocks in the same download batch) and restart chain sync once a new
+    // filter has been calculated. This field isn't persisted to the wallet as it's only relevant within a network
+    // session.
+    private int keyLookaheadEpoch;
+
+    // We simplify by wrapping a basic key chain and that way we get some functionality like key lookup and event
+    // listeners &quot;for free&quot;. All keys in the key tree appear here, even if they aren't meant to be used for receiving
+    // money.
+    private final BasicKeyChain basicKeyChain;
+
+    // If set this chain is following another chain in a married KeyChainGroup
+    private boolean isFollowing;
+
+    // holds a number of signatures required to spend. It's the N from N-of-M CHECKMULTISIG script for P2SH transactions
+    // and always 1 for other transaction types
+<span class="fc" id="L160">    protected int sigsRequiredToSpend = 1;</span>
+
+
+    public static class Builder&lt;T extends Builder&lt;T&gt;&gt; {
+        protected SecureRandom random;
+<span class="fc" id="L165">        protected int bits = 128;</span>
+        protected String passphrase;
+        protected long seedCreationTimeSecs;
+        protected byte[] entropy;
+        protected DeterministicSeed seed;
+        protected DeterministicKey watchingKey;
+
+<span class="fc" id="L172">        protected Builder() {</span>
+<span class="fc" id="L173">        }</span>
+
+        @SuppressWarnings(&quot;unchecked&quot;)
+        protected T self() {
+<span class="fc" id="L177">            return (T)this;</span>
+        }
+
+        /**
+         * Creates a deterministic key chain starting from the given entropy. All keys yielded by this chain will be the same
+         * if the starting entropy is the same. You should provide the creation time in seconds since the UNIX epoch for the
+         * seed: this lets us know from what part of the chain we can expect to see derived keys appear.
+         */
+        public T entropy(byte[] entropy) {
+<span class="nc" id="L186">            this.entropy = entropy;</span>
+<span class="nc" id="L187">            return self();</span>
+        }
+
+        /**
+         * Creates a deterministic key chain starting from the given seed. All keys yielded by this chain will be the same
+         * if the starting seed is the same.
+         */
+        public T seed(DeterministicSeed seed) {
+<span class="fc" id="L195">            this.seed = seed;</span>
+<span class="fc" id="L196">            return self();</span>
+        }
+
+        /**
+         * Generates a new key chain with entropy selected randomly from the given {@link java.security.SecureRandom}
+         * object and of the requested size in bits.  The derived seed is further protected with a user selected passphrase
+         * (see BIP 39).
+         * @param random the random number generator - use new SecureRandom().
+         * @param bits The number of bits of entropy to use when generating entropy.  Either 128 (default), 192 or 256.
+         */
+        public T random(SecureRandom random, int bits) {
+<span class="nc" id="L207">            this.random = random;</span>
+<span class="nc" id="L208">            this.bits = bits;</span>
+<span class="nc" id="L209">            return self();</span>
+        }
+
+        /**
+         * Generates a new key chain with 128 bits of entropy selected randomly from the given {@link java.security.SecureRandom}
+         * object.  The derived seed is further protected with a user selected passphrase
+         * (see BIP 39).
+         * @param random the random number generator - use new SecureRandom().
+         */
+        public T random(SecureRandom random) {
+<span class="fc" id="L219">            this.random = random;</span>
+<span class="fc" id="L220">            return self();</span>
+        }
+
+        public T watchingKey(DeterministicKey watchingKey) {
+<span class="nc" id="L224">            this.watchingKey = watchingKey;</span>
+<span class="nc" id="L225">            return self();</span>
+        }
+
+        public T seedCreationTimeSecs(long seedCreationTimeSecs) {
+<span class="nc" id="L229">            this.seedCreationTimeSecs = seedCreationTimeSecs;</span>
+<span class="nc" id="L230">            return self();</span>
+        }
+
+        /** The passphrase to use with the generated mnemonic, or null if you would like to use the default empty string. Currently must be the empty string. */
+        public T passphrase(String passphrase) {
+            // FIXME support non-empty passphrase
+<span class="nc" id="L236">            this.passphrase = passphrase;</span>
+<span class="nc" id="L237">            return self();</span>
+        }
+
+        public DeterministicKeyChain build() {
+<span class="nc bnc" id="L241" title="All 8 branches missed.">            checkState(random != null || entropy != null || seed != null || watchingKey!= null, &quot;Must provide either entropy or random or seed or watchingKey&quot;);</span>
+<span class="nc bnc" id="L242" title="All 4 branches missed.">            checkState(passphrase == null || seed == null, &quot;Passphrase must not be specified with seed&quot;);</span>
+            DeterministicKeyChain chain;
+
+<span class="nc bnc" id="L245" title="All 2 branches missed.">            if (random != null) {</span>
+                // Default passphrase to &quot;&quot; if not specified
+<span class="nc" id="L247">                chain = new DeterministicKeyChain(random, bits, getPassphrase(), seedCreationTimeSecs);</span>
+<span class="nc bnc" id="L248" title="All 2 branches missed.">            } else if (entropy != null) {</span>
+<span class="nc" id="L249">                chain = new DeterministicKeyChain(entropy, getPassphrase(), seedCreationTimeSecs);</span>
+<span class="nc bnc" id="L250" title="All 2 branches missed.">            } else if (seed != null) {</span>
+<span class="nc" id="L251">                seed.setCreationTimeSeconds(seedCreationTimeSecs);</span>
+<span class="nc" id="L252">                chain = new DeterministicKeyChain(seed);</span>
+            } else {
+<span class="nc" id="L254">                watchingKey.setCreationTimeSeconds(seedCreationTimeSecs);</span>
+<span class="nc" id="L255">                chain = new DeterministicKeyChain(watchingKey);</span>
+            }
+
+<span class="nc" id="L258">            return chain;</span>
+        }
+
+        protected String getPassphrase() {
+<span class="pc bpc" id="L262" title="1 of 2 branches missed.">            return passphrase != null ? passphrase : DEFAULT_PASSPHRASE_FOR_MNEMONIC;</span>
+        }
+    }
+
+    public static Builder&lt;?&gt; builder() {
+<span class="nc" id="L267">        return new Builder();</span>
+    }
+
+    /**
+     * Generates a new key chain with entropy selected randomly from the given {@link java.security.SecureRandom}
+     * object and the default entropy size.
+     */
+    public DeterministicKeyChain(SecureRandom random) {
+<span class="fc" id="L275">        this(random, DeterministicSeed.DEFAULT_SEED_ENTROPY_BITS, DEFAULT_PASSPHRASE_FOR_MNEMONIC, Utils.currentTimeSeconds());</span>
+<span class="fc" id="L276">    }</span>
+
+    /**
+     * Generates a new key chain with entropy selected randomly from the given {@link java.security.SecureRandom}
+     * object and of the requested size in bits.
+     */
+    public DeterministicKeyChain(SecureRandom random, int bits) {
+<span class="fc" id="L283">        this(random, bits, DEFAULT_PASSPHRASE_FOR_MNEMONIC, Utils.currentTimeSeconds());</span>
+<span class="fc" id="L284">    }</span>
+
+    /**
+     * Generates a new key chain with entropy selected randomly from the given {@link java.security.SecureRandom}
+     * object and of the requested size in bits.  The derived seed is further protected with a user selected passphrase
+     * (see BIP 39).
+     */
+    public DeterministicKeyChain(SecureRandom random, int bits, String passphrase, long seedCreationTimeSecs) {
+<span class="fc" id="L292">        this(new DeterministicSeed(random, bits, passphrase, seedCreationTimeSecs));</span>
+<span class="fc" id="L293">    }</span>
+
+    /**
+     * Creates a deterministic key chain starting from the given entropy. All keys yielded by this chain will be the same
+     * if the starting seed is the same. You should provide the creation time in seconds since the UNIX epoch for the
+     * seed: this lets us know from what part of the chain we can expect to see derived keys appear.
+     */
+    public DeterministicKeyChain(byte[] entropy, String passphrase, long seedCreationTimeSecs) {
+<span class="fc" id="L301">        this(new DeterministicSeed(entropy, passphrase, seedCreationTimeSecs));</span>
+<span class="fc" id="L302">    }</span>
+
+    /**
+     * Creates a deterministic key chain starting from the given seed. All keys yielded by this chain will be the same
+     * if the starting seed is the same.
+     */
+    protected DeterministicKeyChain(DeterministicSeed seed) {
+<span class="fc" id="L309">        this(seed, null, ACCOUNT_ZERO_PATH);</span>
+<span class="fc" id="L310">    }</span>
+
+    /**
+     * Creates a deterministic key chain starting from the given seed. This deterministic Key chain
+     * will follow the account path defined.
+     */
+    public DeterministicKeyChain(DeterministicSeed seed, ImmutableList&lt;ChildNumber&gt; accountPath) {
+<span class="fc" id="L317">        this(seed, null, accountPath);</span>
+<span class="fc" id="L318">    }</span>
+
+    /**
+     * Creates a deterministic key chain that watches the given (public only) root key. You can use this to calculate
+     * balances and generally follow along, but spending is not possible with such a chain.
+     */
+    public DeterministicKeyChain(DeterministicKey watchingKey) {
+<span class="nc" id="L325">        this(watchingKey, ACCOUNT_ZERO_PATH);</span>
+<span class="nc" id="L326">    }</span>
+
+    /**
+     * Creates a deterministic key chain that watches the given (public only) root key. You can use this to calculate
+     * balances and generally follow along, but spending is not possible with such a chain.
+     */
+<span class="fc" id="L332">    public DeterministicKeyChain(DeterministicKey watchingKey, ImmutableList&lt;ChildNumber&gt; accountPath) {</span>
+<span class="fc" id="L333">        checkArgument(watchingKey.isPubKeyOnly(), &quot;Private subtrees not currently supported: if you got this key from DKC.getWatchingKey() then use .dropPrivate().dropParent() on it first.&quot;);</span>
+<span class="pc bpc" id="L334" title="1 of 2 branches missed.">        checkArgument(watchingKey.getPath().size() == accountPath.size(), &quot;You can only watch an account key currently&quot;);</span>
+<span class="fc" id="L335">        setAccountPath(accountPath);</span>
+<span class="fc" id="L336">        basicKeyChain = new BasicKeyChain();</span>
+<span class="fc" id="L337">        this.seed = null;</span>
+<span class="fc" id="L338">        this.rootKey = null;</span>
+<span class="fc" id="L339">        basicKeyChain.importKey(watchingKey);</span>
+<span class="fc" id="L340">        hierarchy = new DeterministicHierarchy(watchingKey);</span>
+<span class="fc" id="L341">        initializeHierarchyUnencrypted(watchingKey);</span>
+<span class="fc" id="L342">    }</span>
+
+    /**
+     * &lt;p&gt;Creates a deterministic key chain with the given watch key. If &lt;code&gt;isFollowing&lt;/code&gt; flag is set then this keychain follows
+     * some other keychain. In a married wallet following keychain represents &quot;spouse's&quot; keychain.&lt;/p&gt;
+     * &lt;p&gt;Watch key has to be an account key.&lt;/p&gt;
+     */
+    protected DeterministicKeyChain(DeterministicKey watchKey, boolean isFollowing) {
+<span class="fc" id="L350">        this(watchKey, isFollowing, ACCOUNT_ZERO_PATH);</span>
+<span class="fc" id="L351">    }</span>
+
+    /**
+     * &lt;p&gt;Creates a deterministic key chain with the given watch key. If &lt;code&gt;isFollowing&lt;/code&gt; flag is set then this keychain follows
+     * some other keychain. In a married wallet following keychain represents &quot;spouse's&quot; keychain.&lt;/p&gt;
+     * &lt;p&gt;Watch key has to be an account key.&lt;/p&gt;
+     */
+    protected DeterministicKeyChain(DeterministicKey watchKey, boolean isFollowing,
+            ImmutableList&lt;ChildNumber&gt; accountPath) {
+<span class="fc" id="L360">        this(watchKey, accountPath);</span>
+<span class="fc" id="L361">        this.isFollowing = isFollowing;</span>
+<span class="fc" id="L362">    }</span>
+
+    /**
+     * Creates a deterministic key chain with the given watch key and that follows some other keychain. In a married
+     * wallet following keychain represents &quot;spouse&quot;
+     * Watch key has to be an account key.
+     */
+    public static DeterministicKeyChain watchAndFollow(DeterministicKey watchKey) {
+<span class="fc" id="L370">        return new DeterministicKeyChain(watchKey, true);</span>
+    }
+
+    /**
+     * Creates a key chain that watches the given account key.
+     */
+    public static DeterministicKeyChain watch(DeterministicKey accountKey) {
+<span class="fc" id="L377">        return watch(accountKey, ACCOUNT_ZERO_PATH);</span>
+    }
+
+    /**
+     * Creates a key chain that watches the given account key.
+     */
+    public static DeterministicKeyChain watch(DeterministicKey accountKey, ImmutableList&lt;ChildNumber&gt; accountPath) {
+<span class="fc" id="L384">        return new DeterministicKeyChain(accountKey, accountPath);</span>
+    }
+
+    /**
+     * For use in {@link KeyChainFactory} during deserialization.
+     */
+    protected DeterministicKeyChain(DeterministicSeed seed, @Nullable KeyCrypter crypter) {
+<span class="fc" id="L391">        this(seed, crypter, ACCOUNT_ZERO_PATH);</span>
+<span class="fc" id="L392">    }</span>
+
+    /**
+     * Creates a deterministic key chain with an encrypted deterministic seed using the provided account path.
+     *  Using {@link org.bitcoinj.crypto.KeyCrypter KeyCrypter} to decrypt.
+     */
+    protected DeterministicKeyChain(DeterministicSeed seed, @Nullable KeyCrypter crypter,
+<span class="fc" id="L399">                                    ImmutableList&lt;ChildNumber&gt; accountPath) {</span>
+<span class="fc" id="L400">        setAccountPath(accountPath);</span>
+<span class="fc" id="L401">        this.seed = seed;</span>
+<span class="fc" id="L402">        basicKeyChain = new BasicKeyChain(crypter);</span>
+<span class="fc bfc" id="L403" title="All 2 branches covered.">        if (!seed.isEncrypted()) {</span>
+<span class="fc" id="L404">            rootKey = HDKeyDerivation.createMasterPrivateKey(checkNotNull(seed.getSeedBytes()));</span>
+<span class="fc" id="L405">            rootKey.setCreationTimeSeconds(seed.getCreationTimeSeconds());</span>
+<span class="fc" id="L406">            basicKeyChain.importKey(rootKey);</span>
+<span class="fc" id="L407">            hierarchy = new DeterministicHierarchy(rootKey);</span>
+<span class="fc bfc" id="L408" title="All 2 branches covered.">            for (int i = 1; i &lt;= getAccountPath().size(); i++) {</span>
+<span class="fc" id="L409">                basicKeyChain.importKey(hierarchy.get(getAccountPath().subList(0, i), false, true));</span>
+            }
+<span class="fc" id="L411">            initializeHierarchyUnencrypted(rootKey);</span>
+        }
+        // Else...
+        // We can't initialize ourselves with just an encrypted seed, so we expected deserialization code to do the
+        // rest of the setup (loading the root key).
+<span class="fc" id="L416">    }</span>
+
+    /**
+     * For use in encryption when {@link #toEncrypted(KeyCrypter, KeyParameter)} is called, so that
+     * subclasses can override that method and create an instance of the right class.
+     *
+     * See also {@link #makeKeyChainFromSeed(DeterministicSeed)}
+     */
+<span class="fc" id="L424">    protected DeterministicKeyChain(KeyCrypter crypter, KeyParameter aesKey, DeterministicKeyChain chain) {</span>
+        // Can't encrypt a watching chain.
+<span class="fc" id="L426">        checkNotNull(chain.rootKey);</span>
+<span class="fc" id="L427">        checkNotNull(chain.seed);</span>
+
+<span class="pc bpc" id="L429" title="1 of 2 branches missed.">        checkArgument(!chain.rootKey.isEncrypted(), &quot;Chain already encrypted&quot;);</span>
+
+<span class="fc" id="L431">        this.issuedExternalKeys = chain.issuedExternalKeys;</span>
+<span class="fc" id="L432">        this.issuedInternalKeys = chain.issuedInternalKeys;</span>
+
+<span class="fc" id="L434">        this.lookaheadSize = chain.lookaheadSize;</span>
+<span class="fc" id="L435">        this.lookaheadThreshold = chain.lookaheadThreshold;</span>
+
+<span class="fc" id="L437">        this.seed = chain.seed.encrypt(crypter, aesKey);</span>
+<span class="fc" id="L438">        basicKeyChain = new BasicKeyChain(crypter);</span>
+        // The first number is the &quot;account number&quot; but we don't use that feature.
+<span class="fc" id="L440">        rootKey = chain.rootKey.encrypt(crypter, aesKey, null);</span>
+<span class="fc" id="L441">        hierarchy = new DeterministicHierarchy(rootKey);</span>
+<span class="fc" id="L442">        basicKeyChain.importKey(rootKey);</span>
+
+<span class="pc bpc" id="L444" title="1 of 2 branches missed.">        for (int i = 1; i &lt; getAccountPath().size(); i++) {</span>
+<span class="nc" id="L445">            encryptNonLeaf(aesKey, chain, rootKey, getAccountPath().subList(0, i));</span>
+        }
+<span class="fc" id="L447">        DeterministicKey account = encryptNonLeaf(aesKey, chain, rootKey, getAccountPath());</span>
+<span class="fc" id="L448">        externalParentKey = encryptNonLeaf(aesKey, chain, account, HDUtils.concat(getAccountPath(), EXTERNAL_SUBPATH));</span>
+<span class="fc" id="L449">        internalParentKey = encryptNonLeaf(aesKey, chain, account, HDUtils.concat(getAccountPath(), INTERNAL_SUBPATH));</span>
+
+        // Now copy the (pubkey only) leaf keys across to avoid rederiving them. The private key bytes are missing
+        // anyway so there's nothing to encrypt.
+<span class="fc bfc" id="L453" title="All 2 branches covered.">        for (ECKey eckey : chain.basicKeyChain.getKeys()) {</span>
+<span class="fc" id="L454">            DeterministicKey key = (DeterministicKey) eckey;</span>
+<span class="fc bfc" id="L455" title="All 2 branches covered.">            if (key.getPath().size() != getAccountPath().size() + 2) continue; // Not a leaf key.</span>
+<span class="fc" id="L456">            DeterministicKey parent = hierarchy.get(checkNotNull(key.getParent()).getPath(), false, false);</span>
+            // Clone the key to the new encrypted hierarchy.
+<span class="fc" id="L458">            key = new DeterministicKey(key.dropPrivateBytes(), parent);</span>
+<span class="fc" id="L459">            hierarchy.putKey(key);</span>
+<span class="fc" id="L460">            basicKeyChain.importKey(key);</span>
+<span class="fc" id="L461">        }</span>
+<span class="fc" id="L462">    }</span>
+
+    /** Override in subclasses to use a different account derivation path */
+    protected ImmutableList&lt;ChildNumber&gt; getAccountPath() {
+<span class="fc bfc" id="L466" title="All 2 branches covered.">        if (accountPath != null)</span>
+<span class="fc" id="L467">            return accountPath;</span>
+<span class="fc" id="L468">        return ACCOUNT_ZERO_PATH;</span>
+    }
+
+    /** Store account path of this DeterministicKey */
+    protected void setAccountPath(ImmutableList&lt;ChildNumber&gt; accountPath) {
+<span class="fc" id="L473">        this.accountPath = accountPath;</span>
+<span class="fc" id="L474">    }</span>
+
+    private DeterministicKey encryptNonLeaf(KeyParameter aesKey, DeterministicKeyChain chain,
+                                            DeterministicKey parent, ImmutableList&lt;ChildNumber&gt; path) {
+<span class="fc" id="L478">        DeterministicKey key = chain.hierarchy.get(path, false, false);</span>
+<span class="fc" id="L479">        key = key.encrypt(checkNotNull(basicKeyChain.getKeyCrypter()), aesKey, parent);</span>
+<span class="fc" id="L480">        hierarchy.putKey(key);</span>
+<span class="fc" id="L481">        basicKeyChain.importKey(key);</span>
+<span class="fc" id="L482">        return key;</span>
+    }
+
+    // Derives the account path keys and inserts them into the basic key chain. This is important to preserve their
+    // order for serialization, amongst other things.
+    private void initializeHierarchyUnencrypted(DeterministicKey baseKey) {
+<span class="fc" id="L488">        externalParentKey = hierarchy.deriveChild(getAccountPath(), false, false, ChildNumber.ZERO);</span>
+<span class="fc" id="L489">        internalParentKey = hierarchy.deriveChild(getAccountPath(), false, false, ChildNumber.ONE);</span>
+<span class="fc" id="L490">        basicKeyChain.importKey(externalParentKey);</span>
+<span class="fc" id="L491">        basicKeyChain.importKey(internalParentKey);</span>
+<span class="fc" id="L492">    }</span>
+
+    /** Returns a freshly derived key that has not been returned by this method before. */
+    @Override
+    public DeterministicKey getKey(KeyPurpose purpose) {
+<span class="fc" id="L497">        return getKeys(purpose, 1).get(0);</span>
+    }
+
+    /** Returns freshly derived key/s that have not been returned by this method before. */
+    @Override
+    public List&lt;DeterministicKey&gt; getKeys(KeyPurpose purpose, int numberOfKeys) {
+<span class="pc bpc" id="L503" title="1 of 2 branches missed.">        checkArgument(numberOfKeys &gt; 0);</span>
+<span class="fc" id="L504">        lock.lock();</span>
+        try {
+            DeterministicKey parentKey;
+            int index;
+<span class="pc bpc" id="L508" title="1 of 3 branches missed.">            switch (purpose) {</span>
+                // Map both REFUND and RECEIVE_KEYS to the same branch for now. Refunds are a feature of the BIP 70
+                // payment protocol. Later we may wish to map it to a different branch (in a new wallet version?).
+                // This would allow a watching wallet to only be able to see inbound payments, but not change
+                // (i.e. spends) or refunds. Might be useful for auditing ...
+                case RECEIVE_FUNDS:
+                case REFUND:
+<span class="fc" id="L515">                    issuedExternalKeys += numberOfKeys;</span>
+<span class="fc" id="L516">                    index = issuedExternalKeys;</span>
+<span class="fc" id="L517">                    parentKey = externalParentKey;</span>
+<span class="fc" id="L518">                    break;</span>
+                case AUTHENTICATION:
+                case CHANGE:
+<span class="fc" id="L521">                    issuedInternalKeys += numberOfKeys;</span>
+<span class="fc" id="L522">                    index = issuedInternalKeys;</span>
+<span class="fc" id="L523">                    parentKey = internalParentKey;</span>
+<span class="fc" id="L524">                    break;</span>
+                default:
+<span class="nc" id="L526">                    throw new UnsupportedOperationException();</span>
+            }
+            // Optimization: potentially do a very quick key generation for just the number of keys we need if we
+            // didn't already create them, ignoring the configured lookahead size. This ensures we'll be able to
+            // retrieve the keys in the following loop, but if we're totally fresh and didn't get a chance to
+            // calculate the lookahead keys yet, this will not block waiting to calculate 100+ EC point multiplies.
+            // On slow/crappy Android phones looking ahead 100 keys can take ~5 seconds but the OS will kill us
+            // if we block for just one second on the UI thread. Because UI threads may need an address in order
+            // to render the screen, we need getKeys to be fast even if the wallet is totally brand new and lookahead
+            // didn't happen yet.
+            //
+            // It's safe to do this because when a network thread tries to calculate a Bloom filter, we'll go ahead
+            // and calculate the full lookahead zone there, so network requests will always use the right amount.
+<span class="fc" id="L539">            List&lt;DeterministicKey&gt; lookahead = maybeLookAhead(parentKey, index, 0, 0);</span>
+<span class="fc" id="L540">            basicKeyChain.importKeys(lookahead);</span>
+<span class="fc" id="L541">            List&lt;DeterministicKey&gt; keys = new ArrayList&lt;&gt;(numberOfKeys);</span>
+<span class="fc bfc" id="L542" title="All 2 branches covered.">            for (int i = 0; i &lt; numberOfKeys; i++) {</span>
+<span class="fc" id="L543">                ImmutableList&lt;ChildNumber&gt; path = HDUtils.append(parentKey.getPath(), new ChildNumber(index - numberOfKeys + i, false));</span>
+<span class="fc" id="L544">                DeterministicKey k = hierarchy.get(path, false, false);</span>
+                // Just a last minute sanity check before we hand the key out to the app for usage. This isn't inspired
+                // by any real problem reports from bitcoinj users, but I've heard of cases via the grapevine of
+                // places that lost money due to bitflips causing addresses to not match keys. Of course in an
+                // environment with flaky RAM there's no real way to always win: bitflips could be introduced at any
+                // other layer. But as we're potentially retrieving from long term storage here, check anyway.
+<span class="fc" id="L550">                checkForBitFlip(k);</span>
+<span class="fc" id="L551">                keys.add(k);</span>
+            }
+<span class="fc" id="L553">            return keys;</span>
+        } finally {
+<span class="pc" id="L555">            lock.unlock();</span>
+        }
+    }
+
+    private void checkForBitFlip(DeterministicKey k) {
+<span class="fc" id="L560">        DeterministicKey parent = checkNotNull(k.getParent());</span>
+<span class="fc" id="L561">        byte[] rederived = HDKeyDerivation.deriveChildKeyBytesFromPublic(parent, k.getChildNumber(), HDKeyDerivation.PublicDeriveMode.WITH_INVERSION).keyBytes;</span>
+<span class="fc" id="L562">        byte[] actual = k.getPubKey();</span>
+<span class="pc bpc" id="L563" title="1 of 2 branches missed.">        if (!Arrays.equals(rederived, actual))</span>
+<span class="nc" id="L564">            throw new IllegalStateException(String.format(Locale.US, &quot;Bit-flip check failed: %s vs %s&quot;, Arrays.toString(rederived), Arrays.toString(actual)));</span>
+<span class="fc" id="L565">    }</span>
+
+    /**
+     * Mark the DeterministicKey as used.
+     * Also correct the issued{Internal|External}Keys counter, because all lower children seem to be requested already.
+     * If the counter was updated, we also might trigger lookahead.
+     */
+    public DeterministicKey markKeyAsUsed(DeterministicKey k) {
+<span class="fc" id="L573">        int numChildren = k.getChildNumber().i() + 1;</span>
+
+<span class="fc bfc" id="L575" title="All 2 branches covered.">        if (k.getParent() == internalParentKey) {</span>
+<span class="pc bpc" id="L576" title="1 of 2 branches missed.">            if (issuedInternalKeys &lt; numChildren) {</span>
+<span class="nc" id="L577">                issuedInternalKeys = numChildren;</span>
+<span class="nc" id="L578">                maybeLookAhead();</span>
+            }
+<span class="fc bfc" id="L580" title="All 2 branches covered.">        } else if (k.getParent() == externalParentKey) {</span>
+<span class="fc bfc" id="L581" title="All 2 branches covered.">            if (issuedExternalKeys &lt; numChildren) {</span>
+<span class="fc" id="L582">                issuedExternalKeys = numChildren;</span>
+<span class="fc" id="L583">                maybeLookAhead();</span>
+            }
+        }
+<span class="fc" id="L586">        return k;</span>
+    }
+
+    public DeterministicKey findKeyFromPubHash(byte[] pubkeyHash) {
+<span class="fc" id="L590">        lock.lock();</span>
+        try {
+<span class="fc" id="L592">            return (DeterministicKey) basicKeyChain.findKeyFromPubHash(pubkeyHash);</span>
+        } finally {
+<span class="pc" id="L594">            lock.unlock();</span>
+        }
+    }
+
+    public DeterministicKey findKeyFromPubKey(byte[] pubkey) {
+<span class="fc" id="L599">        lock.lock();</span>
+        try {
+<span class="fc" id="L601">            return (DeterministicKey) basicKeyChain.findKeyFromPubKey(pubkey);</span>
+        } finally {
+<span class="pc" id="L603">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Mark the DeterministicKeys as used, if they match the pubkeyHash
+     * See {@link DeterministicKeyChain#markKeyAsUsed(DeterministicKey)} for more info on this.
+     */
+    @Nullable
+    public DeterministicKey markPubHashAsUsed(byte[] pubkeyHash) {
+<span class="fc" id="L613">        lock.lock();</span>
+        try {
+<span class="fc" id="L615">            DeterministicKey k = (DeterministicKey) basicKeyChain.findKeyFromPubHash(pubkeyHash);</span>
+<span class="fc bfc" id="L616" title="All 2 branches covered.">            if (k != null)</span>
+<span class="fc" id="L617">                markKeyAsUsed(k);</span>
+<span class="fc" id="L618">            return k;</span>
+        } finally {
+<span class="pc" id="L620">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Mark the DeterministicKeys as used, if they match the pubkey
+     * See {@link DeterministicKeyChain#markKeyAsUsed(DeterministicKey)} for more info on this.
+     */
+    @Nullable
+    public DeterministicKey markPubKeyAsUsed(byte[] pubkey) {
+<span class="fc" id="L630">        lock.lock();</span>
+        try {
+<span class="fc" id="L632">            DeterministicKey k = (DeterministicKey) basicKeyChain.findKeyFromPubKey(pubkey);</span>
+<span class="fc bfc" id="L633" title="All 2 branches covered.">            if (k != null)</span>
+<span class="fc" id="L634">                markKeyAsUsed(k);</span>
+<span class="fc" id="L635">            return k;</span>
+        } finally {
+<span class="pc" id="L637">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public boolean hasKey(ECKey key) {
+<span class="fc" id="L643">        lock.lock();</span>
+        try {
+<span class="fc" id="L645">            return basicKeyChain.hasKey(key);</span>
+        } finally {
+<span class="pc" id="L647">            lock.unlock();</span>
+        }
+    }
+
+    /** Returns the deterministic key for the given absolute path in the hierarchy. */
+    protected DeterministicKey getKeyByPath(ChildNumber... path) {
+<span class="nc" id="L653">        return getKeyByPath(ImmutableList.copyOf(path));</span>
+    }
+
+    /** Returns the deterministic key for the given absolute path in the hierarchy. */
+    protected DeterministicKey getKeyByPath(List&lt;ChildNumber&gt; path) {
+<span class="fc" id="L658">        return getKeyByPath(path, false);</span>
+    }
+
+    /** Returns the deterministic key for the given absolute path in the hierarchy, optionally creating it */
+    public DeterministicKey getKeyByPath(List&lt;ChildNumber&gt; path, boolean create) {
+<span class="fc" id="L663">        return hierarchy.get(path, false, create);</span>
+    }
+
+    /**
+     * &lt;p&gt;An alias for &lt;code&gt;getKeyByPath(getAccountPath())&lt;/code&gt;.&lt;/p&gt;
+     *
+     * &lt;p&gt;Use this when you would like to create a watching key chain that follows this one, but can't spend money from it.
+     * The returned key can be serialized and then passed into {@link #watch(org.bitcoinj.crypto.DeterministicKey)}
+     * on another system to watch the hierarchy.&lt;/p&gt;
+     *
+     * &lt;p&gt;Note that the returned key is not pubkey only unless this key chain already is: the returned key can still
+     * be used for signing etc if the private key bytes are available.&lt;/p&gt;
+     */
+    public DeterministicKey getWatchingKey() {
+<span class="fc" id="L677">        return getKeyByPath(getAccountPath());</span>
+    }
+
+    /** Returns true if this chain is watch only, meaning it has public keys but no private key. */
+    public boolean isWatching() {
+<span class="fc" id="L682">        return getWatchingKey().isWatching();</span>
+    }
+
+    @Override
+    public int numKeys() {
+        // We need to return here the total number of keys including the lookahead zone, not the number of keys we
+        // have issued via getKey/freshReceiveKey.
+<span class="fc" id="L689">        lock.lock();</span>
+        try {
+<span class="fc" id="L691">            maybeLookAhead();</span>
+<span class="fc" id="L692">            return basicKeyChain.numKeys();</span>
+        } finally {
+<span class="pc" id="L694">            lock.unlock();</span>
+        }
+
+    }
+
+    /**
+     * Returns number of leaf keys used including both internal and external paths. This may be fewer than the number
+     * that have been deserialized or held in memory, because of the lookahead zone.
+     */
+    public int numLeafKeysIssued() {
+<span class="fc" id="L704">        lock.lock();</span>
+        try {
+<span class="fc" id="L706">            return issuedExternalKeys + issuedInternalKeys;</span>
+        } finally {
+<span class="pc" id="L708">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public long getEarliestKeyCreationTime() {
+<span class="fc bfc" id="L714" title="All 2 branches covered.">        if (seed != null)</span>
+<span class="fc" id="L715">            return seed.getCreationTimeSeconds();</span>
+        else
+<span class="fc" id="L717">            return getWatchingKey().getCreationTimeSeconds();</span>
+    }
+
+    @Override
+    public void addEventListener(KeyChainEventListener listener) {
+<span class="nc" id="L722">        basicKeyChain.addEventListener(listener);</span>
+<span class="nc" id="L723">    }</span>
+
+    @Override
+    public void addEventListener(KeyChainEventListener listener, Executor executor) {
+<span class="fc" id="L727">        basicKeyChain.addEventListener(listener, executor);</span>
+<span class="fc" id="L728">    }</span>
+
+    @Override
+    public boolean removeEventListener(KeyChainEventListener listener) {
+<span class="fc" id="L732">        return basicKeyChain.removeEventListener(listener);</span>
+    }
+
+    /** Returns a list of words that represent the seed or null if this chain is a watching chain. */
+    @Nullable
+    public List&lt;String&gt; getMnemonicCode() {
+<span class="nc bnc" id="L738" title="All 2 branches missed.">        if (seed == null) return null;</span>
+
+<span class="nc" id="L740">        lock.lock();</span>
+        try {
+<span class="nc" id="L742">            return seed.getMnemonicCode();</span>
+        } finally {
+<span class="nc" id="L744">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Return true if this keychain is following another keychain
+     */
+    public boolean isFollowing() {
+<span class="fc" id="L752">        return isFollowing;</span>
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Serialization support
+    //
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    @Override
+    public List&lt;Protos.Key&gt; serializeToProtobuf() {
+<span class="fc" id="L763">        List&lt;Protos.Key&gt; result = newArrayList();</span>
+<span class="fc" id="L764">        lock.lock();</span>
+        try {
+<span class="fc" id="L766">            result.addAll(serializeMyselfToProtobuf());</span>
+        } finally {
+<span class="pc" id="L768">            lock.unlock();</span>
+<span class="fc" id="L769">        }</span>
+<span class="fc" id="L770">        return result;</span>
+    }
+
+    protected List&lt;Protos.Key&gt; serializeMyselfToProtobuf() {
+        // Most of the serialization work is delegated to the basic key chain, which will serialize the bulk of the
+        // data (handling encryption along the way), and letting us patch it up with the extra data we care about.
+<span class="fc" id="L776">        LinkedList&lt;Protos.Key&gt; entries = newLinkedList();</span>
+<span class="fc bfc" id="L777" title="All 2 branches covered.">        if (seed != null) {</span>
+<span class="fc" id="L778">            Protos.Key.Builder mnemonicEntry = BasicKeyChain.serializeEncryptableItem(seed);</span>
+<span class="fc" id="L779">            mnemonicEntry.setType(Protos.Key.Type.DETERMINISTIC_MNEMONIC);</span>
+<span class="fc" id="L780">            serializeSeedEncryptableItem(seed, mnemonicEntry);</span>
+<span class="fc bfc" id="L781" title="All 2 branches covered.">            for (ChildNumber childNumber : getAccountPath()) {</span>
+<span class="fc" id="L782">                mnemonicEntry.addAccountPath(childNumber.i());</span>
+<span class="fc" id="L783">            }</span>
+<span class="fc" id="L784">            entries.add(mnemonicEntry.build());</span>
+        }
+<span class="fc" id="L786">        Map&lt;ECKey, Protos.Key.Builder&gt; keys = basicKeyChain.serializeToEditableProtobufs();</span>
+<span class="fc bfc" id="L787" title="All 2 branches covered.">        for (Map.Entry&lt;ECKey, Protos.Key.Builder&gt; entry : keys.entrySet()) {</span>
+<span class="fc" id="L788">            DeterministicKey key = (DeterministicKey) entry.getKey();</span>
+<span class="fc" id="L789">            Protos.Key.Builder proto = entry.getValue();</span>
+<span class="fc" id="L790">            proto.setType(Protos.Key.Type.DETERMINISTIC_KEY);</span>
+<span class="fc" id="L791">            final Protos.DeterministicKey.Builder detKey = proto.getDeterministicKeyBuilder();</span>
+<span class="fc" id="L792">            detKey.setChainCode(ByteString.copyFrom(key.getChainCode()));</span>
+<span class="fc bfc" id="L793" title="All 2 branches covered.">            for (ChildNumber num : key.getPath())</span>
+<span class="fc" id="L794">                detKey.addPath(num.i());</span>
+<span class="fc bfc" id="L795" title="All 2 branches covered.">            if (key.equals(externalParentKey)) {</span>
+<span class="fc" id="L796">                detKey.setIssuedSubkeys(issuedExternalKeys);</span>
+<span class="fc" id="L797">                detKey.setLookaheadSize(lookaheadSize);</span>
+<span class="fc" id="L798">                detKey.setSigsRequiredToSpend(getSigsRequiredToSpend());</span>
+<span class="fc bfc" id="L799" title="All 2 branches covered.">            } else if (key.equals(internalParentKey)) {</span>
+<span class="fc" id="L800">                detKey.setIssuedSubkeys(issuedInternalKeys);</span>
+<span class="fc" id="L801">                detKey.setLookaheadSize(lookaheadSize);</span>
+<span class="fc" id="L802">                detKey.setSigsRequiredToSpend(getSigsRequiredToSpend());</span>
+            }
+            // Flag the very first key of following keychain.
+<span class="fc bfc" id="L805" title="All 4 branches covered.">            if (entries.isEmpty() &amp;&amp; isFollowing()) {</span>
+<span class="fc" id="L806">                detKey.setIsFollowing(true);</span>
+            }
+<span class="fc bfc" id="L808" title="All 2 branches covered.">            if (key.getParent() != null) {</span>
+                // HD keys inherit the timestamp of their parent if they have one, so no need to serialize it.
+<span class="fc" id="L810">                proto.clearCreationTimestamp();</span>
+            }
+<span class="fc" id="L812">            entries.add(proto.build());</span>
+<span class="fc" id="L813">        }</span>
+<span class="fc" id="L814">        return entries;</span>
+    }
+
+    static List&lt;DeterministicKeyChain&gt; fromProtobuf(List&lt;Protos.Key&gt; keys, @Nullable KeyCrypter crypter) throws UnreadableWalletException {
+<span class="fc" id="L818">        return fromProtobuf(keys, crypter, new DefaultKeyChainFactory());</span>
+    }
+
+    /**
+     * Returns all the key chains found in the given list of keys. Typically there will only be one, but in the case of
+     * key rotation it can happen that there are multiple chains found.
+     */
+    public static List&lt;DeterministicKeyChain&gt; fromProtobuf(List&lt;Protos.Key&gt; keys, @Nullable KeyCrypter crypter, KeyChainFactory factory) throws UnreadableWalletException {
+<span class="fc" id="L826">        List&lt;DeterministicKeyChain&gt; chains = newLinkedList();</span>
+<span class="fc" id="L827">        DeterministicSeed seed = null;</span>
+<span class="fc" id="L828">        DeterministicKeyChain chain = null;</span>
+
+<span class="fc" id="L830">        int lookaheadSize = -1;</span>
+<span class="fc" id="L831">        int sigsRequiredToSpend = 1;</span>
+
+<span class="fc" id="L833">        List&lt;ChildNumber&gt; accountPath = newArrayList();</span>
+<span class="fc" id="L834">        PeekingIterator&lt;Protos.Key&gt; iter = Iterators.peekingIterator(keys.iterator());</span>
+<span class="fc bfc" id="L835" title="All 2 branches covered.">        while (iter.hasNext()) {</span>
+<span class="fc" id="L836">            Protos.Key key = iter.next();</span>
+<span class="fc" id="L837">            final Protos.Key.Type t = key.getType();</span>
+<span class="fc bfc" id="L838" title="All 2 branches covered.">            if (t == Protos.Key.Type.DETERMINISTIC_MNEMONIC) {</span>
+<span class="fc" id="L839">                accountPath = newArrayList();</span>
+<span class="fc bfc" id="L840" title="All 2 branches covered.">                for (int i : key.getAccountPathList()) {</span>
+<span class="fc" id="L841">                    accountPath.add(new ChildNumber(i));</span>
+<span class="fc" id="L842">                }</span>
+<span class="pc bpc" id="L843" title="1 of 2 branches missed.">                if (accountPath.isEmpty())</span>
+<span class="nc" id="L844">                    accountPath = ACCOUNT_ZERO_PATH;</span>
+<span class="fc bfc" id="L845" title="All 2 branches covered.">                if (chain != null) {</span>
+<span class="pc bpc" id="L846" title="1 of 2 branches missed.">                    checkState(lookaheadSize &gt;= 0);</span>
+<span class="fc" id="L847">                    chain.setLookaheadSize(lookaheadSize);</span>
+<span class="fc" id="L848">                    chain.setSigsRequiredToSpend(sigsRequiredToSpend);</span>
+<span class="fc" id="L849">                    chain.maybeLookAhead();</span>
+<span class="fc" id="L850">                    chains.add(chain);</span>
+<span class="fc" id="L851">                    chain = null;</span>
+                }
+<span class="fc" id="L853">                long timestamp = key.getCreationTimestamp() / 1000;</span>
+<span class="fc" id="L854">                String passphrase = DEFAULT_PASSPHRASE_FOR_MNEMONIC; // FIXME allow non-empty passphrase</span>
+<span class="fc bfc" id="L855" title="All 2 branches covered.">                if (key.hasSecretBytes()) {</span>
+<span class="pc bpc" id="L856" title="1 of 2 branches missed.">                    if (key.hasEncryptedDeterministicSeed())</span>
+<span class="nc" id="L857">                        throw new UnreadableWalletException(&quot;Malformed key proto: &quot; + key.toString());</span>
+<span class="fc" id="L858">                    byte[] seedBytes = null;</span>
+<span class="pc bpc" id="L859" title="1 of 2 branches missed.">                    if (key.hasDeterministicSeed()) {</span>
+<span class="fc" id="L860">                        seedBytes = key.getDeterministicSeed().toByteArray();</span>
+                    }
+<span class="fc" id="L862">                    seed = new DeterministicSeed(key.getSecretBytes().toStringUtf8(), seedBytes, passphrase, timestamp);</span>
+<span class="pc bpc" id="L863" title="1 of 2 branches missed.">                } else if (key.hasEncryptedData()) {</span>
+<span class="pc bpc" id="L864" title="1 of 2 branches missed.">                    if (key.hasDeterministicSeed())</span>
+<span class="nc" id="L865">                        throw new UnreadableWalletException(&quot;Malformed key proto: &quot; + key.toString());</span>
+<span class="fc" id="L866">                    EncryptedData data = new EncryptedData(key.getEncryptedData().getInitialisationVector().toByteArray(),</span>
+<span class="fc" id="L867">                            key.getEncryptedData().getEncryptedPrivateKey().toByteArray());</span>
+<span class="fc" id="L868">                    EncryptedData encryptedSeedBytes = null;</span>
+<span class="pc bpc" id="L869" title="1 of 2 branches missed.">                    if (key.hasEncryptedDeterministicSeed()) {</span>
+<span class="fc" id="L870">                        Protos.EncryptedData encryptedSeed = key.getEncryptedDeterministicSeed();</span>
+<span class="fc" id="L871">                        encryptedSeedBytes = new EncryptedData(encryptedSeed.getInitialisationVector().toByteArray(),</span>
+<span class="fc" id="L872">                                encryptedSeed.getEncryptedPrivateKey().toByteArray());</span>
+                    }
+<span class="fc" id="L874">                    seed = new DeterministicSeed(data, encryptedSeedBytes, timestamp);</span>
+<span class="fc" id="L875">                } else {</span>
+<span class="nc" id="L876">                    throw new UnreadableWalletException(&quot;Malformed key proto: &quot; + key.toString());</span>
+                }
+<span class="pc bpc" id="L878" title="1 of 2 branches missed.">                if (log.isDebugEnabled())</span>
+<span class="nc" id="L879">                    log.debug(&quot;Deserializing: DETERMINISTIC_MNEMONIC: {}&quot;, seed);</span>
+<span class="fc bfc" id="L880" title="All 2 branches covered.">            } else if (t == Protos.Key.Type.DETERMINISTIC_KEY) {</span>
+<span class="pc bpc" id="L881" title="1 of 2 branches missed.">                if (!key.hasDeterministicKey())</span>
+<span class="nc" id="L882">                    throw new UnreadableWalletException(&quot;Deterministic key missing extra data: &quot; + key.toString());</span>
+<span class="fc" id="L883">                byte[] chainCode = key.getDeterministicKey().getChainCode().toByteArray();</span>
+                // Deserialize the path through the tree.
+<span class="fc" id="L885">                LinkedList&lt;ChildNumber&gt; path = newLinkedList();</span>
+<span class="fc bfc" id="L886" title="All 2 branches covered.">                for (int i : key.getDeterministicKey().getPathList())</span>
+<span class="fc" id="L887">                    path.add(new ChildNumber(i));</span>
+                // Deserialize the public key and path.
+<span class="fc" id="L889">                LazyECPoint pubkey = new LazyECPoint(ECKey.CURVE.getCurve(), key.getPublicKey().toByteArray());</span>
+<span class="fc" id="L890">                final ImmutableList&lt;ChildNumber&gt; immutablePath = ImmutableList.copyOf(path);</span>
+                // Possibly create the chain, if we didn't already do so yet.
+<span class="fc" id="L892">                boolean isWatchingAccountKey = false;</span>
+<span class="fc" id="L893">                boolean isFollowingKey = false;</span>
+                // save previous chain if any if the key is marked as following. Current key and the next ones are to be
+                // placed in new following key chain
+<span class="fc bfc" id="L896" title="All 2 branches covered.">                if (key.getDeterministicKey().getIsFollowing()) {</span>
+<span class="fc bfc" id="L897" title="All 2 branches covered.">                    if (chain != null) {</span>
+<span class="pc bpc" id="L898" title="1 of 2 branches missed.">                        checkState(lookaheadSize &gt;= 0);</span>
+<span class="fc" id="L899">                        chain.setLookaheadSize(lookaheadSize);</span>
+<span class="fc" id="L900">                        chain.setSigsRequiredToSpend(sigsRequiredToSpend);</span>
+<span class="fc" id="L901">                        chain.maybeLookAhead();</span>
+<span class="fc" id="L902">                        chains.add(chain);</span>
+<span class="fc" id="L903">                        chain = null;</span>
+<span class="fc" id="L904">                        seed = null;</span>
+                    }
+<span class="fc" id="L906">                    isFollowingKey = true;</span>
+                }
+<span class="fc bfc" id="L908" title="All 2 branches covered.">                if (chain == null) {</span>
+                    // If this is not a following chain and previous was, this must be married
+<span class="fc bfc" id="L910" title="All 6 branches covered.">                    boolean isMarried = !isFollowingKey &amp;&amp; !chains.isEmpty() &amp;&amp; chains.get(chains.size() - 1).isFollowing();</span>
+<span class="fc bfc" id="L911" title="All 2 branches covered.">                    if (seed == null) {</span>
+<span class="fc" id="L912">                        DeterministicKey accountKey = new DeterministicKey(immutablePath, chainCode, pubkey, null, null);</span>
+<span class="fc" id="L913">                        accountKey.setCreationTimeSeconds(key.getCreationTimestamp() / 1000);</span>
+<span class="fc" id="L914">                        chain = factory.makeWatchingKeyChain(key, iter.peek(), accountKey, isFollowingKey, isMarried);</span>
+<span class="fc" id="L915">                        isWatchingAccountKey = true;</span>
+<span class="fc" id="L916">                    } else {</span>
+<span class="fc" id="L917">                        chain = factory.makeKeyChain(key, iter.peek(), seed, crypter, isMarried,</span>
+<span class="fc" id="L918">                                ImmutableList.&lt;ChildNumber&gt; builder().addAll(accountPath).build());</span>
+<span class="fc" id="L919">                        chain.lookaheadSize = LAZY_CALCULATE_LOOKAHEAD;</span>
+                        // If the seed is encrypted, then the chain is incomplete at this point. However, we will load
+                        // it up below as we parse in the keys. We just need to check at the end that we've loaded
+                        // everything afterwards.
+                    }
+                }
+                // Find the parent key assuming this is not the root key, and not an account key for a watching chain.
+<span class="fc" id="L926">                DeterministicKey parent = null;</span>
+<span class="fc bfc" id="L927" title="All 4 branches covered.">                if (!path.isEmpty() &amp;&amp; !isWatchingAccountKey) {</span>
+<span class="fc" id="L928">                    ChildNumber index = path.removeLast();</span>
+<span class="fc" id="L929">                    parent = chain.hierarchy.get(path, false, false);</span>
+<span class="fc" id="L930">                    path.add(index);</span>
+                }
+                DeterministicKey detkey;
+<span class="fc bfc" id="L933" title="All 2 branches covered.">                if (key.hasSecretBytes()) {</span>
+                    // Not encrypted: private key is available.
+<span class="fc" id="L935">                    final BigInteger priv = new BigInteger(1, key.getSecretBytes().toByteArray());</span>
+<span class="fc" id="L936">                    detkey = new DeterministicKey(immutablePath, chainCode, pubkey, priv, parent);</span>
+<span class="fc" id="L937">                } else {</span>
+<span class="fc bfc" id="L938" title="All 2 branches covered.">                    if (key.hasEncryptedData()) {</span>
+<span class="fc" id="L939">                        Protos.EncryptedData proto = key.getEncryptedData();</span>
+<span class="fc" id="L940">                        EncryptedData data = new EncryptedData(proto.getInitialisationVector().toByteArray(),</span>
+<span class="fc" id="L941">                                proto.getEncryptedPrivateKey().toByteArray());</span>
+<span class="fc" id="L942">                        checkNotNull(crypter, &quot;Encountered an encrypted key but no key crypter provided&quot;);</span>
+<span class="fc" id="L943">                        detkey = new DeterministicKey(immutablePath, chainCode, crypter, pubkey, data, parent);</span>
+<span class="fc" id="L944">                    } else {</span>
+                        // No secret key bytes and key is not encrypted: either a watching key or private key bytes
+                        // will be rederived on the fly from the parent.
+<span class="fc" id="L947">                        detkey = new DeterministicKey(immutablePath, chainCode, pubkey, null, parent);</span>
+                    }
+                }
+<span class="fc bfc" id="L950" title="All 2 branches covered.">                if (key.hasCreationTimestamp())</span>
+<span class="fc" id="L951">                    detkey.setCreationTimeSeconds(key.getCreationTimestamp() / 1000);</span>
+<span class="pc bpc" id="L952" title="1 of 2 branches missed.">                if (log.isDebugEnabled())</span>
+<span class="nc" id="L953">                    log.debug(&quot;Deserializing: DETERMINISTIC_KEY: {}&quot;, detkey);</span>
+<span class="fc bfc" id="L954" title="All 2 branches covered.">                if (!isWatchingAccountKey) {</span>
+                    // If the non-encrypted case, the non-leaf keys (account, internal, external) have already
+                    // been rederived and inserted at this point. In the encrypted case though,
+                    // we can't rederive and we must reinsert, potentially building the hierarchy object
+                    // if need be.
+<span class="fc bfc" id="L959" title="All 2 branches covered.">                    if (path.isEmpty()) {</span>
+                        // Master key.
+<span class="fc bfc" id="L961" title="All 2 branches covered.">                        if (chain.rootKey == null) {</span>
+<span class="fc" id="L962">                            chain.rootKey = detkey;</span>
+<span class="fc" id="L963">                            chain.hierarchy = new DeterministicHierarchy(detkey);</span>
+                        }
+<span class="fc bfc" id="L965" title="All 2 branches covered.">                    } else if (path.size() == chain.getAccountPath().size() + 1) {</span>
+                        // Constant 0 is used for external chain and constant 1 for internal chain
+                        // (also known as change addresses). https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+<span class="fc bfc" id="L968" title="All 2 branches covered.">                        if (detkey.getChildNumber().num() == 0) {</span>
+                            // External chain is used for addresses that are meant to be visible outside of the wallet
+                            // (e.g. for receiving payments).
+<span class="fc" id="L971">                            chain.externalParentKey = detkey;</span>
+<span class="fc" id="L972">                            chain.issuedExternalKeys = key.getDeterministicKey().getIssuedSubkeys();</span>
+<span class="fc" id="L973">                            lookaheadSize = Math.max(lookaheadSize, key.getDeterministicKey().getLookaheadSize());</span>
+<span class="fc" id="L974">                            sigsRequiredToSpend = key.getDeterministicKey().getSigsRequiredToSpend();</span>
+<span class="pc bpc" id="L975" title="1 of 2 branches missed.">                        } else if (detkey.getChildNumber().num() == 1) {</span>
+                            // Internal chain is used for addresses which are not meant to be visible outside of the
+                            // wallet and is used for return transaction change.
+<span class="fc" id="L978">                            chain.internalParentKey = detkey;</span>
+<span class="fc" id="L979">                            chain.issuedInternalKeys = key.getDeterministicKey().getIssuedSubkeys();</span>
+                        }
+                    }
+                }
+<span class="fc" id="L983">                chain.hierarchy.putKey(detkey);</span>
+<span class="fc" id="L984">                chain.basicKeyChain.importKey(detkey);</span>
+            }
+<span class="fc" id="L986">        }</span>
+<span class="fc bfc" id="L987" title="All 2 branches covered.">        if (chain != null) {</span>
+<span class="pc bpc" id="L988" title="1 of 2 branches missed.">            checkState(lookaheadSize &gt;= 0);</span>
+<span class="fc" id="L989">            chain.setLookaheadSize(lookaheadSize);</span>
+<span class="fc" id="L990">            chain.setSigsRequiredToSpend(sigsRequiredToSpend);</span>
+<span class="fc" id="L991">            chain.maybeLookAhead();</span>
+<span class="fc" id="L992">            chains.add(chain);</span>
+        }
+<span class="fc" id="L994">        return chains;</span>
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Encryption support
+    //
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    @Override
+    public DeterministicKeyChain toEncrypted(CharSequence password) {
+<span class="fc" id="L1005">        checkNotNull(password);</span>
+<span class="pc bpc" id="L1006" title="1 of 2 branches missed.">        checkArgument(password.length() &gt; 0);</span>
+<span class="fc bfc" id="L1007" title="All 2 branches covered.">        checkState(seed != null, &quot;Attempt to encrypt a watching chain.&quot;);</span>
+<span class="fc bfc" id="L1008" title="All 2 branches covered.">        checkState(!seed.isEncrypted());</span>
+<span class="fc" id="L1009">        KeyCrypter scrypt = new KeyCrypterScrypt();</span>
+<span class="fc" id="L1010">        KeyParameter derivedKey = scrypt.deriveKey(password);</span>
+<span class="fc" id="L1011">        return toEncrypted(scrypt, derivedKey);</span>
+    }
+
+    @Override
+    public DeterministicKeyChain toEncrypted(KeyCrypter keyCrypter, KeyParameter aesKey) {
+<span class="fc" id="L1016">        return new DeterministicKeyChain(keyCrypter, aesKey, this);</span>
+    }
+
+    @Override
+    public DeterministicKeyChain toDecrypted(CharSequence password) {
+<span class="fc" id="L1021">        checkNotNull(password);</span>
+<span class="pc bpc" id="L1022" title="1 of 2 branches missed.">        checkArgument(password.length() &gt; 0);</span>
+<span class="fc" id="L1023">        KeyCrypter crypter = getKeyCrypter();</span>
+<span class="fc bfc" id="L1024" title="All 2 branches covered.">        checkState(crypter != null, &quot;Chain not encrypted&quot;);</span>
+<span class="fc" id="L1025">        KeyParameter derivedKey = crypter.deriveKey(password);</span>
+<span class="fc" id="L1026">        return toDecrypted(derivedKey);</span>
+    }
+
+    @Override
+    public DeterministicKeyChain toDecrypted(KeyParameter aesKey) {
+<span class="pc bpc" id="L1031" title="1 of 2 branches missed.">        checkState(getKeyCrypter() != null, &quot;Key chain not encrypted&quot;);</span>
+<span class="pc bpc" id="L1032" title="1 of 2 branches missed.">        checkState(seed != null, &quot;Can't decrypt a watching chain&quot;);</span>
+<span class="fc" id="L1033">        checkState(seed.isEncrypted());</span>
+<span class="fc" id="L1034">        String passphrase = DEFAULT_PASSPHRASE_FOR_MNEMONIC; // FIXME allow non-empty passphrase</span>
+<span class="fc" id="L1035">        DeterministicSeed decSeed = seed.decrypt(getKeyCrypter(), passphrase, aesKey);</span>
+<span class="fc" id="L1036">        DeterministicKeyChain chain = makeKeyChainFromSeed(decSeed);</span>
+        // Now double check that the keys match to catch the case where the key is wrong but padding didn't catch it.
+<span class="pc bpc" id="L1038" title="1 of 2 branches missed.">        if (!chain.getWatchingKey().getPubKeyPoint().equals(getWatchingKey().getPubKeyPoint()))</span>
+<span class="nc" id="L1039">            throw new KeyCrypterException(&quot;Provided AES key is wrong&quot;);</span>
+<span class="fc" id="L1040">        chain.lookaheadSize = lookaheadSize;</span>
+        // Now copy the (pubkey only) leaf keys across to avoid rederiving them. The private key bytes are missing
+        // anyway so there's nothing to decrypt.
+<span class="fc bfc" id="L1043" title="All 2 branches covered.">        for (ECKey eckey : basicKeyChain.getKeys()) {</span>
+<span class="fc" id="L1044">            DeterministicKey key = (DeterministicKey) eckey;</span>
+<span class="fc bfc" id="L1045" title="All 2 branches covered.">            if (key.getPath().size() != getAccountPath().size() + 2) continue; // Not a leaf key.</span>
+<span class="fc" id="L1046">            checkState(key.isEncrypted());</span>
+<span class="fc" id="L1047">            DeterministicKey parent = chain.hierarchy.get(checkNotNull(key.getParent()).getPath(), false, false);</span>
+            // Clone the key to the new decrypted hierarchy.
+<span class="fc" id="L1049">            key = new DeterministicKey(key.dropPrivateBytes(), parent);</span>
+<span class="fc" id="L1050">            chain.hierarchy.putKey(key);</span>
+<span class="fc" id="L1051">            chain.basicKeyChain.importKey(key);</span>
+<span class="fc" id="L1052">        }</span>
+<span class="fc" id="L1053">        chain.issuedExternalKeys = issuedExternalKeys;</span>
+<span class="fc" id="L1054">        chain.issuedInternalKeys = issuedInternalKeys;</span>
+<span class="fc" id="L1055">        return chain;</span>
+    }
+
+    /**
+     * Factory method to create a key chain from a seed.
+     * Subclasses should override this to create an instance of the subclass instead of a plain DKC.
+     * This is used in encryption/decryption.
+     */
+    protected DeterministicKeyChain makeKeyChainFromSeed(DeterministicSeed seed) {
+<span class="fc" id="L1064">        return new DeterministicKeyChain(seed);</span>
+    }
+
+    @Override
+    public boolean checkPassword(CharSequence password) {
+<span class="fc" id="L1069">        checkNotNull(password);</span>
+<span class="pc bpc" id="L1070" title="1 of 2 branches missed.">        checkState(getKeyCrypter() != null, &quot;Key chain not encrypted&quot;);</span>
+<span class="fc" id="L1071">        return checkAESKey(getKeyCrypter().deriveKey(password));</span>
+    }
+
+    @Override
+    public boolean checkAESKey(KeyParameter aesKey) {
+<span class="pc bpc" id="L1076" title="1 of 2 branches missed.">        checkState(rootKey != null, &quot;Can't check password for a watching chain&quot;);</span>
+<span class="fc" id="L1077">        checkNotNull(aesKey);</span>
+<span class="pc bpc" id="L1078" title="1 of 2 branches missed.">        checkState(getKeyCrypter() != null, &quot;Key chain not encrypted&quot;);</span>
+        try {
+<span class="fc" id="L1080">            return rootKey.decrypt(aesKey).getPubKeyPoint().equals(rootKey.getPubKeyPoint());</span>
+<span class="fc" id="L1081">        } catch (KeyCrypterException e) {</span>
+<span class="fc" id="L1082">            return false;</span>
+        }
+    }
+
+    @Nullable
+    @Override
+    public KeyCrypter getKeyCrypter() {
+<span class="fc" id="L1089">        return basicKeyChain.getKeyCrypter();</span>
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Bloom filtering support
+    //
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+    @Override
+    public int numBloomFilterEntries() {
+<span class="fc" id="L1101">        return numKeys() * 2;</span>
+    }
+
+    @Override
+    public BloomFilter getFilter(int size, double falsePositiveRate, long tweak) {
+<span class="fc" id="L1106">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L1108" title="1 of 2 branches missed.">            checkArgument(size &gt;= numBloomFilterEntries());</span>
+<span class="fc" id="L1109">            maybeLookAhead();</span>
+<span class="fc" id="L1110">            return basicKeyChain.getFilter(size, falsePositiveRate, tweak);</span>
+        } finally {
+<span class="pc" id="L1112">            lock.unlock();</span>
+        }
+
+    }
+
+    /**
+     * &lt;p&gt;The number of public keys we should pre-generate on each path before they are requested by the app. This is
+     * required so that when scanning through the chain given only a seed, we can give enough keys to the remote node
+     * via the Bloom filter such that we see transactions that are &quot;from the future&quot;, for example transactions created
+     * by a different app that's sharing the same seed, or transactions we made before but we're replaying the chain
+     * given just the seed. The default is 100.&lt;/p&gt;
+     */
+    public int getLookaheadSize() {
+<span class="fc" id="L1125">        lock.lock();</span>
+        try {
+<span class="fc" id="L1127">            return lookaheadSize;</span>
+        } finally {
+<span class="pc" id="L1129">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Sets a new lookahead size. See {@link #getLookaheadSize()} for details on what this is. Setting a new size
+     * that's larger than the current size will return immediately and the new size will only take effect next time
+     * a fresh filter is requested (e.g. due to a new peer being connected). So you should set this before starting
+     * to sync the chain, if you want to modify it. If you haven't modified the lookahead threshold manually then
+     * it will be automatically set to be a third of the new size.
+     */
+    public void setLookaheadSize(int lookaheadSize) {
+<span class="fc" id="L1141">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L1143" title="All 2 branches covered.">            boolean readjustThreshold = this.lookaheadThreshold == calcDefaultLookaheadThreshold();</span>
+<span class="fc" id="L1144">            this.lookaheadSize = lookaheadSize;</span>
+<span class="fc bfc" id="L1145" title="All 2 branches covered.">            if (readjustThreshold)</span>
+<span class="fc" id="L1146">                this.lookaheadThreshold = calcDefaultLookaheadThreshold();</span>
+        } finally {
+<span class="pc" id="L1148">            lock.unlock();</span>
+<span class="fc" id="L1149">        }</span>
+<span class="fc" id="L1150">    }</span>
+
+    /**
+     * Sets the threshold for the key pre-generation. This is used to avoid adding new keys and thus
+     * re-calculating Bloom filters every time a new key is calculated. Without a lookahead threshold, every time we
+     * received a relevant transaction we'd extend the lookahead zone and generate a new filter, which is inefficient.
+     */
+    public void setLookaheadThreshold(int num) {
+<span class="fc" id="L1158">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L1160" title="1 of 2 branches missed.">            if (num &gt;= lookaheadSize)</span>
+<span class="nc" id="L1161">                throw new IllegalArgumentException(&quot;Threshold larger or equal to the lookaheadSize&quot;);</span>
+<span class="fc" id="L1162">            this.lookaheadThreshold = num;</span>
+        } finally {
+<span class="pc" id="L1164">            lock.unlock();</span>
+<span class="fc" id="L1165">        }</span>
+<span class="fc" id="L1166">    }</span>
+
+    /**
+     * Gets the threshold for the key pre-generation. See {@link #setLookaheadThreshold(int)} for details on what this
+     * is. The default is a third of the lookahead size (100 / 3 == 33). If you don't modify it explicitly then this
+     * value will always be one third of the lookahead size.
+     */
+    public int getLookaheadThreshold() {
+<span class="fc" id="L1174">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L1176" title="All 2 branches covered.">            if (lookaheadThreshold &gt;= lookaheadSize)</span>
+<span class="fc" id="L1177">                return 0;</span>
+<span class="fc" id="L1178">            return lookaheadThreshold;</span>
+        } finally {
+<span class="pc" id="L1180">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Pre-generate enough keys to reach the lookahead size. You can call this if you need to explicitly invoke
+     * the lookahead procedure, but it's normally unnecessary as it will be done automatically when needed.
+     */
+    public void maybeLookAhead() {
+<span class="fc" id="L1189">        lock.lock();</span>
+        try {
+<span class="fc" id="L1191">            List&lt;DeterministicKey&gt; keys = maybeLookAhead(externalParentKey, issuedExternalKeys);</span>
+<span class="fc" id="L1192">            keys.addAll(maybeLookAhead(internalParentKey, issuedInternalKeys));</span>
+<span class="fc bfc" id="L1193" title="All 2 branches covered.">            if (keys.isEmpty())</span>
+<span class="fc" id="L1194">                return;</span>
+<span class="fc" id="L1195">            keyLookaheadEpoch++;</span>
+            // Batch add all keys at once so there's only one event listener invocation, as this will be listened to
+            // by the wallet and used to rebuild/broadcast the Bloom filter. That's expensive so we don't want to do
+            // it more often than necessary.
+<span class="fc" id="L1199">            basicKeyChain.importKeys(keys);</span>
+        } finally {
+<span class="pc" id="L1201">            lock.unlock();</span>
+<span class="fc" id="L1202">        }</span>
+<span class="fc" id="L1203">    }</span>
+
+    private List&lt;DeterministicKey&gt; maybeLookAhead(DeterministicKey parent, int issued) {
+<span class="fc" id="L1206">        checkState(lock.isHeldByCurrentThread());</span>
+<span class="fc" id="L1207">        return maybeLookAhead(parent, issued, getLookaheadSize(), getLookaheadThreshold());</span>
+    }
+
+    /**
+     * Pre-generate enough keys to reach the lookahead size, but only if there are more than the lookaheadThreshold to
+     * be generated, so that the Bloom filter does not have to be regenerated that often.
+     *
+     * The returned mutable list of keys must be inserted into the basic key chain.
+     */
+    private List&lt;DeterministicKey&gt; maybeLookAhead(DeterministicKey parent, int issued, int lookaheadSize, int lookaheadThreshold) {
+<span class="fc" id="L1217">        checkState(lock.isHeldByCurrentThread());</span>
+<span class="fc" id="L1218">        final int numChildren = hierarchy.getNumChildren(parent.getPath());</span>
+<span class="fc" id="L1219">        final int needed = issued + lookaheadSize + lookaheadThreshold - numChildren;</span>
+
+<span class="fc bfc" id="L1221" title="All 2 branches covered.">        if (needed &lt;= lookaheadThreshold)</span>
+<span class="fc" id="L1222">            return new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L1224">        log.info(&quot;{} keys needed for {} = {} issued + {} lookahead size + {} lookahead threshold - {} num children&quot;,</span>
+<span class="fc" id="L1225">                needed, parent.getPathAsString(), issued, lookaheadSize, lookaheadThreshold, numChildren);</span>
+
+<span class="fc" id="L1227">        List&lt;DeterministicKey&gt; result  = new ArrayList&lt;&gt;(needed);</span>
+<span class="fc" id="L1228">        final Stopwatch watch = Stopwatch.createStarted();</span>
+<span class="fc" id="L1229">        int nextChild = numChildren;</span>
+<span class="fc bfc" id="L1230" title="All 2 branches covered.">        for (int i = 0; i &lt; needed; i++) {</span>
+<span class="fc" id="L1231">            DeterministicKey key = HDKeyDerivation.deriveThisOrNextChildKey(parent, nextChild);</span>
+<span class="fc" id="L1232">            key = key.dropPrivateBytes();</span>
+<span class="fc" id="L1233">            hierarchy.putKey(key);</span>
+<span class="fc" id="L1234">            result.add(key);</span>
+<span class="fc" id="L1235">            nextChild = key.getChildNumber().num() + 1;</span>
+        }
+<span class="fc" id="L1237">        watch.stop();</span>
+<span class="fc" id="L1238">        log.info(&quot;Took {}&quot;, watch);</span>
+<span class="fc" id="L1239">        return result;</span>
+    }
+
+    /** Housekeeping call to call when lookahead might be needed.  Normally called automatically by KeychainGroup. */
+    public void maybeLookAheadScripts() {
+<span class="fc" id="L1244">    }</span>
+
+    /**
+     * Returns number of keys used on external path. This may be fewer than the number that have been deserialized
+     * or held in memory, because of the lookahead zone.
+     */
+    public int getIssuedExternalKeys() {
+<span class="fc" id="L1251">        lock.lock();</span>
+        try {
+<span class="fc" id="L1253">            return issuedExternalKeys;</span>
+        } finally {
+<span class="pc" id="L1255">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Returns number of keys used on internal path. This may be fewer than the number that have been deserialized
+     * or held in memory, because of the lookahead zone.
+     */
+    public int getIssuedInternalKeys() {
+<span class="fc" id="L1264">        lock.lock();</span>
+        try {
+<span class="fc" id="L1266">            return issuedInternalKeys;</span>
+        } finally {
+<span class="pc" id="L1268">            lock.unlock();</span>
+        }
+    }
+
+    /** Returns the seed or null if this chain is a watching chain. */
+    @Nullable
+    public DeterministicSeed getSeed() {
+<span class="fc" id="L1275">        lock.lock();</span>
+        try {
+<span class="fc" id="L1277">            return seed;</span>
+        } finally {
+<span class="pc" id="L1279">            lock.unlock();</span>
+        }
+    }
+
+    // For internal usage only
+    /* package */ List&lt;ECKey&gt; getKeys(boolean includeLookahead, boolean includeParents) {
+<span class="fc" id="L1285">        List&lt;ECKey&gt; keys = basicKeyChain.getKeys();</span>
+<span class="fc bfc" id="L1286" title="All 2 branches covered.">        if (!includeLookahead) {</span>
+<span class="fc" id="L1287">            int treeSize = internalParentKey.getPath().size();</span>
+<span class="fc" id="L1288">            List&lt;ECKey&gt; issuedKeys = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L1289" title="All 2 branches covered.">            for (ECKey key : keys) {</span>
+<span class="fc" id="L1290">                DeterministicKey detkey = (DeterministicKey) key;</span>
+<span class="fc" id="L1291">                DeterministicKey parent = detkey.getParent();</span>
+<span class="fc bfc" id="L1292" title="All 4 branches covered.">                if (!includeParents &amp;&amp; parent == null) continue;</span>
+<span class="fc bfc" id="L1293" title="All 4 branches covered.">                if (!includeParents &amp;&amp; detkey.getPath().size() &lt;= treeSize) continue;</span>
+<span class="fc bfc" id="L1294" title="All 4 branches covered.">                if (internalParentKey.equals(parent) &amp;&amp; detkey.getChildNumber().i() &gt;= issuedInternalKeys) continue;</span>
+<span class="fc bfc" id="L1295" title="All 4 branches covered.">                if (externalParentKey.equals(parent) &amp;&amp; detkey.getChildNumber().i() &gt;= issuedExternalKeys) continue;</span>
+<span class="fc" id="L1296">                issuedKeys.add(detkey);</span>
+<span class="fc" id="L1297">            }</span>
+<span class="fc" id="L1298">            return issuedKeys;</span>
+        }
+<span class="fc" id="L1300">        return keys;</span>
+    }
+
+    /**
+     * Returns only the external keys that have been issued by this chain, lookahead not included.
+     */
+    public List&lt;ECKey&gt; getIssuedReceiveKeys() {
+<span class="nc" id="L1307">        final List&lt;ECKey&gt; keys = new ArrayList&lt;&gt;(getKeys(false, false));</span>
+<span class="nc bnc" id="L1308" title="All 2 branches missed.">        for (Iterator&lt;ECKey&gt; i = keys.iterator(); i.hasNext();) {</span>
+<span class="nc" id="L1309">            DeterministicKey parent = ((DeterministicKey) i.next()).getParent();</span>
+<span class="nc bnc" id="L1310" title="All 4 branches missed.">            if (parent == null || !externalParentKey.equals(parent))</span>
+<span class="nc" id="L1311">                i.remove();</span>
+<span class="nc" id="L1312">        }</span>
+<span class="nc" id="L1313">        return keys;</span>
+    }
+
+    /**
+     * Returns leaf keys issued by this chain (including lookahead zone)
+     */
+    public List&lt;DeterministicKey&gt; getLeafKeys() {
+<span class="fc" id="L1320">        ImmutableList.Builder&lt;DeterministicKey&gt; keys = ImmutableList.builder();</span>
+<span class="fc bfc" id="L1321" title="All 2 branches covered.">        for (ECKey key : getKeys(true, false)) {</span>
+<span class="fc" id="L1322">            DeterministicKey dKey = (DeterministicKey) key;</span>
+<span class="fc bfc" id="L1323" title="All 2 branches covered.">            if (dKey.getPath().size() == getAccountPath().size() + 2) {</span>
+<span class="fc" id="L1324">                keys.add(dKey);</span>
+            }
+<span class="fc" id="L1326">        }</span>
+<span class="fc" id="L1327">        return keys.build();</span>
+    }
+
+    /*package*/ static void serializeSeedEncryptableItem(DeterministicSeed seed, Protos.Key.Builder proto) {
+        // The seed can be missing if we have not derived it yet from the mnemonic.
+        // This will not normally happen once all the wallets are on the latest code that caches
+        // the seed.
+<span class="pc bpc" id="L1334" title="1 of 4 branches missed.">        if (seed.isEncrypted() &amp;&amp; seed.getEncryptedSeedData() != null) {</span>
+<span class="fc" id="L1335">            EncryptedData data = seed.getEncryptedSeedData();</span>
+<span class="fc" id="L1336">            proto.getEncryptedDeterministicSeedBuilder()</span>
+<span class="fc" id="L1337">                    .setEncryptedPrivateKey(ByteString.copyFrom(data.encryptedBytes))</span>
+<span class="fc" id="L1338">                    .setInitialisationVector(ByteString.copyFrom(data.initialisationVector));</span>
+            // We don't allow mixing of encryption types at the moment.
+<span class="pc bpc" id="L1340" title="1 of 2 branches missed.">            checkState(seed.getEncryptionType() == Protos.Wallet.EncryptionType.ENCRYPTED_SCRYPT_AES);</span>
+<span class="fc" id="L1341">        } else {</span>
+<span class="fc" id="L1342">            final byte[] secret = seed.getSeedBytes();</span>
+<span class="pc bpc" id="L1343" title="1 of 2 branches missed.">            if (secret != null)</span>
+<span class="fc" id="L1344">                proto.setDeterministicSeed(ByteString.copyFrom(secret));</span>
+        }
+<span class="fc" id="L1346">    }</span>
+
+    /**
+     * Returns a counter that is incremented each time new keys are generated due to lookahead. Used by the network
+     * code to learn whether to discard the current block and await calculation of a new filter.
+     */
+    public int getKeyLookaheadEpoch() {
+<span class="fc" id="L1353">        lock.lock();</span>
+        try {
+<span class="fc" id="L1355">            return keyLookaheadEpoch;</span>
+        } finally {
+<span class="pc" id="L1357">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Whether the keychain is married.  A keychain is married when it vends P2SH addresses
+     * from multiple keychains in a multisig relationship.
+     * @see org.bitcoinj.wallet.MarriedKeyChain
+     */
+    public boolean isMarried() {
+<span class="fc" id="L1367">        return false;</span>
+    }
+
+    /** Get redeem data for a key.  Only applicable to married keychains. */
+    public RedeemData getRedeemData(DeterministicKey followedKey) {
+<span class="nc" id="L1372">        throw new UnsupportedOperationException();</span>
+    }
+
+    /** Create a new key and return the matching output script.  Only applicable to married keychains. */
+    public Script freshOutputScript(KeyPurpose purpose) {
+<span class="nc" id="L1377">        throw new UnsupportedOperationException();</span>
+    }
+
+    public String toString(boolean includePrivateKeys, @Nullable KeyParameter aesKey, NetworkParameters params) {
+<span class="fc" id="L1381">        final DeterministicKey watchingKey = getWatchingKey();</span>
+<span class="fc" id="L1382">        final StringBuilder builder = new StringBuilder();</span>
+<span class="pc bpc" id="L1383" title="1 of 2 branches missed.">        if (seed != null) {</span>
+<span class="pc bpc" id="L1384" title="1 of 2 branches missed.">            if (includePrivateKeys) {</span>
+<span class="nc bnc" id="L1385" title="All 2 branches missed.">                DeterministicSeed decryptedSeed = seed.isEncrypted()</span>
+<span class="nc" id="L1386">                        ? seed.decrypt(getKeyCrypter(), DEFAULT_PASSPHRASE_FOR_MNEMONIC, aesKey) : seed;</span>
+<span class="nc" id="L1387">                final List&lt;String&gt; words = decryptedSeed.getMnemonicCode();</span>
+<span class="nc" id="L1388">                builder.append(&quot;Seed as words: &quot;).append(Utils.SPACE_JOINER.join(words)).append('\n');</span>
+<span class="nc" id="L1389">                builder.append(&quot;Seed as hex:   &quot;).append(decryptedSeed.toHexString()).append('\n');</span>
+<span class="nc" id="L1390">            } else {</span>
+<span class="pc bpc" id="L1391" title="1 of 2 branches missed.">                if (seed.isEncrypted())</span>
+<span class="nc" id="L1392">                    builder.append(&quot;Seed is encrypted\n&quot;);</span>
+            }
+<span class="fc" id="L1394">            builder.append(&quot;Seed birthday: &quot;).append(seed.getCreationTimeSeconds()).append(&quot;  [&quot;)</span>
+<span class="fc" id="L1395">                    .append(Utils.dateTimeFormat(seed.getCreationTimeSeconds() * 1000)).append(&quot;]\n&quot;);</span>
+        } else {
+<span class="nc" id="L1397">            builder.append(&quot;Key birthday:  &quot;).append(watchingKey.getCreationTimeSeconds()).append(&quot;  [&quot;)</span>
+<span class="nc" id="L1398">                    .append(Utils.dateTimeFormat(watchingKey.getCreationTimeSeconds() * 1000)).append(&quot;]\n&quot;);</span>
+        }
+<span class="fc" id="L1400">        builder.append(&quot;Key to watch:  &quot;).append(watchingKey.serializePubB58(params)).append('\n');</span>
+<span class="fc" id="L1401">        formatAddresses(includePrivateKeys, aesKey, params, builder);</span>
+<span class="fc" id="L1402">        return builder.toString();</span>
+    }
+
+    protected void formatAddresses(boolean includePrivateKeys, @Nullable KeyParameter aesKey, NetworkParameters params,
+            StringBuilder builder) {
+<span class="fc bfc" id="L1407" title="All 2 branches covered.">        for (ECKey key : getKeys(false, true))</span>
+<span class="fc" id="L1408">            key.formatKeyWithAddress(includePrivateKeys, aesKey, builder, params);</span>
+<span class="fc" id="L1409">    }</span>
+
+    /** The number of signatures required to spend coins received by this keychain. */
+    public void setSigsRequiredToSpend(int sigsRequiredToSpend) {
+<span class="fc" id="L1413">        this.sigsRequiredToSpend = sigsRequiredToSpend;</span>
+<span class="fc" id="L1414">    }</span>
+
+    /**
+     * Returns the number of signatures required to spend transactions for this KeyChain. It's the N from
+     * N-of-M CHECKMULTISIG script for P2SH transactions and always 1 for other transaction types.
+     */
+    public int getSigsRequiredToSpend() {
+<span class="fc" id="L1421">        return sigsRequiredToSpend;</span>
+    }
+
+    /** Returns the redeem script by its hash or null if this keychain did not generate the script. */
+    @Nullable
+    public RedeemData findRedeemDataByScriptHash(ByteString bytes) {
+<span class="fc" id="L1427">        return null;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

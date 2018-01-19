@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>ProtobufConnection.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.net</a> &gt; <span class="el_source">ProtobufConnection.java</span></div><h1>ProtobufConnection.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.net;
+
+import org.bitcoinj.core.Utils;
+import org.bitcoinj.utils.Threading;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.ByteString;
+import com.google.protobuf.MessageLite;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.concurrent.GuardedBy;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+
+/**
+ * &lt;p&gt;A handler which is used in {@link NioServer} and {@link NioClient} to split up incoming data streams
+ * into protobufs and provide an interface for writing protobufs to the connections.&lt;/p&gt;
+ *
+ * &lt;p&gt;Messages are encoded with a 4-byte signed integer (big endian) prefix to indicate their length followed by the
+ * serialized protobuf&lt;/p&gt;
+ *
+ * &lt;p&gt;(Used to be called ProtobufParser)&lt;/p&gt;
+ */
+public class ProtobufConnection&lt;MessageType extends MessageLite&gt; extends AbstractTimeoutHandler implements StreamConnection {
+<span class="fc" id="L47">    private static final Logger log = LoggerFactory.getLogger(ProtobufConnection.class);</span>
+
+    /**
+     * An interface which can be implemented to handle callbacks as new messages are generated and socket events occur.
+     * @param &lt;MessageType&gt; The protobuf type which is used on this socket.
+     *                      This &lt;b&gt;MUST&lt;/b&gt; match the MessageType used in the parent {@link ProtobufConnection}
+     */
+    public interface Listener&lt;MessageType extends MessageLite&gt; {
+        /** Called when a new protobuf is received from the remote side. */
+        void messageReceived(ProtobufConnection&lt;MessageType&gt; handler, MessageType msg);
+        /** Called when the connection is opened and available for writing data to. */
+        void connectionOpen(ProtobufConnection&lt;MessageType&gt; handler);
+        /** Called when the connection is closed and no more data should be provided. */
+        void connectionClosed(ProtobufConnection&lt;MessageType&gt; handler);
+    }
+
+    // The callback listener
+    private final Listener&lt;MessageType&gt; handler;
+    // The prototype which is used to deserialize messages
+    private final MessageLite prototype;
+
+    // The maximum message size (NOT INCLUDING LENGTH PREFIX)
+    final int maxMessageSize;
+
+    // A temporary buffer used when the message size is larger than the buffer being used by the network code
+    // Because the networking code uses a constant size buffer and we want to allow for very large message sizes, we use
+    // a smaller network buffer per client and only allocate more memory when we need it to deserialize large messages.
+    // Though this is not in of itself a DoS protection, it allows for handling more legitimate clients per server and
+    // attacking clients can be made to timeout/get blocked if they are sending crap to fill buffers.
+<span class="fc" id="L76">    @GuardedBy(&quot;lock&quot;) private int messageBytesOffset = 0;</span>
+    @GuardedBy(&quot;lock&quot;) private byte[] messageBytes;
+<span class="fc" id="L78">    private final ReentrantLock lock = Threading.lock(&quot;ProtobufConnection&quot;);</span>
+
+<span class="fc" id="L80">    @VisibleForTesting final AtomicReference&lt;MessageWriteTarget&gt; writeTarget = new AtomicReference&lt;&gt;();</span>
+
+    /**
+     * Creates a new protobuf handler.
+     *
+     * @param handler The callback listener
+     * @param prototype The default instance of the message type used in both directions of this channel.
+     *                  This should be the return value from {@link MessageLite#getDefaultInstanceForType()}
+     * @param maxMessageSize The maximum message size (not including the 4-byte length prefix).
+     *                       Note that this has an upper bound of {@link Integer#MAX_VALUE} - 4
+     * @param timeoutMillis The timeout between messages before the connection is automatically closed. Only enabled
+     *                      after the connection is established.
+     */
+<span class="fc" id="L93">    public ProtobufConnection(Listener&lt;MessageType&gt; handler, MessageType prototype, int maxMessageSize, int timeoutMillis) {</span>
+<span class="fc" id="L94">        this.handler = handler;</span>
+<span class="fc" id="L95">        this.prototype = prototype;</span>
+<span class="fc" id="L96">        this.maxMessageSize = Math.min(maxMessageSize, Integer.MAX_VALUE - 4);</span>
+<span class="fc" id="L97">        setTimeoutEnabled(false);</span>
+<span class="fc" id="L98">        setSocketTimeout(timeoutMillis);</span>
+<span class="fc" id="L99">    }</span>
+
+    @Override
+    public void setWriteTarget(MessageWriteTarget writeTarget) {
+        // Only allow it to be set once.
+<span class="pc bpc" id="L104" title="1 of 2 branches missed.">        checkState(this.writeTarget.getAndSet(checkNotNull(writeTarget)) == null);</span>
+<span class="fc" id="L105">    }</span>
+
+    @Override
+    public int getMaxMessageSize() {
+<span class="fc" id="L109">        return maxMessageSize;</span>
+    }
+
+    /**
+     * Closes this connection, eventually triggering a {@link ProtobufConnection.Listener#connectionClosed()} event.
+     */
+    public void closeConnection() {
+<span class="fc" id="L116">        this.writeTarget.get().closeConnection();</span>
+<span class="fc" id="L117">    }</span>
+
+    @Override
+    protected void timeoutOccurred() {
+<span class="nc" id="L121">        log.warn(&quot;Timeout occurred for &quot; + handler);</span>
+<span class="nc" id="L122">        closeConnection();</span>
+<span class="nc" id="L123">    }</span>
+
+    // Deserializes and provides a listener event (buff must not have the length prefix in it)
+    // Does set the buffers's position to its limit
+    @SuppressWarnings(&quot;unchecked&quot;)
+    // The warning 'unchecked cast' being suppressed here comes from the build() formally returning
+    // a MessageLite-derived class that cannot be statically guaranteed to be the MessageType.
+    private void deserializeMessage(ByteBuffer buff) throws Exception {
+<span class="fc" id="L131">        MessageType msg = (MessageType) prototype.newBuilderForType().mergeFrom(ByteString.copyFrom(buff)).build();</span>
+<span class="fc" id="L132">        resetTimeout();</span>
+<span class="fc" id="L133">        handler.messageReceived(this, msg);</span>
+<span class="fc" id="L134">    }</span>
+
+    @Override
+    public int receiveBytes(ByteBuffer buff) throws Exception {
+<span class="fc" id="L138">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L140" title="1 of 2 branches missed.">            if (messageBytes != null) {</span>
+                // Just keep filling up the currently being worked on message
+<span class="nc" id="L142">                int bytesToGet = Math.min(messageBytes.length - messageBytesOffset, buff.remaining());</span>
+<span class="nc" id="L143">                buff.get(messageBytes, messageBytesOffset, bytesToGet);</span>
+<span class="nc" id="L144">                messageBytesOffset += bytesToGet;</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">                if (messageBytesOffset == messageBytes.length) {</span>
+                    // Filled up our buffer, decode the message
+<span class="nc" id="L147">                    deserializeMessage(ByteBuffer.wrap(messageBytes));</span>
+<span class="nc" id="L148">                    messageBytes = null;</span>
+<span class="nc bnc" id="L149" title="All 2 branches missed.">                    if (buff.hasRemaining())</span>
+<span class="nc" id="L150">                        return bytesToGet + receiveBytes(buff);</span>
+                }
+<span class="nc" id="L152">                return bytesToGet;</span>
+            }
+
+            // If we cant read the length prefix yet, give up
+<span class="pc bpc" id="L156" title="1 of 2 branches missed.">            if (buff.remaining() &lt; 4)</span>
+<span class="nc" id="L157">                return 0;</span>
+
+            // Read one integer in big endian
+<span class="fc" id="L160">            buff.order(ByteOrder.BIG_ENDIAN);</span>
+<span class="fc" id="L161">            final int len = buff.getInt();</span>
+
+            // If length is larger than the maximum message size (or is negative/overflows) throw an exception and close the
+            // connection
+<span class="pc bpc" id="L165" title="2 of 4 branches missed.">            if (len &gt; maxMessageSize || len + 4 &lt; 4)</span>
+<span class="nc" id="L166">                throw new IllegalStateException(&quot;Message too large or length underflowed&quot;);</span>
+
+            // If the buffer's capacity is less than the next messages length + 4 (length prefix), we must use messageBytes
+            // as a temporary buffer to store the message
+<span class="pc bpc" id="L170" title="1 of 2 branches missed.">            if (buff.capacity() &lt; len + 4) {</span>
+<span class="nc" id="L171">                messageBytes = new byte[len];</span>
+                // Now copy all remaining bytes into the new buffer, set messageBytesOffset and tell the caller how many
+                // bytes we consumed
+<span class="nc" id="L174">                int bytesToRead = buff.remaining();</span>
+<span class="nc" id="L175">                buff.get(messageBytes, 0, bytesToRead);</span>
+<span class="nc" id="L176">                messageBytesOffset = bytesToRead;</span>
+<span class="nc" id="L177">                return bytesToRead + 4;</span>
+            }
+
+<span class="fc bfc" id="L180" title="All 2 branches covered.">            if (buff.remaining() &lt; len) {</span>
+                // Wait until the whole message is available in the buffer
+<span class="fc" id="L182">                buff.position(buff.position() - 4); // Make sure the buffer's position is right at the end</span>
+<span class="fc" id="L183">                return 0;</span>
+            }
+
+            // Temporarily limit the buffer to the size of the message so that the protobuf decode doesn't get messed up
+<span class="fc" id="L187">            int limit = buff.limit();</span>
+<span class="fc" id="L188">            buff.limit(buff.position() + len);</span>
+<span class="fc" id="L189">            deserializeMessage(buff);</span>
+<span class="pc bpc" id="L190" title="1 of 2 branches missed.">            checkState(buff.remaining() == 0);</span>
+<span class="fc" id="L191">            buff.limit(limit); // Reset the limit in case we have to recurse</span>
+
+            // If there are still bytes remaining, see if we can pull out another message since we won't get called again
+<span class="fc bfc" id="L194" title="All 2 branches covered.">            if (buff.hasRemaining())</span>
+<span class="fc" id="L195">                return len + 4 + receiveBytes(buff);</span>
+            else
+<span class="fc" id="L197">                return len + 4;</span>
+        } finally {
+<span class="pc" id="L199">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public void connectionClosed() {
+<span class="fc" id="L205">        handler.connectionClosed(this);</span>
+<span class="fc" id="L206">    }</span>
+
+    @Override
+    public void connectionOpened() {
+<span class="fc" id="L210">        setTimeoutEnabled(true);</span>
+<span class="fc" id="L211">        handler.connectionOpen(this);</span>
+<span class="fc" id="L212">    }</span>
+
+    /**
+     * &lt;p&gt;Writes the given message to the other side of the connection, prefixing it with the proper 4-byte prefix.&lt;/p&gt;
+     *
+     * &lt;p&gt;Provides a write-order guarantee.&lt;/p&gt;
+     *
+     * @throws IllegalStateException If the encoded message is larger than the maximum message size.
+     */
+    public void write(MessageType msg) throws IllegalStateException {
+<span class="fc" id="L222">        byte[] messageBytes = msg.toByteArray();</span>
+<span class="pc bpc" id="L223" title="1 of 2 branches missed.">        checkState(messageBytes.length &lt;= maxMessageSize);</span>
+<span class="fc" id="L224">        byte[] messageLength = new byte[4];</span>
+<span class="fc" id="L225">        Utils.uint32ToByteArrayBE(messageBytes.length, messageLength, 0);</span>
+        try {
+<span class="fc" id="L227">            MessageWriteTarget target = writeTarget.get();</span>
+<span class="fc" id="L228">            target.writeBytes(messageLength);</span>
+<span class="fc" id="L229">            target.writeBytes(messageBytes);</span>
+<span class="nc" id="L230">        } catch (IOException e) {</span>
+<span class="nc" id="L231">            closeConnection();</span>
+<span class="fc" id="L232">        }</span>
+<span class="fc" id="L233">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

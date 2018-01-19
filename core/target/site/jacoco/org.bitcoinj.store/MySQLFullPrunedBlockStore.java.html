@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>MySQLFullPrunedBlockStore.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.store</a> &gt; <span class="el_source">MySQLFullPrunedBlockStore.java</span></div><h1>MySQLFullPrunedBlockStore.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 Kalpesh Parmar
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.store;
+
+import org.bitcoinj.core.NetworkParameters;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+/**
+ * &lt;p&gt;A full pruned block store using the MySQL database engine. As an added bonus an address index is calculated,
+ * so you can use {@link #calculateBalanceForAddress(org.bitcoinj.core.Address)} to quickly look up
+ * the quantity of bitcoins controlled by that address.&lt;/p&gt;
+ */
+public class MySQLFullPrunedBlockStore extends DatabaseFullPrunedBlockStore {
+    private static final String MYSQL_DUPLICATE_KEY_ERROR_CODE = &quot;23000&quot;;
+    private static final String DATABASE_DRIVER_CLASS = &quot;com.mysql.jdbc.Driver&quot;;
+    private static final String DATABASE_CONNECTION_URL_PREFIX = &quot;jdbc:mysql://&quot;;
+
+    // create table SQL
+    private static final String CREATE_SETTINGS_TABLE = &quot;CREATE TABLE settings (\n&quot; +
+            &quot;    name varchar(32) NOT NULL,\n&quot; +
+            &quot;    value blob,\n&quot; +
+            &quot;    CONSTRAINT setting_pk PRIMARY KEY (name)  \n&quot; +
+            &quot;)\n&quot;;
+
+    private static final String CREATE_HEADERS_TABLE = &quot;CREATE TABLE headers (\n&quot; +
+            &quot;    hash varbinary(28) NOT NULL,\n&quot; +
+            &quot;    chainwork varbinary(12) NOT NULL,\n&quot; +
+            &quot;    height integer NOT NULL,\n&quot; +
+            &quot;    header varbinary(80) NOT NULL,\n&quot; +
+            &quot;    wasundoable tinyint(1) NOT NULL,\n&quot; +
+            &quot;    CONSTRAINT headers_pk PRIMARY KEY (hash) USING BTREE \n&quot; +
+            &quot;)&quot;;
+
+    private static final String CREATE_UNDOABLE_TABLE = &quot;CREATE TABLE undoableblocks (\n&quot; +
+            &quot;    hash varbinary(28) NOT NULL,\n&quot; +
+            &quot;    height integer NOT NULL,\n&quot; +
+            &quot;    txoutchanges mediumblob,\n&quot; +
+            &quot;    transactions mediumblob,\n&quot; +
+            &quot;    CONSTRAINT undoableblocks_pk PRIMARY KEY (hash) USING BTREE \n&quot; +
+            &quot;)\n&quot;;
+
+    private static final String CREATE_OPEN_OUTPUT_TABLE = &quot;CREATE TABLE openoutputs (\n&quot; +
+            &quot;    hash varbinary(32) NOT NULL,\n&quot; +
+            &quot;    `index` integer NOT NULL,\n&quot; +
+            &quot;    height integer NOT NULL,\n&quot; +
+            &quot;    value bigint NOT NULL,\n&quot; +
+            &quot;    scriptbytes mediumblob NOT NULL,\n&quot; +
+            &quot;    toaddress varchar(35),\n&quot; +
+            &quot;    addresstargetable tinyint(1),\n&quot; +
+            &quot;    coinbase boolean,\n&quot; +
+            &quot;    CONSTRAINT openoutputs_pk PRIMARY KEY (hash, `index`) USING BTREE \n&quot; +
+            &quot;)\n&quot;;
+
+    // Some indexes to speed up inserts
+    private static final String CREATE_OUTPUTS_ADDRESS_MULTI_INDEX              = &quot;CREATE INDEX openoutputs_hash_index_height_toaddress_idx ON openoutputs (hash, `index`, height, toaddress) USING btree&quot;;
+    private static final String CREATE_OUTPUTS_TOADDRESS_INDEX                  = &quot;CREATE INDEX openoutputs_toaddress_idx ON openoutputs (toaddress) USING btree&quot;;
+    private static final String CREATE_OUTPUTS_ADDRESSTARGETABLE_INDEX          = &quot;CREATE INDEX openoutputs_addresstargetable_idx ON openoutputs (addresstargetable) USING btree&quot;;
+    private static final String CREATE_OUTPUTS_HASH_INDEX                       = &quot;CREATE INDEX openoutputs_hash_idx ON openoutputs (hash) USING btree&quot;;
+    private static final String CREATE_UNDOABLE_TABLE_INDEX                     = &quot;CREATE INDEX undoableblocks_height_idx ON undoableblocks (height) USING btree&quot;;
+
+    // SQL involving index column (table openOutputs) overridden as it is a reserved word and must be back ticked in MySQL.
+    private static final String SELECT_OPENOUTPUTS_SQL                          = &quot;SELECT height, value, scriptbytes, coinbase, toaddress, addresstargetable FROM openoutputs WHERE hash = ? AND `index` = ?&quot;;
+    private static final String INSERT_OPENOUTPUTS_SQL                          = &quot;INSERT INTO openoutputs (hash, `index`, height, value, scriptbytes, toaddress, addresstargetable, coinbase) VALUES (?, ?, ?, ?, ?, ?, ?, ?)&quot;;
+    private static final String DELETE_OPENOUTPUTS_SQL                          = &quot;DELETE FROM openoutputs WHERE hash = ? AND `index`= ?&quot;;
+
+    private static final String SELECT_TRANSACTION_OUTPUTS_SQL                  = &quot;SELECT hash, value, scriptbytes, height, `index`, coinbase, toaddress, addresstargetable FROM openoutputs where toaddress = ?&quot;;
+
+    /**
+     * Creates a new MySQLFullPrunedBlockStore.
+     *
+     * @param params A copy of the NetworkParameters used
+     * @param fullStoreDepth The number of blocks of history stored in full (something like 1000 is pretty safe)
+     * @param hostname The hostname of the database to connect to
+     * @param dbName The database to connect to
+     * @param username The database username
+     * @param password The password to the database
+     * @throws BlockStoreException if the database fails to open for any reason
+     */
+    public MySQLFullPrunedBlockStore(NetworkParameters params, int fullStoreDepth, String hostname, String dbName,
+                                     String username, String password) throws BlockStoreException {
+<span class="nc" id="L98">        super(params, DATABASE_CONNECTION_URL_PREFIX + hostname + &quot;/&quot; + dbName, fullStoreDepth, username, password, null);</span>
+<span class="nc" id="L99">    }</span>
+
+    @Override
+    protected String getDuplicateKeyErrorCode() {
+<span class="nc" id="L103">        return MYSQL_DUPLICATE_KEY_ERROR_CODE;</span>
+    }
+
+    @Override
+    protected String getSelectOpenoutputsSQL() {
+<span class="nc" id="L108">        return SELECT_OPENOUTPUTS_SQL;</span>
+    }
+
+    @Override
+    protected String getInsertOpenoutputsSQL() {
+<span class="nc" id="L113">        return INSERT_OPENOUTPUTS_SQL;</span>
+    }
+
+    @Override
+    protected String getDeleteOpenoutputsSQL() {
+<span class="nc" id="L118">        return DELETE_OPENOUTPUTS_SQL;</span>
+    }
+
+    @Override
+    protected String getTransactionOutputSelectSQL() {
+<span class="nc" id="L123">        return SELECT_TRANSACTION_OUTPUTS_SQL;</span>
+    }
+
+    @Override
+    protected List&lt;String&gt; getCreateTablesSQL() {
+<span class="nc" id="L128">        List&lt;String&gt; sqlStatements = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L129">        sqlStatements.add(CREATE_SETTINGS_TABLE);</span>
+<span class="nc" id="L130">        sqlStatements.add(CREATE_HEADERS_TABLE);</span>
+<span class="nc" id="L131">        sqlStatements.add(CREATE_UNDOABLE_TABLE);</span>
+<span class="nc" id="L132">        sqlStatements.add(CREATE_OPEN_OUTPUT_TABLE);</span>
+<span class="nc" id="L133">        return sqlStatements;</span>
+    }
+
+    @Override
+    protected List&lt;String&gt; getCreateIndexesSQL() {
+<span class="nc" id="L138">        List&lt;String&gt; sqlStatements = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L139">        sqlStatements.add(CREATE_UNDOABLE_TABLE_INDEX);</span>
+<span class="nc" id="L140">        sqlStatements.add(CREATE_OUTPUTS_ADDRESS_MULTI_INDEX);</span>
+<span class="nc" id="L141">        sqlStatements.add(CREATE_OUTPUTS_ADDRESSTARGETABLE_INDEX);</span>
+<span class="nc" id="L142">        sqlStatements.add(CREATE_OUTPUTS_HASH_INDEX);</span>
+<span class="nc" id="L143">        sqlStatements.add(CREATE_OUTPUTS_TOADDRESS_INDEX);</span>
+<span class="nc" id="L144">        return sqlStatements;</span>
+    }
+
+    @Override
+    protected List&lt;String&gt; getCreateSchemeSQL() {
+        // do nothing
+<span class="nc" id="L150">        return Collections.emptyList();</span>
+    }
+
+    @Override
+    protected String getDatabaseDriverClass() {
+<span class="nc" id="L155">        return DATABASE_DRIVER_CLASS;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

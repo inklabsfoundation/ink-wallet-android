@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>ChildNumber.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.crypto</a> &gt; <span class="el_source">ChildNumber.java</span></div><h1>ChildNumber.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Matija Mazi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.crypto;
+
+import java.util.Locale;
+
+import com.google.common.primitives.Ints;
+
+/**
+ * &lt;p&gt;This is just a wrapper for the i (child number) as per BIP 32 with a boolean getter for the most significant bit
+ * and a getter for the actual 0-based child number. A {@link java.util.List} of these forms a &lt;i&gt;path&lt;/i&gt; through a
+ * {@link DeterministicHierarchy}. This class is immutable.
+ */
+public class ChildNumber implements Comparable&lt;ChildNumber&gt; {
+    /**
+     * The bit that's set in the child number to indicate whether this key is &quot;hardened&quot;. Given a hardened key, it is
+     * not possible to derive a child public key if you know only the hardened public key. With a non-hardened key this
+     * is possible, so you can derive trees of public keys given only a public parent, but the downside is that it's
+     * possible to leak private keys if you disclose a parent public key and a child private key (elliptic curve maths
+     * allows you to work upwards).
+     */
+    public static final int HARDENED_BIT = 0x80000000;
+
+<span class="fc" id="L38">    public static final ChildNumber ZERO = new ChildNumber(0);</span>
+<span class="fc" id="L39">    public static final ChildNumber ONE = new ChildNumber(1);</span>
+<span class="fc" id="L40">    public static final ChildNumber ZERO_HARDENED = new ChildNumber(0, true);</span>
+
+    /** Integer i as per BIP 32 spec, including the MSB denoting derivation type (0 = public, 1 = private) **/
+    private final int i;
+
+<span class="fc" id="L45">    public ChildNumber(int childNumber, boolean isHardened) {</span>
+<span class="pc bpc" id="L46" title="1 of 2 branches missed.">        if (hasHardenedBit(childNumber))</span>
+<span class="nc" id="L47">            throw new IllegalArgumentException(&quot;Most significant bit is reserved and shouldn't be set: &quot; + childNumber);</span>
+<span class="fc bfc" id="L48" title="All 2 branches covered.">        i = isHardened ? (childNumber | HARDENED_BIT) : childNumber;</span>
+<span class="fc" id="L49">    }</span>
+
+<span class="fc" id="L51">    public ChildNumber(int i) {</span>
+<span class="fc" id="L52">        this.i = i;</span>
+<span class="fc" id="L53">    }</span>
+
+    /** Returns the uint32 encoded form of the path element, including the most significant bit. */
+    public int getI() {
+<span class="nc" id="L57">        return i;</span>
+    }
+
+    /** Returns the uint32 encoded form of the path element, including the most significant bit. */
+<span class="fc" id="L61">    public int i() { return i; }</span>
+
+    public boolean isHardened() {
+<span class="fc" id="L64">        return hasHardenedBit(i);</span>
+    }
+
+    private static boolean hasHardenedBit(int a) {
+<span class="fc bfc" id="L68" title="All 2 branches covered.">        return (a &amp; HARDENED_BIT) != 0;</span>
+    }
+
+    /** Returns the child number without the hardening bit set (i.e. index in that part of the tree). */
+    public int num() {
+<span class="fc" id="L73">        return i &amp; (~HARDENED_BIT);</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="fc bfc" id="L78" title="All 2 branches covered.">        return String.format(Locale.US, &quot;%d%s&quot;, num(), isHardened() ? &quot;H&quot; : &quot;&quot;);</span>
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="pc bpc" id="L83" title="1 of 2 branches missed.">        if (this == o) return true;</span>
+<span class="pc bpc" id="L84" title="2 of 4 branches missed.">        if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">        return i == ((ChildNumber)o).i;</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="fc" id="L90">        return i;</span>
+    }
+
+    @Override
+    public int compareTo(ChildNumber other) {
+        // note that in this implementation compareTo() is not consistent with equals()
+<span class="nc" id="L96">        return Ints.compare(this.num(), other.num());</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

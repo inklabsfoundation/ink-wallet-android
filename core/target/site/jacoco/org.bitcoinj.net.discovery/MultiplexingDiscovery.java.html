@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>MultiplexingDiscovery.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.net.discovery</a> &gt; <span class="el_source">MultiplexingDiscovery.java</span></div><h1>MultiplexingDiscovery.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 Mike Hearn
+ * Copyright 2015 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.net.discovery;
+
+import com.google.common.collect.Lists;
+
+import org.bitcoinj.core.NetworkParameters;
+import org.bitcoinj.core.VersionMessage;
+import org.bitcoinj.net.discovery.HttpDiscovery;
+import org.bitcoinj.net.discovery.DnsDiscovery.DnsSeedDiscovery;
+import org.bitcoinj.utils.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.*;
+
+import okhttp3.OkHttpClient;
+
+import static com.google.common.base.Preconditions.checkArgument;
+
+/**
+ * MultiplexingDiscovery queries multiple PeerDiscovery objects, shuffles their responses and then returns the results,
+ * thus selecting randomly between them and reducing the influence of any particular seed. Any that don't respond
+ * within the timeout are ignored. Backends are queried in parallel. Backends may block.
+ */
+public class MultiplexingDiscovery implements PeerDiscovery {
+<span class="nc" id="L46">    private static final Logger log = LoggerFactory.getLogger(MultiplexingDiscovery.class);</span>
+
+    protected final List&lt;PeerDiscovery&gt; seeds;
+    protected final NetworkParameters netParams;
+    private volatile ExecutorService vThreadPool;
+
+    /**
+     * Builds a suitable set of peer discoveries. Will query them in parallel before producing a merged response.
+     * If specific services are required, DNS is not used as the protocol can't handle it.
+     * @param params Network to use.
+     * @param services Required services as a bitmask, e.g. {@link VersionMessage#NODE_NETWORK}.
+     */
+    public static MultiplexingDiscovery forServices(NetworkParameters params, long services) {
+<span class="nc" id="L59">        List&lt;PeerDiscovery&gt; discoveries = Lists.newArrayList();</span>
+<span class="nc" id="L60">        HttpDiscovery.Details[] httpSeeds = params.getHttpSeeds();</span>
+<span class="nc bnc" id="L61" title="All 2 branches missed.">        if (httpSeeds != null) {</span>
+<span class="nc" id="L62">            OkHttpClient httpClient = new OkHttpClient();</span>
+<span class="nc bnc" id="L63" title="All 2 branches missed.">            for (HttpDiscovery.Details httpSeed : httpSeeds)</span>
+<span class="nc" id="L64">                discoveries.add(new HttpDiscovery(params, httpSeed, httpClient));</span>
+        }
+        // Also use DNS seeds if there is no specific service requirement
+<span class="nc bnc" id="L67" title="All 2 branches missed.">        if (services == 0) {</span>
+<span class="nc" id="L68">            String[] dnsSeeds = params.getDnsSeeds();</span>
+<span class="nc bnc" id="L69" title="All 2 branches missed.">            if (dnsSeeds != null)</span>
+<span class="nc bnc" id="L70" title="All 2 branches missed.">                for (String dnsSeed : dnsSeeds)</span>
+<span class="nc" id="L71">                    discoveries.add(new DnsSeedDiscovery(params, dnsSeed));</span>
+        }
+<span class="nc" id="L73">        return new MultiplexingDiscovery(params, discoveries);</span>
+    }
+
+    /**
+     * Will query the given seeds in parallel before producing a merged response.
+     */
+<span class="nc" id="L79">    public MultiplexingDiscovery(NetworkParameters params, List&lt;PeerDiscovery&gt; seeds) {</span>
+<span class="nc bnc" id="L80" title="All 2 branches missed.">        checkArgument(!seeds.isEmpty());</span>
+<span class="nc" id="L81">        this.netParams = params;</span>
+<span class="nc" id="L82">        this.seeds = seeds;</span>
+<span class="nc" id="L83">    }</span>
+
+    @Override
+    public InetSocketAddress[] getPeers(final long services, final long timeoutValue, final TimeUnit timeoutUnit) throws PeerDiscoveryException {
+<span class="nc" id="L87">        vThreadPool = createExecutor();</span>
+        try {
+<span class="nc" id="L89">            List&lt;Callable&lt;InetSocketAddress[]&gt;&gt; tasks = Lists.newArrayList();</span>
+<span class="nc bnc" id="L90" title="All 2 branches missed.">            for (final PeerDiscovery seed : seeds) {</span>
+<span class="nc" id="L91">                tasks.add(new Callable&lt;InetSocketAddress[]&gt;() {</span>
+                    @Override
+                    public InetSocketAddress[] call() throws Exception {
+<span class="nc" id="L94">                        return seed.getPeers(services, timeoutValue,  timeoutUnit);</span>
+                    }
+                });
+<span class="nc" id="L97">            }</span>
+<span class="nc" id="L98">            final List&lt;Future&lt;InetSocketAddress[]&gt;&gt; futures = vThreadPool.invokeAll(tasks, timeoutValue, timeoutUnit);</span>
+<span class="nc" id="L99">            ArrayList&lt;InetSocketAddress&gt; addrs = Lists.newArrayList();</span>
+<span class="nc bnc" id="L100" title="All 2 branches missed.">            for (int i = 0; i &lt; futures.size(); i++) {</span>
+<span class="nc" id="L101">                Future&lt;InetSocketAddress[]&gt; future = futures.get(i);</span>
+<span class="nc bnc" id="L102" title="All 2 branches missed.">                if (future.isCancelled()) {</span>
+<span class="nc" id="L103">                    log.warn(&quot;Seed {}: timed out&quot;, seeds.get(i));</span>
+<span class="nc" id="L104">                    continue;  // Timed out.</span>
+                }
+                final InetSocketAddress[] inetAddresses;
+                try {
+<span class="nc" id="L108">                    inetAddresses = future.get();</span>
+<span class="nc" id="L109">                } catch (ExecutionException e) {</span>
+<span class="nc" id="L110">                    log.warn(&quot;Seed {}: failed to look up: {}&quot;, seeds.get(i), e.getMessage());</span>
+<span class="nc" id="L111">                    continue;</span>
+<span class="nc" id="L112">                }</span>
+<span class="nc" id="L113">                Collections.addAll(addrs, inetAddresses);</span>
+            }
+<span class="nc bnc" id="L115" title="All 2 branches missed.">            if (addrs.size() == 0)</span>
+<span class="nc" id="L116">                throw new PeerDiscoveryException(&quot;No peer discovery returned any results in &quot;</span>
+<span class="nc" id="L117">                        + timeoutUnit.toMillis(timeoutValue) + &quot;ms. Check internet connection?&quot;);</span>
+<span class="nc" id="L118">            Collections.shuffle(addrs);</span>
+<span class="nc" id="L119">            vThreadPool.shutdownNow();</span>
+<span class="nc" id="L120">            return addrs.toArray(new InetSocketAddress[addrs.size()]);</span>
+<span class="nc" id="L121">        } catch (InterruptedException e) {</span>
+<span class="nc" id="L122">            throw new PeerDiscoveryException(e);</span>
+        } finally {
+<span class="nc" id="L124">            vThreadPool.shutdown();</span>
+        }
+    }
+
+    protected ExecutorService createExecutor() {
+<span class="nc" id="L129">        return Executors.newFixedThreadPool(seeds.size(), new ContextPropagatingThreadFactory(&quot;Multiplexing discovery&quot;));</span>
+    }
+
+    @Override
+    public void shutdown() {
+<span class="nc" id="L134">        ExecutorService tp = vThreadPool;</span>
+<span class="nc bnc" id="L135" title="All 2 branches missed.">        if (tp != null)</span>
+<span class="nc" id="L136">            tp.shutdown();</span>
+<span class="nc" id="L137">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

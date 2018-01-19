@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>Sha256Hash.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">Sha256Hash.java</span></div><h1>Sha256Hash.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import com.google.common.io.ByteStreams;
+import com.google.common.primitives.*;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.Serializable;
+import java.math.BigInteger;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+
+import static com.google.common.base.Preconditions.checkArgument;
+
+/**
+ * A Sha256Hash just wraps a byte[] so that equals and hashcode work correctly, allowing it to be used as keys in a
+ * map. It also checks that the length is correct and provides a bit more type safety.
+ */
+public class Sha256Hash implements Serializable, Comparable&lt;Sha256Hash&gt; {
+    public static final int LENGTH = 32; // bytes
+<span class="fc" id="L40">    public static final Sha256Hash ZERO_HASH = wrap(new byte[LENGTH]);</span>
+
+    private final byte[] bytes;
+
+    /**
+     * Use {@link #wrap(byte[])} instead.
+     */
+    @Deprecated
+<span class="fc" id="L48">    public Sha256Hash(byte[] rawHashBytes) {</span>
+<span class="pc bpc" id="L49" title="1 of 2 branches missed.">        checkArgument(rawHashBytes.length == LENGTH);</span>
+<span class="fc" id="L50">        this.bytes = rawHashBytes;</span>
+<span class="fc" id="L51">    }</span>
+
+    /**
+     * Use {@link #wrap(String)} instead.
+     */
+    @Deprecated
+<span class="nc" id="L57">    public Sha256Hash(String hexString) {</span>
+<span class="nc bnc" id="L58" title="All 2 branches missed.">        checkArgument(hexString.length() == LENGTH * 2);</span>
+<span class="nc" id="L59">        this.bytes = Utils.HEX.decode(hexString);</span>
+<span class="nc" id="L60">    }</span>
+
+    /**
+     * Creates a new instance that wraps the given hash value.
+     *
+     * @param rawHashBytes the raw hash bytes to wrap
+     * @return a new instance
+     * @throws IllegalArgumentException if the given array length is not exactly 32
+     */
+    @SuppressWarnings(&quot;deprecation&quot;) // the constructor will be made private in the future
+    public static Sha256Hash wrap(byte[] rawHashBytes) {
+<span class="fc" id="L71">        return new Sha256Hash(rawHashBytes);</span>
+    }
+
+    /**
+     * Creates a new instance that wraps the given hash value (represented as a hex string).
+     *
+     * @param hexString a hash value represented as a hex string
+     * @return a new instance
+     * @throws IllegalArgumentException if the given string is not a valid
+     *         hex string, or if it does not represent exactly 32 bytes
+     */
+    public static Sha256Hash wrap(String hexString) {
+<span class="fc" id="L83">        return wrap(Utils.HEX.decode(hexString));</span>
+    }
+
+    /**
+     * Creates a new instance that wraps the given hash value, but with byte order reversed.
+     *
+     * @param rawHashBytes the raw hash bytes to wrap
+     * @return a new instance
+     * @throws IllegalArgumentException if the given array length is not exactly 32
+     */
+    @SuppressWarnings(&quot;deprecation&quot;) // the constructor will be made private in the future
+    public static Sha256Hash wrapReversed(byte[] rawHashBytes) {
+<span class="fc" id="L95">        return wrap(Utils.reverseBytes(rawHashBytes));</span>
+    }
+
+    /** Use {@link #of(byte[])} instead: this old name is ambiguous. */
+    @Deprecated
+    public static Sha256Hash create(byte[] contents) {
+<span class="nc" id="L101">        return of(contents);</span>
+    }
+
+    /**
+     * Creates a new instance containing the calculated (one-time) hash of the given bytes.
+     *
+     * @param contents the bytes on which the hash value is calculated
+     * @return a new instance containing the calculated (one-time) hash
+     */
+    public static Sha256Hash of(byte[] contents) {
+<span class="fc" id="L111">        return wrap(hash(contents));</span>
+    }
+
+    /** Use {@link #twiceOf(byte[])} instead: this old name is ambiguous. */
+    @Deprecated
+    public static Sha256Hash createDouble(byte[] contents) {
+<span class="nc" id="L117">        return twiceOf(contents);</span>
+    }
+
+    /**
+     * Creates a new instance containing the hash of the calculated hash of the given bytes.
+     *
+     * @param contents the bytes on which the hash value is calculated
+     * @return a new instance containing the calculated (two-time) hash
+     */
+    public static Sha256Hash twiceOf(byte[] contents) {
+<span class="fc" id="L127">        return wrap(hashTwice(contents));</span>
+    }
+
+    /**
+     * Creates a new instance containing the calculated (one-time) hash of the given file's contents.
+     *
+     * The file contents are read fully into memory, so this method should only be used with small files.
+     *
+     * @param file the file on which the hash value is calculated
+     * @return a new instance containing the calculated (one-time) hash
+     * @throws IOException if an error occurs while reading the file
+     */
+    public static Sha256Hash of(File file) throws IOException {
+<span class="fc" id="L140">        FileInputStream in = new FileInputStream(file);</span>
+        try {
+<span class="fc" id="L142">            return of(ByteStreams.toByteArray(in));</span>
+        } finally {
+<span class="pc" id="L144">            in.close();</span>
+        }
+    }
+
+    /**
+     * Returns a new SHA-256 MessageDigest instance.
+     *
+     * This is a convenience method which wraps the checked
+     * exception that can never occur with a RuntimeException.
+     *
+     * @return a new SHA-256 MessageDigest instance
+     */
+    public static MessageDigest newDigest() {
+        try {
+<span class="fc" id="L158">            return MessageDigest.getInstance(&quot;SHA-256&quot;);</span>
+<span class="nc" id="L159">        } catch (NoSuchAlgorithmException e) {</span>
+<span class="nc" id="L160">            throw new RuntimeException(e);  // Can't happen.</span>
+        }
+    }
+
+    /**
+     * Calculates the SHA-256 hash of the given bytes.
+     *
+     * @param input the bytes to hash
+     * @return the hash (in big-endian order)
+     */
+    public static byte[] hash(byte[] input) {
+<span class="fc" id="L171">        return hash(input, 0, input.length);</span>
+    }
+
+    /**
+     * Calculates the SHA-256 hash of the given byte range.
+     *
+     * @param input the array containing the bytes to hash
+     * @param offset the offset within the array of the bytes to hash
+     * @param length the number of bytes to hash
+     * @return the hash (in big-endian order)
+     */
+    public static byte[] hash(byte[] input, int offset, int length) {
+<span class="fc" id="L183">        MessageDigest digest = newDigest();</span>
+<span class="fc" id="L184">        digest.update(input, offset, length);</span>
+<span class="fc" id="L185">        return digest.digest();</span>
+    }
+
+    /**
+     * Calculates the SHA-256 hash of the given bytes,
+     * and then hashes the resulting hash again.
+     *
+     * @param input the bytes to hash
+     * @return the double-hash (in big-endian order)
+     */
+    public static byte[] hashTwice(byte[] input) {
+<span class="fc" id="L196">        return hashTwice(input, 0, input.length);</span>
+    }
+
+    /**
+     * Calculates the SHA-256 hash of the given byte range,
+     * and then hashes the resulting hash again.
+     *
+     * @param input the array containing the bytes to hash
+     * @param offset the offset within the array of the bytes to hash
+     * @param length the number of bytes to hash
+     * @return the double-hash (in big-endian order)
+     */
+    public static byte[] hashTwice(byte[] input, int offset, int length) {
+<span class="fc" id="L209">        MessageDigest digest = newDigest();</span>
+<span class="fc" id="L210">        digest.update(input, offset, length);</span>
+<span class="fc" id="L211">        return digest.digest(digest.digest());</span>
+    }
+
+    /**
+     * Calculates the hash of hash on the given byte ranges. This is equivalent to
+     * concatenating the two ranges and then passing the result to {@link #hashTwice(byte[])}.
+     */
+    public static byte[] hashTwice(byte[] input1, int offset1, int length1,
+                                   byte[] input2, int offset2, int length2) {
+<span class="fc" id="L220">        MessageDigest digest = newDigest();</span>
+<span class="fc" id="L221">        digest.update(input1, offset1, length1);</span>
+<span class="fc" id="L222">        digest.update(input2, offset2, length2);</span>
+<span class="fc" id="L223">        return digest.digest(digest.digest());</span>
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="fc bfc" id="L228" title="All 2 branches covered.">        if (this == o) return true;</span>
+<span class="pc bpc" id="L229" title="1 of 4 branches missed.">        if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L230">        return Arrays.equals(bytes, ((Sha256Hash)o).bytes);</span>
+    }
+
+    /**
+     * Returns the last four bytes of the wrapped hash. This should be unique enough to be a suitable hash code even for
+     * blocks, where the goal is to try and get the first bytes to be zeros (i.e. the value as a big integer lower
+     * than the target value).
+     */
+    @Override
+    public int hashCode() {
+        // Use the last 4 bytes, not the first 4 which are often zeros in Bitcoin.
+<span class="fc" id="L241">        return Ints.fromBytes(bytes[LENGTH - 4], bytes[LENGTH - 3], bytes[LENGTH - 2], bytes[LENGTH - 1]);</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="fc" id="L246">        return Utils.HEX.encode(bytes);</span>
+    }
+
+    /**
+     * Returns the bytes interpreted as a positive integer.
+     */
+    public BigInteger toBigInteger() {
+<span class="fc" id="L253">        return new BigInteger(1, bytes);</span>
+    }
+
+    /**
+     * Returns the internal byte array, without defensively copying. Therefore do NOT modify the returned array.
+     */
+    public byte[] getBytes() {
+<span class="fc" id="L260">        return bytes;</span>
+    }
+
+    /**
+     * Returns a reversed copy of the internal byte array.
+     */
+    public byte[] getReversedBytes() {
+<span class="fc" id="L267">        return Utils.reverseBytes(bytes);</span>
+    }
+
+    @Override
+    public int compareTo(final Sha256Hash other) {
+<span class="fc bfc" id="L272" title="All 2 branches covered.">        for (int i = LENGTH - 1; i &gt;= 0; i--) {</span>
+<span class="fc" id="L273">            final int thisByte = this.bytes[i] &amp; 0xff;</span>
+<span class="fc" id="L274">            final int otherByte = other.bytes[i] &amp; 0xff;</span>
+<span class="fc bfc" id="L275" title="All 2 branches covered.">            if (thisByte &gt; otherByte)</span>
+<span class="fc" id="L276">                return 1;</span>
+<span class="fc bfc" id="L277" title="All 2 branches covered.">            if (thisByte &lt; otherByte)</span>
+<span class="fc" id="L278">                return -1;</span>
+        }
+<span class="fc" id="L280">        return 0;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

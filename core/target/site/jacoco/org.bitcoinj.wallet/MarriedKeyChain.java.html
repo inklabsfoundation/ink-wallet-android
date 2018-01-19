@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>MarriedKeyChain.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.wallet</a> &gt; <span class="el_source">MarriedKeyChain.java</span></div><h1>MarriedKeyChain.java</h1><pre class="source lang-java linenums">/*
+ * Copyright by the original author or authors.
+ * 
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.wallet;
+
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
+import com.google.protobuf.ByteString;
+
+import org.bitcoinj.core.BloomFilter;
+import org.bitcoinj.core.ECKey;
+import org.bitcoinj.core.NetworkParameters;
+import org.bitcoinj.core.Utils;
+import org.bitcoinj.crypto.DeterministicKey;
+import org.bitcoinj.crypto.KeyCrypter;
+import org.bitcoinj.script.Script;
+import org.bitcoinj.script.ScriptBuilder;
+import org.spongycastle.crypto.params.KeyParameter;
+
+import java.security.SecureRandom;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.annotation.Nullable;
+
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.Lists.newArrayList;
+
+/**
+ * &lt;p&gt;A multi-signature keychain using synchronized HD keys (a.k.a HDM)&lt;/p&gt;
+ * &lt;p&gt;This keychain keeps track of following keychains that follow the account key of this keychain.
+ * You can get P2SH addresses to receive coins to from this chain. The threshold - sigsRequiredToSpend
+ * specifies how many signatures required to spend transactions for this married keychain. This value should not exceed
+ * total number of keys involved (one followed key plus number of following keys), otherwise IllegalArgumentException
+ * will be thrown.&lt;/p&gt;
+ * &lt;p&gt;IMPORTANT: As of Bitcoin Core 0.9 all multisig transactions which require more than 3 public keys are non-standard
+ * and such spends won't be processed by peers with default settings, essentially making such transactions almost
+ * nonspendable&lt;/p&gt;
+ * &lt;p&gt;This method will throw an IllegalStateException, if the keychain is already married or already has leaf keys
+ * issued.&lt;/p&gt;
+ */
+public class MarriedKeyChain extends DeterministicKeyChain {
+    // The map holds P2SH redeem script and corresponding ECKeys issued by this KeyChainGroup (including lookahead)
+    // mapped to redeem script hashes.
+<span class="pc" id="L61">    private LinkedHashMap&lt;ByteString, RedeemData&gt; marriedKeysRedeemData = new LinkedHashMap&lt;&gt;();</span>
+
+    private List&lt;DeterministicKeyChain&gt; followingKeyChains;
+
+    /** Builds a {@link MarriedKeyChain} */
+    public static class Builder&lt;T extends Builder&lt;T&gt;&gt; extends DeterministicKeyChain.Builder&lt;T&gt; {
+        private List&lt;DeterministicKey&gt; followingKeys;
+        private int threshold;
+
+<span class="fc" id="L70">        protected Builder() {</span>
+<span class="fc" id="L71">        }</span>
+
+        public T followingKeys(List&lt;DeterministicKey&gt; followingKeys) {
+<span class="fc" id="L74">            this.followingKeys = followingKeys;</span>
+<span class="fc" id="L75">            return self();</span>
+        }
+
+        public T followingKeys(DeterministicKey followingKey, DeterministicKey ...followingKeys) {
+<span class="fc" id="L79">            this.followingKeys = Lists.asList(followingKey, followingKeys);</span>
+<span class="fc" id="L80">            return self();</span>
+        }
+
+        /**
+         * Threshold, or &lt;code&gt;(followingKeys.size() + 1) / 2 + 1)&lt;/code&gt; (majority) if unspecified.&lt;/p&gt;
+         * &lt;p&gt;IMPORTANT: As of Bitcoin Core 0.9 all multisig transactions which require more than 3 public keys are non-standard
+         * and such spends won't be processed by peers with default settings, essentially making such transactions almost
+         * nonspendable&lt;/p&gt;
+         */
+        public T threshold(int threshold) {
+<span class="fc" id="L90">            this.threshold = threshold;</span>
+<span class="fc" id="L91">            return self();</span>
+        }
+
+        @Override
+        public MarriedKeyChain build() {
+<span class="pc bpc" id="L96" title="4 of 8 branches missed.">            checkState(random != null || entropy != null || seed != null || watchingKey!= null, &quot;Must provide either entropy or random or seed or watchingKey&quot;);</span>
+<span class="fc" id="L97">            checkNotNull(followingKeys, &quot;followingKeys must be provided&quot;);</span>
+            MarriedKeyChain chain;
+<span class="fc bfc" id="L99" title="All 2 branches covered.">            if (threshold == 0)</span>
+<span class="fc" id="L100">                threshold = (followingKeys.size() + 1) / 2 + 1;</span>
+<span class="fc bfc" id="L101" title="All 2 branches covered.">            if (random != null) {</span>
+<span class="fc" id="L102">                chain = new MarriedKeyChain(random, bits, getPassphrase(), seedCreationTimeSecs);</span>
+<span class="pc bpc" id="L103" title="1 of 2 branches missed.">            } else if (entropy != null) {</span>
+<span class="nc" id="L104">                chain = new MarriedKeyChain(entropy, getPassphrase(), seedCreationTimeSecs);</span>
+<span class="pc bpc" id="L105" title="1 of 2 branches missed.">            } else if (seed != null) {</span>
+<span class="fc" id="L106">                seed.setCreationTimeSeconds(seedCreationTimeSecs);</span>
+<span class="fc" id="L107">                chain = new MarriedKeyChain(seed);</span>
+            } else {
+<span class="nc" id="L109">                watchingKey.setCreationTimeSeconds(seedCreationTimeSecs);</span>
+<span class="nc" id="L110">                chain = new MarriedKeyChain(watchingKey);</span>
+            }
+<span class="fc" id="L112">            chain.addFollowingAccountKeys(followingKeys, threshold);</span>
+<span class="fc" id="L113">            return chain;</span>
+        }
+    }
+
+    public static Builder&lt;?&gt; builder() {
+<span class="fc" id="L118">        return new Builder();</span>
+    }
+
+    // Protobuf deserialization constructors
+    MarriedKeyChain(DeterministicKey accountKey) {
+<span class="nc" id="L123">        super(accountKey, false);</span>
+<span class="nc" id="L124">    }</span>
+
+    MarriedKeyChain(DeterministicSeed seed, KeyCrypter crypter) {
+<span class="fc" id="L127">        super(seed, crypter);</span>
+<span class="fc" id="L128">    }</span>
+
+    // Builder constructors
+    private MarriedKeyChain(SecureRandom random, int bits, String passphrase, long seedCreationTimeSecs) {
+<span class="fc" id="L132">        super(random, bits, passphrase, seedCreationTimeSecs);</span>
+<span class="fc" id="L133">    }</span>
+
+    private MarriedKeyChain(byte[] entropy, String passphrase, long seedCreationTimeSecs) {
+<span class="nc" id="L136">        super(entropy, passphrase, seedCreationTimeSecs);</span>
+<span class="nc" id="L137">    }</span>
+
+    private MarriedKeyChain(DeterministicSeed seed) {
+<span class="fc" id="L140">        super(seed);</span>
+<span class="fc" id="L141">    }</span>
+
+    void setFollowingKeyChains(List&lt;DeterministicKeyChain&gt; followingKeyChains) {
+<span class="pc bpc" id="L144" title="1 of 2 branches missed.">        checkArgument(!followingKeyChains.isEmpty());</span>
+<span class="fc" id="L145">        this.followingKeyChains = followingKeyChains;</span>
+<span class="fc" id="L146">    }</span>
+
+    @Override
+    public boolean isMarried() {
+<span class="fc" id="L150">        return true;</span>
+    }
+
+    /** Create a new married key and return the matching output script */
+    @Override
+    public Script freshOutputScript(KeyPurpose purpose) {
+<span class="fc" id="L156">        DeterministicKey followedKey = getKey(purpose);</span>
+<span class="fc" id="L157">        ImmutableList.Builder&lt;ECKey&gt; keys = ImmutableList.&lt;ECKey&gt;builder().add(followedKey);</span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">        for (DeterministicKeyChain keyChain : followingKeyChains) {</span>
+<span class="fc" id="L159">            DeterministicKey followingKey = keyChain.getKey(purpose);</span>
+<span class="fc" id="L160">            checkState(followedKey.getChildNumber().equals(followingKey.getChildNumber()), &quot;Following keychains should be in sync&quot;);</span>
+<span class="fc" id="L161">            keys.add(followingKey);</span>
+<span class="fc" id="L162">        }</span>
+<span class="fc" id="L163">        List&lt;ECKey&gt; marriedKeys = keys.build();</span>
+<span class="fc" id="L164">        Script redeemScript = ScriptBuilder.createRedeemScript(sigsRequiredToSpend, marriedKeys);</span>
+<span class="fc" id="L165">        return ScriptBuilder.createP2SHOutputScript(redeemScript);</span>
+    }
+
+    private List&lt;ECKey&gt; getMarriedKeysWithFollowed(DeterministicKey followedKey) {
+<span class="fc" id="L169">        ImmutableList.Builder&lt;ECKey&gt; keys = ImmutableList.builder();</span>
+<span class="fc bfc" id="L170" title="All 2 branches covered.">        for (DeterministicKeyChain keyChain : followingKeyChains) {</span>
+<span class="fc" id="L171">            keyChain.maybeLookAhead();</span>
+<span class="fc" id="L172">            keys.add(keyChain.getKeyByPath(followedKey.getPath()));</span>
+<span class="fc" id="L173">        }</span>
+<span class="fc" id="L174">        keys.add(followedKey);</span>
+<span class="fc" id="L175">        return keys.build();</span>
+    }
+
+    /** Get the redeem data for a key in this married chain */
+    @Override
+    public RedeemData getRedeemData(DeterministicKey followedKey) {
+<span class="fc" id="L181">        List&lt;ECKey&gt; marriedKeys = getMarriedKeysWithFollowed(followedKey);</span>
+<span class="fc" id="L182">        Script redeemScript = ScriptBuilder.createRedeemScript(sigsRequiredToSpend, marriedKeys);</span>
+<span class="fc" id="L183">        return RedeemData.of(marriedKeys, redeemScript);</span>
+    }
+
+    private void addFollowingAccountKeys(List&lt;DeterministicKey&gt; followingAccountKeys, int sigsRequiredToSpend) {
+<span class="fc bfc" id="L187" title="All 2 branches covered.">        checkArgument(sigsRequiredToSpend &lt;= followingAccountKeys.size() + 1, &quot;Multisig threshold can't exceed total number of keys&quot;);</span>
+<span class="pc bpc" id="L188" title="1 of 2 branches missed.">        checkState(numLeafKeysIssued() == 0, &quot;Active keychain already has keys in use&quot;);</span>
+<span class="pc bpc" id="L189" title="1 of 2 branches missed.">        checkState(followingKeyChains == null);</span>
+
+<span class="fc" id="L191">        List&lt;DeterministicKeyChain&gt; followingKeyChains = Lists.newArrayList();</span>
+
+<span class="fc bfc" id="L193" title="All 2 branches covered.">        for (DeterministicKey key : followingAccountKeys) {</span>
+<span class="pc bpc" id="L194" title="1 of 2 branches missed.">            checkArgument(key.getPath().size() == getAccountPath().size(), &quot;Following keys have to be account keys&quot;);</span>
+<span class="fc" id="L195">            DeterministicKeyChain chain = DeterministicKeyChain.watchAndFollow(key);</span>
+<span class="pc bpc" id="L196" title="1 of 2 branches missed.">            if (lookaheadSize &gt;= 0)</span>
+<span class="fc" id="L197">                chain.setLookaheadSize(lookaheadSize);</span>
+<span class="pc bpc" id="L198" title="1 of 2 branches missed.">            if (lookaheadThreshold &gt;= 0)</span>
+<span class="fc" id="L199">                chain.setLookaheadThreshold(lookaheadThreshold);</span>
+<span class="fc" id="L200">            followingKeyChains.add(chain);</span>
+<span class="fc" id="L201">        }</span>
+
+<span class="fc" id="L203">        this.sigsRequiredToSpend = sigsRequiredToSpend;</span>
+<span class="fc" id="L204">        this.followingKeyChains = followingKeyChains;</span>
+<span class="fc" id="L205">    }</span>
+
+    @Override
+    public void setLookaheadSize(int lookaheadSize) {
+<span class="fc" id="L209">        lock.lock();</span>
+        try {
+<span class="fc" id="L211">            super.setLookaheadSize(lookaheadSize);</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">            if (followingKeyChains != null) {</span>
+<span class="fc bfc" id="L213" title="All 2 branches covered.">                for (DeterministicKeyChain followingChain : followingKeyChains) {</span>
+<span class="fc" id="L214">                    followingChain.setLookaheadSize(lookaheadSize);</span>
+<span class="fc" id="L215">                }</span>
+            }
+        } finally {
+<span class="pc" id="L218">            lock.unlock();</span>
+<span class="fc" id="L219">        }</span>
+<span class="fc" id="L220">    }</span>
+
+    @Override
+    public List&lt;Protos.Key&gt; serializeToProtobuf() {
+<span class="fc" id="L224">        List&lt;Protos.Key&gt; result = newArrayList();</span>
+<span class="fc" id="L225">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L227" title="All 2 branches covered.">            for (DeterministicKeyChain chain : followingKeyChains) {</span>
+<span class="fc" id="L228">                result.addAll(chain.serializeMyselfToProtobuf());</span>
+<span class="fc" id="L229">            }</span>
+<span class="fc" id="L230">            result.addAll(serializeMyselfToProtobuf());</span>
+        } finally {
+<span class="pc" id="L232">            lock.unlock();</span>
+<span class="fc" id="L233">        }</span>
+<span class="fc" id="L234">        return result;</span>
+    }
+
+    @Override
+    protected void formatAddresses(boolean includePrivateKeys, @Nullable KeyParameter aesKey, NetworkParameters params,
+            StringBuilder builder2) {
+<span class="nc bnc" id="L240" title="All 2 branches missed.">        for (DeterministicKeyChain followingChain : followingKeyChains)</span>
+<span class="nc" id="L241">            builder2.append(&quot;Following chain:  &quot;).append(followingChain.getWatchingKey().serializePubB58(params))</span>
+<span class="nc" id="L242">                    .append('\n');</span>
+<span class="nc" id="L243">        builder2.append('\n');</span>
+<span class="nc bnc" id="L244" title="All 2 branches missed.">        for (RedeemData redeemData : marriedKeysRedeemData.values())</span>
+<span class="nc" id="L245">            formatScript(ScriptBuilder.createP2SHOutputScript(redeemData.redeemScript), builder2, params);</span>
+<span class="nc" id="L246">    }</span>
+
+    private void formatScript(Script script, StringBuilder builder, NetworkParameters params) {
+<span class="nc" id="L249">        builder.append(&quot;  addr:&quot;);</span>
+<span class="nc" id="L250">        builder.append(script.getToAddress(params));</span>
+<span class="nc" id="L251">        builder.append(&quot;  hash160:&quot;);</span>
+<span class="nc" id="L252">        builder.append(Utils.HEX.encode(script.getPubKeyHash()));</span>
+<span class="nc bnc" id="L253" title="All 2 branches missed.">        if (script.getCreationTimeSeconds() &gt; 0)</span>
+<span class="nc" id="L254">            builder.append(&quot;  creationTimeSeconds:&quot;).append(script.getCreationTimeSeconds());</span>
+<span class="nc" id="L255">        builder.append('\n');</span>
+<span class="nc" id="L256">    }</span>
+
+    @Override
+    public void maybeLookAheadScripts() {
+<span class="fc" id="L260">        super.maybeLookAheadScripts();</span>
+<span class="fc" id="L261">        int numLeafKeys = getLeafKeys().size();</span>
+
+<span class="pc bpc" id="L263" title="1 of 2 branches missed.">        checkState(marriedKeysRedeemData.size() &lt;= numLeafKeys, &quot;Number of scripts is greater than number of leaf keys&quot;);</span>
+<span class="fc bfc" id="L264" title="All 2 branches covered.">        if (marriedKeysRedeemData.size() == numLeafKeys)</span>
+<span class="fc" id="L265">            return;</span>
+
+<span class="fc" id="L267">        maybeLookAhead();</span>
+<span class="fc bfc" id="L268" title="All 2 branches covered.">        for (DeterministicKey followedKey : getLeafKeys()) {</span>
+<span class="fc" id="L269">            RedeemData redeemData = getRedeemData(followedKey);</span>
+<span class="fc" id="L270">            Script scriptPubKey = ScriptBuilder.createP2SHOutputScript(redeemData.redeemScript);</span>
+<span class="fc" id="L271">            marriedKeysRedeemData.put(ByteString.copyFrom(scriptPubKey.getPubKeyHash()), redeemData);</span>
+<span class="fc" id="L272">        }</span>
+<span class="fc" id="L273">    }</span>
+
+    @Nullable
+    @Override
+    public RedeemData findRedeemDataByScriptHash(ByteString bytes) {
+<span class="fc" id="L278">        return marriedKeysRedeemData.get(bytes);</span>
+    }
+
+    @Override
+    public BloomFilter getFilter(int size, double falsePositiveRate, long tweak) {
+<span class="fc" id="L283">        lock.lock();</span>
+        BloomFilter filter;
+        try {
+<span class="fc" id="L286">            filter = new BloomFilter(size, falsePositiveRate, tweak);</span>
+<span class="fc bfc" id="L287" title="All 2 branches covered.">            for (Map.Entry&lt;ByteString, RedeemData&gt; entry : marriedKeysRedeemData.entrySet()) {</span>
+<span class="fc" id="L288">                filter.insert(entry.getKey().toByteArray());</span>
+<span class="fc" id="L289">                filter.insert(entry.getValue().redeemScript.getProgram());</span>
+<span class="fc" id="L290">            }</span>
+        } finally {
+<span class="pc" id="L292">            lock.unlock();</span>
+<span class="fc" id="L293">        }</span>
+<span class="fc" id="L294">        return filter;</span>
+    }
+
+    @Override
+    public int numBloomFilterEntries() {
+<span class="fc" id="L299">        maybeLookAhead();</span>
+<span class="fc" id="L300">        return getLeafKeys().size() * 2;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

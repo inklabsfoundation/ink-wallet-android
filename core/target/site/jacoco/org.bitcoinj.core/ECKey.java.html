@@ -1,0 +1,1295 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>ECKey.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">ECKey.java</span></div><h1>ECKey.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ * Copyright 2014-2016 the libsecp256k1 contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import org.bitcoinj.crypto.*;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.MoreObjects;
+import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
+import com.google.common.primitives.Ints;
+import com.google.common.primitives.UnsignedBytes;
+import org.bitcoin.NativeSecp256k1;
+import org.bitcoin.NativeSecp256k1Util;
+import org.bitcoin.Secp256k1Context;
+import org.bitcoinj.wallet.Protos;
+import org.bitcoinj.wallet.Wallet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.spongycastle.asn1.*;
+import org.spongycastle.asn1.x9.X9ECParameters;
+import org.spongycastle.asn1.x9.X9IntegerConverter;
+import org.spongycastle.crypto.AsymmetricCipherKeyPair;
+import org.spongycastle.crypto.digests.SHA256Digest;
+import org.spongycastle.crypto.ec.CustomNamedCurves;
+import org.spongycastle.crypto.generators.ECKeyPairGenerator;
+import org.spongycastle.crypto.params.*;
+import org.spongycastle.crypto.signers.ECDSASigner;
+import org.spongycastle.crypto.signers.HMacDSAKCalculator;
+import org.spongycastle.math.ec.ECAlgorithms;
+import org.spongycastle.math.ec.ECPoint;
+import org.spongycastle.math.ec.FixedPointCombMultiplier;
+import org.spongycastle.math.ec.FixedPointUtil;
+import org.spongycastle.math.ec.custom.sec.SecP256K1Curve;
+import org.spongycastle.util.encoders.Base64;
+
+import javax.annotation.Nullable;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.math.BigInteger;
+import java.nio.charset.Charset;
+import java.security.SecureRandom;
+import java.security.SignatureException;
+import java.util.Arrays;
+import java.util.Comparator;
+
+import static com.google.common.base.Preconditions.*;
+
+// TODO: Move this class to tracking compression state itself.
+// The Bouncy Castle developers are deprecating their own tracking of the compression state.
+
+/**
+ * &lt;p&gt;Represents an elliptic curve public and (optionally) private key, usable for digital signatures but not encryption.
+ * Creating a new ECKey with the empty constructor will generate a new random keypair. Other static methods can be used
+ * when you already have the public or private parts. If you create a key with only the public part, you can check
+ * signatures but not create them.&lt;/p&gt;
+ *
+ * &lt;p&gt;ECKey also provides access to Bitcoin Core compatible text message signing, as accessible via the UI or JSON-RPC.
+ * This is slightly different to signing raw bytes - if you want to sign your own data and it won't be exposed as
+ * text to people, you don't want to use this. If in doubt, ask on the mailing list.&lt;/p&gt;
+ *
+ * &lt;p&gt;The ECDSA algorithm supports &lt;i&gt;key recovery&lt;/i&gt; in which a signature plus a couple of discriminator bits can
+ * be reversed to find the public key used to calculate it. This can be convenient when you have a message and a
+ * signature and want to find out who signed it, rather than requiring the user to provide the expected identity.&lt;/p&gt;
+ *
+ * &lt;p&gt;This class supports a variety of serialization forms. The methods that accept/return byte arrays serialize
+ * private keys as raw byte arrays and public keys using the SEC standard byte encoding for public keys. Signatures
+ * are encoded using ASN.1/DER inside the Bitcoin protocol.&lt;/p&gt;
+ *
+ * &lt;p&gt;A key can be &lt;i&gt;compressed&lt;/i&gt; or &lt;i&gt;uncompressed&lt;/i&gt;. This refers to whether the public key is represented
+ * when encoded into bytes as an (x, y) coordinate on the elliptic curve, or whether it's represented as just an X
+ * co-ordinate and an extra byte that carries a sign bit. With the latter form the Y coordinate can be calculated
+ * dynamically, however, &lt;b&gt;because the binary serialization is different the address of a key changes if its
+ * compression status is changed&lt;/b&gt;. If you deviate from the defaults it's important to understand this: money sent
+ * to a compressed version of the key will have a different address to the same key in uncompressed form. Whether
+ * a public key is compressed or not is recorded in the SEC binary serialisation format, and preserved in a flag in
+ * this class so round-tripping preserves state. Unless you're working with old software or doing unusual things, you
+ * can usually ignore the compressed/uncompressed distinction.&lt;/p&gt;
+ */
+public class ECKey implements EncryptableItem {
+<span class="fc" id="L96">    private static final Logger log = LoggerFactory.getLogger(ECKey.class);</span>
+
+    /** Sorts oldest keys first, newest last. */
+<span class="fc" id="L99">    public static final Comparator&lt;ECKey&gt; AGE_COMPARATOR = new Comparator&lt;ECKey&gt;() {</span>
+
+        @Override
+        public int compare(ECKey k1, ECKey k2) {
+<span class="nc bnc" id="L103" title="All 2 branches missed.">            if (k1.creationTimeSeconds == k2.creationTimeSeconds)</span>
+<span class="nc" id="L104">                return 0;</span>
+            else
+<span class="nc bnc" id="L106" title="All 2 branches missed.">                return k1.creationTimeSeconds &gt; k2.creationTimeSeconds ? 1 : -1;</span>
+        }
+    };
+
+    /** Compares pub key bytes using {@link com.google.common.primitives.UnsignedBytes#lexicographicalComparator()} */
+<span class="fc" id="L111">    public static final Comparator&lt;ECKey&gt; PUBKEY_COMPARATOR = new Comparator&lt;ECKey&gt;() {</span>
+<span class="fc" id="L112">        private Comparator&lt;byte[]&gt; comparator = UnsignedBytes.lexicographicalComparator();</span>
+
+        @Override
+        public int compare(ECKey k1, ECKey k2) {
+<span class="fc" id="L116">            return comparator.compare(k1.getPubKey(), k2.getPubKey());</span>
+        }
+    };
+
+    // The parameters of the secp256k1 curve that Bitcoin uses.
+<span class="fc" id="L121">    private static final X9ECParameters CURVE_PARAMS = CustomNamedCurves.getByName(&quot;secp256k1&quot;);</span>
+
+    /** The parameters of the secp256k1 curve that Bitcoin uses. */
+    public static final ECDomainParameters CURVE;
+
+    /**
+     * Equal to CURVE.getN().shiftRight(1), used for canonicalising the S value of a signature. If you aren't
+     * sure what this is about, you can ignore it.
+     */
+    public static final BigInteger HALF_CURVE_ORDER;
+
+    private static final SecureRandom secureRandom;
+
+    static {
+        // Init proper random number generator, as some old Android installations have bugs that make it unsecure.
+<span class="pc bpc" id="L136" title="1 of 2 branches missed.">        if (Utils.isAndroidRuntime())</span>
+<span class="nc" id="L137">            new LinuxSecureRandom();</span>
+
+        // Tell Bouncy Castle to precompute data that's needed during secp256k1 calculations. Increasing the width
+        // number makes calculations faster, but at a cost of extra memory usage and with decreasing returns. 12 was
+        // picked after consulting with the BC team.
+<span class="fc" id="L142">        FixedPointUtil.precompute(CURVE_PARAMS.getG(), 12);</span>
+<span class="fc" id="L143">        CURVE = new ECDomainParameters(CURVE_PARAMS.getCurve(), CURVE_PARAMS.getG(), CURVE_PARAMS.getN(),</span>
+<span class="fc" id="L144">                CURVE_PARAMS.getH());</span>
+<span class="fc" id="L145">        HALF_CURVE_ORDER = CURVE_PARAMS.getN().shiftRight(1);</span>
+<span class="fc" id="L146">        secureRandom = new SecureRandom();</span>
+    }
+
+    // The two parts of the key. If &quot;priv&quot; is set, &quot;pub&quot; can always be calculated. If &quot;pub&quot; is set but not &quot;priv&quot;, we
+    // can only verify signatures not make them.
+    protected final BigInteger priv;  // A field element.
+    protected final LazyECPoint pub;
+
+    // Creation time of the key in seconds since the epoch, or zero if the key was deserialized from a version that did
+    // not have this field.
+    protected long creationTimeSeconds;
+
+    protected KeyCrypter keyCrypter;
+    protected EncryptedData encryptedPrivateKey;
+
+    private byte[] pubKeyHash;
+
+    /**
+     * Generates an entirely new keypair. Point compression is used so the resulting public key will be 33 bytes
+     * (32 for the co-ordinate and 1 byte to represent the y bit).
+     */
+    public ECKey() {
+<span class="fc" id="L168">        this(secureRandom);</span>
+<span class="fc" id="L169">    }</span>
+
+    /**
+     * Generates an entirely new keypair with the given {@link SecureRandom} object. Point compression is used so the
+     * resulting public key will be 33 bytes (32 for the co-ordinate and 1 byte to represent the y bit).
+     */
+<span class="fc" id="L175">    public ECKey(SecureRandom secureRandom) {</span>
+<span class="fc" id="L176">        ECKeyPairGenerator generator = new ECKeyPairGenerator();</span>
+<span class="fc" id="L177">        ECKeyGenerationParameters keygenParams = new ECKeyGenerationParameters(CURVE, secureRandom);</span>
+<span class="fc" id="L178">        generator.init(keygenParams);</span>
+<span class="fc" id="L179">        AsymmetricCipherKeyPair keypair = generator.generateKeyPair();</span>
+<span class="fc" id="L180">        ECPrivateKeyParameters privParams = (ECPrivateKeyParameters) keypair.getPrivate();</span>
+<span class="fc" id="L181">        ECPublicKeyParameters pubParams = (ECPublicKeyParameters) keypair.getPublic();</span>
+<span class="fc" id="L182">        priv = privParams.getD();</span>
+<span class="fc" id="L183">        pub = new LazyECPoint(CURVE.getCurve(), pubParams.getQ().getEncoded(true));</span>
+<span class="fc" id="L184">        creationTimeSeconds = Utils.currentTimeSeconds();</span>
+<span class="fc" id="L185">    }</span>
+
+    protected ECKey(@Nullable BigInteger priv, ECPoint pub) {
+<span class="fc" id="L188">        this(priv, new LazyECPoint(checkNotNull(pub)));</span>
+<span class="fc" id="L189">    }</span>
+
+<span class="fc" id="L191">    protected ECKey(@Nullable BigInteger priv, LazyECPoint pub) {</span>
+<span class="fc bfc" id="L192" title="All 2 branches covered.">        if (priv != null) {</span>
+<span class="fc bfc" id="L193" title="All 2 branches covered.">            checkArgument(priv.bitLength() &lt;= 32 * 8, &quot;private key exceeds 32 bytes: %s bits&quot;, priv.bitLength());</span>
+            // Try and catch buggy callers or bad key imports, etc. Zero and one are special because these are often
+            // used as sentinel values and because scripting languages have a habit of auto-casting true and false to
+            // 1 and 0 or vice-versa. Type confusion bugs could therefore result in private keys with these values.
+<span class="pc bpc" id="L197" title="1 of 2 branches missed.">            checkArgument(!priv.equals(BigInteger.ZERO));</span>
+<span class="pc bpc" id="L198" title="1 of 2 branches missed.">            checkArgument(!priv.equals(BigInteger.ONE));</span>
+        }
+<span class="fc" id="L200">        this.priv = priv;</span>
+<span class="fc" id="L201">        this.pub = checkNotNull(pub);</span>
+<span class="fc" id="L202">    }</span>
+
+    /**
+     * Utility for compressing an elliptic curve point. Returns the same point if it's already compressed.
+     * See the ECKey class docs for a discussion of point compression.
+     */
+    public static ECPoint compressPoint(ECPoint point) {
+<span class="fc" id="L209">        return getPointWithCompression(point, true);</span>
+    }
+
+    public static LazyECPoint compressPoint(LazyECPoint point) {
+<span class="pc bpc" id="L213" title="1 of 2 branches missed.">        return point.isCompressed() ? point : new LazyECPoint(compressPoint(point.get()));</span>
+    }
+
+    /**
+     * Utility for decompressing an elliptic curve point. Returns the same point if it's already compressed.
+     * See the ECKey class docs for a discussion of point compression.
+     */
+    public static ECPoint decompressPoint(ECPoint point) {
+<span class="fc" id="L221">        return getPointWithCompression(point, false);</span>
+    }
+
+    public static LazyECPoint decompressPoint(LazyECPoint point) {
+<span class="nc bnc" id="L225" title="All 2 branches missed.">        return !point.isCompressed() ? point : new LazyECPoint(decompressPoint(point.get()));</span>
+    }
+
+    private static ECPoint getPointWithCompression(ECPoint point, boolean compressed) {
+<span class="fc bfc" id="L229" title="All 2 branches covered.">      if (point.isCompressed() == compressed)</span>
+<span class="fc" id="L230">          return point;</span>
+<span class="fc" id="L231">      point = point.normalize();</span>
+<span class="fc" id="L232">      BigInteger x = point.getAffineXCoord().toBigInteger();</span>
+<span class="fc" id="L233">      BigInteger y = point.getAffineYCoord().toBigInteger();</span>
+<span class="fc" id="L234">      return CURVE.getCurve().createPoint(x, y, compressed);</span>
+    }
+
+    /**
+     * Construct an ECKey from an ASN.1 encoded private key. These are produced by OpenSSL and stored by Bitcoin
+     * Core in its wallet. Note that this is slow because it requires an EC point multiply.
+     */
+    public static ECKey fromASN1(byte[] asn1privkey) {
+<span class="fc" id="L242">        return extractKeyFromASN1(asn1privkey);</span>
+    }
+
+    /**
+     * Creates an ECKey given the private key only. The public key is calculated from it (this is slow). The resulting
+     * public key is compressed.
+     */
+    public static ECKey fromPrivate(BigInteger privKey) {
+<span class="fc" id="L250">        return fromPrivate(privKey, true);</span>
+    }
+
+    /**
+     * Creates an ECKey given the private key only. The public key is calculated from it (this is slow), either
+     * compressed or not.
+     */
+    public static ECKey fromPrivate(BigInteger privKey, boolean compressed) {
+<span class="fc" id="L258">        ECPoint point = publicPointFromPrivate(privKey);</span>
+<span class="fc" id="L259">        return new ECKey(privKey, getPointWithCompression(point, compressed));</span>
+    }
+
+    /**
+     * Creates an ECKey given the private key only. The public key is calculated from it (this is slow). The resulting
+     * public key is compressed.
+     */
+    public static ECKey fromPrivate(byte[] privKeyBytes) {
+<span class="fc" id="L267">        return fromPrivate(new BigInteger(1, privKeyBytes));</span>
+    }
+
+    /**
+     * Creates an ECKey given the private key only. The public key is calculated from it (this is slow), either
+     * compressed or not.
+     */
+    public static ECKey fromPrivate(byte[] privKeyBytes, boolean compressed) {
+<span class="fc" id="L275">        return fromPrivate(new BigInteger(1, privKeyBytes), compressed);</span>
+    }
+
+    /**
+     * Creates an ECKey that simply trusts the caller to ensure that point is really the result of multiplying the
+     * generator point by the private key. This is used to speed things up when you know you have the right values
+     * already. The compression state of pub will be preserved.
+     */
+    public static ECKey fromPrivateAndPrecalculatedPublic(BigInteger priv, ECPoint pub) {
+<span class="fc" id="L284">        return new ECKey(priv, pub);</span>
+    }
+
+    /**
+     * Creates an ECKey that simply trusts the caller to ensure that point is really the result of multiplying the
+     * generator point by the private key. This is used to speed things up when you know you have the right values
+     * already. The compression state of the point will be preserved.
+     */
+    public static ECKey fromPrivateAndPrecalculatedPublic(byte[] priv, byte[] pub) {
+<span class="fc" id="L293">        checkNotNull(priv);</span>
+<span class="fc" id="L294">        checkNotNull(pub);</span>
+<span class="fc" id="L295">        return new ECKey(new BigInteger(1, priv), CURVE.getCurve().decodePoint(pub));</span>
+    }
+
+    /**
+     * Creates an ECKey that cannot be used for signing, only verifying signatures, from the given point. The
+     * compression state of pub will be preserved.
+     */
+    public static ECKey fromPublicOnly(ECPoint pub) {
+<span class="fc" id="L303">        return new ECKey(null, pub);</span>
+    }
+
+    /**
+     * Creates an ECKey that cannot be used for signing, only verifying signatures, from the given encoded point.
+     * The compression state of pub will be preserved.
+     */
+    public static ECKey fromPublicOnly(byte[] pub) {
+<span class="fc" id="L311">        return new ECKey(null, CURVE.getCurve().decodePoint(pub));</span>
+    }
+
+    /**
+     * Returns a copy of this key, but with the public point represented in uncompressed form. Normally you would
+     * never need this: it's for specialised scenarios or when backwards compatibility in encoded form is necessary.
+     */
+    public ECKey decompress() {
+<span class="pc bpc" id="L319" title="1 of 2 branches missed.">        if (!pub.isCompressed())</span>
+<span class="nc" id="L320">            return this;</span>
+        else
+<span class="fc" id="L322">            return new ECKey(priv, decompressPoint(pub.get()));</span>
+    }
+
+    /**
+     * Creates an ECKey given only the private key bytes. This is the same as using the BigInteger constructor, but
+     * is more convenient if you are importing a key from elsewhere. The public key will be automatically derived
+     * from the private key.
+     */
+    @Deprecated
+    public ECKey(@Nullable byte[] privKeyBytes, @Nullable byte[] pubKey) {
+<span class="nc bnc" id="L332" title="All 2 branches missed.">        this(privKeyBytes == null ? null : new BigInteger(1, privKeyBytes), pubKey);</span>
+<span class="nc" id="L333">    }</span>
+
+    /**
+     * Create a new ECKey with an encrypted private key, a public key and a KeyCrypter.
+     *
+     * @param encryptedPrivateKey The private key, encrypted,
+     * @param pubKey The keys public key
+     * @param keyCrypter The KeyCrypter that will be used, with an AES key, to encrypt and decrypt the private key
+     */
+    @Deprecated
+    public ECKey(EncryptedData encryptedPrivateKey, byte[] pubKey, KeyCrypter keyCrypter) {
+<span class="nc" id="L344">        this((byte[])null, pubKey);</span>
+
+<span class="nc" id="L346">        this.keyCrypter = checkNotNull(keyCrypter);</span>
+<span class="nc" id="L347">        this.encryptedPrivateKey = encryptedPrivateKey;</span>
+<span class="nc" id="L348">    }</span>
+
+    /**
+     * Constructs a key that has an encrypted private component. The given object wraps encrypted bytes and an
+     * initialization vector. Note that the key will not be decrypted during this call: the returned ECKey is
+     * unusable for signing unless a decryption key is supplied.
+     */
+    public static ECKey fromEncrypted(EncryptedData encryptedPrivateKey, KeyCrypter crypter, byte[] pubKey) {
+<span class="fc" id="L356">        ECKey key = fromPublicOnly(pubKey);</span>
+<span class="fc" id="L357">        key.encryptedPrivateKey = checkNotNull(encryptedPrivateKey);</span>
+<span class="fc" id="L358">        key.keyCrypter = checkNotNull(crypter);</span>
+<span class="fc" id="L359">        return key;</span>
+    }
+
+    /**
+     * Creates an ECKey given either the private key only, the public key only, or both. If only the private key
+     * is supplied, the public key will be calculated from it (this is slow). If both are supplied, it's assumed
+     * the public key already correctly matches the private key. If only the public key is supplied, this ECKey cannot
+     * be used for signing.
+     * @param compressed If set to true and pubKey is null, the derived public key will be in compressed form.
+     */
+    @Deprecated
+<span class="fc" id="L370">    public ECKey(@Nullable BigInteger privKey, @Nullable byte[] pubKey, boolean compressed) {</span>
+<span class="pc bpc" id="L371" title="3 of 4 branches missed.">        if (privKey == null &amp;&amp; pubKey == null)</span>
+<span class="nc" id="L372">            throw new IllegalArgumentException(&quot;ECKey requires at least private or public key&quot;);</span>
+<span class="fc" id="L373">        this.priv = privKey;</span>
+<span class="pc bpc" id="L374" title="1 of 2 branches missed.">        if (pubKey == null) {</span>
+            // Derive public from private.
+<span class="fc" id="L376">            ECPoint point = publicPointFromPrivate(privKey);</span>
+<span class="fc" id="L377">            point = getPointWithCompression(point, compressed);</span>
+<span class="fc" id="L378">            this.pub = new LazyECPoint(point);</span>
+<span class="fc" id="L379">        } else {</span>
+            // We expect the pubkey to be in regular encoded form, just as a BigInteger. Therefore the first byte is
+            // a special marker byte.
+            // TODO: This is probably not a useful API and may be confusing.
+<span class="nc" id="L383">            this.pub = new LazyECPoint(CURVE.getCurve(), pubKey);</span>
+        }
+<span class="fc" id="L385">    }</span>
+
+    /**
+     * Creates an ECKey given either the private key only, the public key only, or both. If only the private key
+     * is supplied, the public key will be calculated from it (this is slow). If both are supplied, it's assumed
+     * the public key already correctly matches the public key. If only the public key is supplied, this ECKey cannot
+     * be used for signing.
+     */
+    @Deprecated
+    private ECKey(@Nullable BigInteger privKey, @Nullable byte[] pubKey) {
+<span class="nc" id="L395">        this(privKey, pubKey, false);</span>
+<span class="nc" id="L396">    }</span>
+
+    /**
+     * Returns true if this key doesn't have unencrypted access to private key bytes. This may be because it was never
+     * given any private key bytes to begin with (a watching key), or because the key is encrypted. You can use
+     * {@link #isEncrypted()} to tell the cases apart.
+     */
+    public boolean isPubKeyOnly() {
+<span class="fc bfc" id="L404" title="All 2 branches covered.">        return priv == null;</span>
+    }
+
+    /**
+     * Returns true if this key has unencrypted access to private key bytes. Does the opposite of
+     * {@link #isPubKeyOnly()}.
+     */
+    public boolean hasPrivKey() {
+<span class="fc bfc" id="L412" title="All 2 branches covered.">        return priv != null;</span>
+    }
+
+    /** Returns true if this key is watch only, meaning it has a public key but no private key. */
+    public boolean isWatching() {
+<span class="fc bfc" id="L417" title="All 4 branches covered.">        return isPubKeyOnly() &amp;&amp; !isEncrypted();</span>
+    }
+
+    /**
+     * Output this ECKey as an ASN.1 encoded private key, as understood by OpenSSL or used by Bitcoin Core
+     * in its wallet storage format.
+     * @throws org.bitcoinj.core.ECKey.MissingPrivateKeyException if the private key is missing or encrypted.
+     */
+    public byte[] toASN1() {
+        try {
+<span class="fc" id="L427">            byte[] privKeyBytes = getPrivKeyBytes();</span>
+<span class="fc" id="L428">            ByteArrayOutputStream baos = new ByteArrayOutputStream(400);</span>
+
+            // ASN1_SEQUENCE(EC_PRIVATEKEY) = {
+            //   ASN1_SIMPLE(EC_PRIVATEKEY, version, LONG),
+            //   ASN1_SIMPLE(EC_PRIVATEKEY, privateKey, ASN1_OCTET_STRING),
+            //   ASN1_EXP_OPT(EC_PRIVATEKEY, parameters, ECPKPARAMETERS, 0),
+            //   ASN1_EXP_OPT(EC_PRIVATEKEY, publicKey, ASN1_BIT_STRING, 1)
+            // } ASN1_SEQUENCE_END(EC_PRIVATEKEY)
+<span class="fc" id="L436">            DERSequenceGenerator seq = new DERSequenceGenerator(baos);</span>
+<span class="fc" id="L437">            seq.addObject(new ASN1Integer(1)); // version</span>
+<span class="fc" id="L438">            seq.addObject(new DEROctetString(privKeyBytes));</span>
+<span class="fc" id="L439">            seq.addObject(new DERTaggedObject(0, CURVE_PARAMS.toASN1Primitive()));</span>
+<span class="fc" id="L440">            seq.addObject(new DERTaggedObject(1, new DERBitString(getPubKey())));</span>
+<span class="fc" id="L441">            seq.close();</span>
+<span class="fc" id="L442">            return baos.toByteArray();</span>
+<span class="nc" id="L443">        } catch (IOException e) {</span>
+<span class="nc" id="L444">            throw new RuntimeException(e);  // Cannot happen, writing to memory stream.</span>
+        }
+    }
+
+    /**
+     * Returns public key bytes from the given private key. To convert a byte array into a BigInteger, use &lt;tt&gt;
+     * new BigInteger(1, bytes);&lt;/tt&gt;
+     */
+    public static byte[] publicKeyFromPrivate(BigInteger privKey, boolean compressed) {
+<span class="nc" id="L453">        ECPoint point = publicPointFromPrivate(privKey);</span>
+<span class="nc" id="L454">        return point.getEncoded(compressed);</span>
+    }
+
+    /**
+     * Returns public key point from the given private key. To convert a byte array into a BigInteger, use &lt;tt&gt;
+     * new BigInteger(1, bytes);&lt;/tt&gt;
+     */
+    public static ECPoint publicPointFromPrivate(BigInteger privKey) {
+        /*
+         * TODO: FixedPointCombMultiplier currently doesn't support scalars longer than the group order,
+         * but that could change in future versions.
+         */
+<span class="fc bfc" id="L466" title="All 2 branches covered.">        if (privKey.bitLength() &gt; CURVE.getN().bitLength()) {</span>
+<span class="fc" id="L467">            privKey = privKey.mod(CURVE.getN());</span>
+        }
+<span class="fc" id="L469">        return new FixedPointCombMultiplier().multiply(CURVE.getG(), privKey);</span>
+    }
+
+    /** Gets the hash160 form of the public key (as seen in addresses). */
+    public byte[] getPubKeyHash() {
+<span class="fc bfc" id="L474" title="All 2 branches covered.">        if (pubKeyHash == null)</span>
+<span class="fc" id="L475">            pubKeyHash = Utils.sha256hash160(this.pub.getEncoded());</span>
+<span class="fc" id="L476">        return pubKeyHash;</span>
+    }
+
+    /**
+     * Gets the raw public key value. This appears in transaction scriptSigs. Note that this is &lt;b&gt;not&lt;/b&gt; the same
+     * as the pubKeyHash/address.
+     */
+    public byte[] getPubKey() {
+<span class="fc" id="L484">        return pub.getEncoded();</span>
+    }
+
+    /** Gets the public key in the form of an elliptic curve point object from Bouncy Castle. */
+    public ECPoint getPubKeyPoint() {
+<span class="fc" id="L489">        return pub.get();</span>
+    }
+
+    /**
+     * Gets the private key in the form of an integer field element. The public key is derived by performing EC
+     * point addition this number of times (i.e. point multiplying).
+     *
+     * @throws java.lang.IllegalStateException if the private key bytes are not available.
+     */
+    public BigInteger getPrivKey() {
+<span class="pc bpc" id="L499" title="1 of 2 branches missed.">        if (priv == null)</span>
+<span class="nc" id="L500">            throw new MissingPrivateKeyException();</span>
+<span class="fc" id="L501">        return priv;</span>
+    }
+
+    /**
+     * Returns whether this key is using the compressed form or not. Compressed pubkeys are only 33 bytes, not 64.
+     */
+    public boolean isCompressed() {
+<span class="fc" id="L508">        return pub.isCompressed();</span>
+    }
+
+    /**
+     * Returns the address that corresponds to the public part of this ECKey. Note that an address is derived from
+     * the RIPEMD-160 hash of the public key and is not the public key itself (which is too large to be convenient).
+     */
+    public Address toAddress(NetworkParameters params) {
+<span class="fc" id="L516">        return new Address(params, getPubKeyHash());</span>
+    }
+
+    /**
+     * Groups the two components that make up a signature, and provides a way to encode to DER form, which is
+     * how ECDSA signatures are represented when embedded in other data structures in the Bitcoin protocol. The raw
+     * components can be useful for doing further EC maths on them.
+     */
+    public static class ECDSASignature {
+        /** The two components of the signature. */
+        public final BigInteger r, s;
+
+        /**
+         * Constructs a signature with the given components. Does NOT automatically canonicalise the signature.
+         */
+<span class="fc" id="L531">        public ECDSASignature(BigInteger r, BigInteger s) {</span>
+<span class="fc" id="L532">            this.r = r;</span>
+<span class="fc" id="L533">            this.s = s;</span>
+<span class="fc" id="L534">        }</span>
+
+        /**
+         * Returns true if the S component is &quot;low&quot;, that means it is below {@link ECKey#HALF_CURVE_ORDER}. See &lt;a
+         * href=&quot;https://github.com/bitcoin/bips/blob/master/bip-0062.mediawiki#Low_S_values_in_signatures&quot;&gt;BIP62&lt;/a&gt;.
+         */
+        public boolean isCanonical() {
+<span class="fc bfc" id="L541" title="All 2 branches covered.">            return s.compareTo(HALF_CURVE_ORDER) &lt;= 0;</span>
+        }
+
+        /**
+         * Will automatically adjust the S component to be less than or equal to half the curve order, if necessary.
+         * This is required because for every signature (r,s) the signature (r, -s (mod N)) is a valid signature of
+         * the same message. However, we dislike the ability to modify the bits of a Bitcoin transaction after it's
+         * been signed, as that violates various assumed invariants. Thus in future only one of those forms will be
+         * considered legal and the other will be banned.
+         */
+        public ECDSASignature toCanonicalised() {
+<span class="fc bfc" id="L552" title="All 2 branches covered.">            if (!isCanonical()) {</span>
+                // The order of the curve is the number of valid points that exist on that curve. If S is in the upper
+                // half of the number of valid points, then bring it back to the lower half. Otherwise, imagine that
+                //    N = 10
+                //    s = 8, so (-8 % 10 == 2) thus both (r, 8) and (r, 2) are valid solutions.
+                //    10 - 8 == 2, giving us always the latter solution, which is canonical.
+<span class="fc" id="L558">                return new ECDSASignature(r, CURVE.getN().subtract(s));</span>
+            } else {
+<span class="fc" id="L560">                return this;</span>
+            }
+        }
+
+        /**
+         * DER is an international standard for serializing data structures which is widely used in cryptography.
+         * It's somewhat like protocol buffers but less convenient. This method returns a standard DER encoding
+         * of the signature, as recognized by OpenSSL and other libraries.
+         */
+        public byte[] encodeToDER() {
+            try {
+<span class="fc" id="L571">                return derByteStream().toByteArray();</span>
+<span class="nc" id="L572">            } catch (IOException e) {</span>
+<span class="nc" id="L573">                throw new RuntimeException(e);  // Cannot happen.</span>
+            }
+        }
+
+        public static ECDSASignature decodeFromDER(byte[] bytes) throws IllegalArgumentException {
+<span class="fc" id="L578">            ASN1InputStream decoder = null;</span>
+            try {
+<span class="fc" id="L580">                decoder = new ASN1InputStream(bytes);</span>
+<span class="fc" id="L581">                final ASN1Primitive seqObj = decoder.readObject();</span>
+<span class="fc bfc" id="L582" title="All 2 branches covered.">                if (seqObj == null)</span>
+<span class="fc" id="L583">                    throw new IllegalArgumentException(&quot;Reached past end of ASN.1 stream.&quot;);</span>
+<span class="pc bpc" id="L584" title="1 of 2 branches missed.">                if (!(seqObj instanceof DLSequence))</span>
+<span class="nc" id="L585">                    throw new IllegalArgumentException(&quot;Read unexpected class: &quot; + seqObj.getClass().getName());</span>
+<span class="fc" id="L586">                final DLSequence seq = (DLSequence) seqObj;</span>
+                ASN1Integer r, s;
+                try {
+<span class="fc" id="L589">                    r = (ASN1Integer) seq.getObjectAt(0);</span>
+<span class="fc" id="L590">                    s = (ASN1Integer) seq.getObjectAt(1);</span>
+<span class="fc" id="L591">                } catch (ClassCastException e) {</span>
+<span class="fc" id="L592">                    throw new IllegalArgumentException(e);</span>
+<span class="fc" id="L593">                }</span>
+                // OpenSSL deviates from the DER spec by interpreting these values as unsigned, though they should not be
+                // Thus, we always use the positive versions. See: http://r6.ca/blog/20111119T211504Z.html
+<span class="fc" id="L596">                return new ECDSASignature(r.getPositiveValue(), s.getPositiveValue());</span>
+<span class="fc" id="L597">            } catch (IOException e) {</span>
+<span class="fc" id="L598">                throw new IllegalArgumentException(e);</span>
+            } finally {
+<span class="pc bpc" id="L600" title="2 of 4 branches missed.">                if (decoder != null)</span>
+<span class="pc" id="L601">                    try { decoder.close(); } catch (IOException x) {}</span>
+            }
+        }
+
+        protected ByteArrayOutputStream derByteStream() throws IOException {
+            // Usually 70-72 bytes.
+<span class="fc" id="L607">            ByteArrayOutputStream bos = new ByteArrayOutputStream(72);</span>
+<span class="fc" id="L608">            DERSequenceGenerator seq = new DERSequenceGenerator(bos);</span>
+<span class="fc" id="L609">            seq.addObject(new ASN1Integer(r));</span>
+<span class="fc" id="L610">            seq.addObject(new ASN1Integer(s));</span>
+<span class="fc" id="L611">            seq.close();</span>
+<span class="fc" id="L612">            return bos;</span>
+        }
+
+        @Override
+        public boolean equals(Object o) {
+<span class="pc bpc" id="L617" title="1 of 2 branches missed.">            if (this == o) return true;</span>
+<span class="pc bpc" id="L618" title="2 of 4 branches missed.">            if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L619">            ECDSASignature other = (ECDSASignature) o;</span>
+<span class="pc bpc" id="L620" title="2 of 4 branches missed.">            return r.equals(other.r) &amp;&amp; s.equals(other.s);</span>
+        }
+
+        @Override
+        public int hashCode() {
+<span class="fc" id="L625">            return Objects.hashCode(r, s);</span>
+        }
+    }
+
+    /**
+     * Signs the given hash and returns the R and S components as BigIntegers. In the Bitcoin protocol, they are
+     * usually encoded using ASN.1 format, so you want {@link org.bitcoinj.core.ECKey.ECDSASignature#toASN1()}
+     * instead. However sometimes the independent components can be useful, for instance, if you're going to do
+     * further EC maths on them.
+     * @throws KeyCrypterException if this ECKey doesn't have a private part.
+     */
+    public ECDSASignature sign(Sha256Hash input) throws KeyCrypterException {
+<span class="fc" id="L637">        return sign(input, null);</span>
+    }
+
+    /**
+     * If this global variable is set to true, sign() creates a dummy signature and verify() always returns true.
+     * This is intended to help accelerate unit tests that do a lot of signing/verifying, which in the debugger
+     * can be painfully slow.
+     */
+    @VisibleForTesting
+<span class="fc" id="L646">    public static boolean FAKE_SIGNATURES = false;</span>
+
+    /**
+     * Signs the given hash and returns the R and S components as BigIntegers. In the Bitcoin protocol, they are
+     * usually encoded using DER format, so you want {@link org.bitcoinj.core.ECKey.ECDSASignature#encodeToDER()}
+     * instead. However sometimes the independent components can be useful, for instance, if you're doing to do further
+     * EC maths on them.
+     *
+     * @param aesKey The AES key to use for decryption of the private key. If null then no decryption is required.
+     * @throws KeyCrypterException if there's something wrong with aesKey.
+     * @throws ECKey.MissingPrivateKeyException if this key cannot sign because it's pubkey only.
+     */
+    public ECDSASignature sign(Sha256Hash input, @Nullable KeyParameter aesKey) throws KeyCrypterException {
+<span class="fc" id="L659">        KeyCrypter crypter = getKeyCrypter();</span>
+<span class="fc bfc" id="L660" title="All 2 branches covered.">        if (crypter != null) {</span>
+<span class="fc bfc" id="L661" title="All 2 branches covered.">            if (aesKey == null)</span>
+<span class="fc" id="L662">                throw new KeyIsEncryptedException();</span>
+<span class="fc" id="L663">            return decrypt(aesKey).sign(input);</span>
+        } else {
+            // No decryption of private key required.
+<span class="pc bpc" id="L666" title="1 of 2 branches missed.">            if (priv == null)</span>
+<span class="nc" id="L667">                throw new MissingPrivateKeyException();</span>
+        }
+<span class="fc" id="L669">        return doSign(input, priv);</span>
+    }
+
+    protected ECDSASignature doSign(Sha256Hash input, BigInteger privateKeyForSigning) {
+<span class="pc bpc" id="L673" title="1 of 2 branches missed.">        if (Secp256k1Context.isEnabled()) {</span>
+            try {
+<span class="nc" id="L675">                byte[] signature = NativeSecp256k1.sign(</span>
+<span class="nc" id="L676">                        input.getBytes(),</span>
+<span class="nc" id="L677">                        Utils.bigIntegerToBytes(privateKeyForSigning, 32)</span>
+                );
+<span class="nc" id="L679">                return ECDSASignature.decodeFromDER(signature);</span>
+<span class="nc" id="L680">            } catch (NativeSecp256k1Util.AssertFailException e) {</span>
+<span class="nc" id="L681">                log.error(&quot;Caught AssertFailException inside secp256k1&quot;, e);</span>
+<span class="nc" id="L682">                throw new RuntimeException(e);</span>
+            }
+        }
+<span class="fc bfc" id="L685" title="All 2 branches covered.">        if (FAKE_SIGNATURES)</span>
+<span class="fc" id="L686">            return TransactionSignature.dummy();</span>
+<span class="fc" id="L687">        checkNotNull(privateKeyForSigning);</span>
+<span class="fc" id="L688">        ECDSASigner signer = new ECDSASigner(new HMacDSAKCalculator(new SHA256Digest()));</span>
+<span class="fc" id="L689">        ECPrivateKeyParameters privKey = new ECPrivateKeyParameters(privateKeyForSigning, CURVE);</span>
+<span class="fc" id="L690">        signer.init(true, privKey);</span>
+<span class="fc" id="L691">        BigInteger[] components = signer.generateSignature(input.getBytes());</span>
+<span class="fc" id="L692">        return new ECDSASignature(components[0], components[1]).toCanonicalised();</span>
+    }
+
+    /**
+     * &lt;p&gt;Verifies the given ECDSA signature against the message bytes using the public key bytes.&lt;/p&gt;
+     * 
+     * &lt;p&gt;When using native ECDSA verification, data must be 32 bytes, and no element may be
+     * larger than 520 bytes.&lt;/p&gt;
+     *
+     * @param data      Hash of the data to verify.
+     * @param signature ASN.1 encoded signature.
+     * @param pub       The public key bytes to use.
+     */
+    public static boolean verify(byte[] data, ECDSASignature signature, byte[] pub) {
+<span class="fc bfc" id="L706" title="All 2 branches covered.">        if (FAKE_SIGNATURES)</span>
+<span class="fc" id="L707">            return true;</span>
+
+<span class="pc bpc" id="L709" title="1 of 2 branches missed.">        if (Secp256k1Context.isEnabled()) {</span>
+            try {
+<span class="nc" id="L711">                return NativeSecp256k1.verify(data, signature.encodeToDER(), pub);</span>
+<span class="nc" id="L712">            } catch (NativeSecp256k1Util.AssertFailException e) {</span>
+<span class="nc" id="L713">                log.error(&quot;Caught AssertFailException inside secp256k1&quot;, e);</span>
+<span class="nc" id="L714">                return false;</span>
+            }
+        }
+
+<span class="fc" id="L718">        ECDSASigner signer = new ECDSASigner();</span>
+<span class="fc" id="L719">        ECPublicKeyParameters params = new ECPublicKeyParameters(CURVE.getCurve().decodePoint(pub), CURVE);</span>
+<span class="fc" id="L720">        signer.init(false, params);</span>
+        try {
+<span class="fc" id="L722">            return signer.verifySignature(data, signature.r, signature.s);</span>
+<span class="nc" id="L723">        } catch (NullPointerException e) {</span>
+            // Bouncy Castle contains a bug that can cause NPEs given specially crafted signatures. Those signatures
+            // are inherently invalid/attack sigs so we just fail them here rather than crash the thread.
+<span class="nc" id="L726">            log.error(&quot;Caught NPE inside bouncy castle&quot;, e);</span>
+<span class="nc" id="L727">            return false;</span>
+        }
+    }
+
+    /**
+     * Verifies the given ASN.1 encoded ECDSA signature against a hash using the public key.
+     *
+     * @param data      Hash of the data to verify.
+     * @param signature ASN.1 encoded signature.
+     * @param pub       The public key bytes to use.
+     */
+    public static boolean verify(byte[] data, byte[] signature, byte[] pub) {
+<span class="pc bpc" id="L739" title="1 of 2 branches missed.">        if (Secp256k1Context.isEnabled()) {</span>
+            try {
+<span class="nc" id="L741">                return NativeSecp256k1.verify(data, signature, pub);</span>
+<span class="nc" id="L742">            } catch (NativeSecp256k1Util.AssertFailException e) {</span>
+<span class="nc" id="L743">                log.error(&quot;Caught AssertFailException inside secp256k1&quot;, e);</span>
+<span class="nc" id="L744">                return false;</span>
+            }
+        }
+<span class="fc" id="L747">        return verify(data, ECDSASignature.decodeFromDER(signature), pub);</span>
+    }
+
+    /**
+     * Verifies the given ASN.1 encoded ECDSA signature against a hash using the public key.
+     *
+     * @param hash      Hash of the data to verify.
+     * @param signature ASN.1 encoded signature.
+     */
+    public boolean verify(byte[] hash, byte[] signature) {
+<span class="fc" id="L757">        return ECKey.verify(hash, signature, getPubKey());</span>
+    }
+
+    /**
+     * Verifies the given R/S pair (signature) against a hash using the public key.
+     */
+    public boolean verify(Sha256Hash sigHash, ECDSASignature signature) {
+<span class="fc" id="L764">        return ECKey.verify(sigHash.getBytes(), signature, getPubKey());</span>
+    }
+
+    /**
+     * Verifies the given ASN.1 encoded ECDSA signature against a hash using the public key, and throws an exception
+     * if the signature doesn't match
+     * @throws java.security.SignatureException if the signature does not match.
+     */
+    public void verifyOrThrow(byte[] hash, byte[] signature) throws SignatureException {
+<span class="nc bnc" id="L773" title="All 2 branches missed.">        if (!verify(hash, signature))</span>
+<span class="nc" id="L774">            throw new SignatureException();</span>
+<span class="nc" id="L775">    }</span>
+
+    /**
+     * Verifies the given R/S pair (signature) against a hash using the public key, and throws an exception
+     * if the signature doesn't match
+     * @throws java.security.SignatureException if the signature does not match.
+     */
+    public void verifyOrThrow(Sha256Hash sigHash, ECDSASignature signature) throws SignatureException {
+<span class="nc bnc" id="L783" title="All 2 branches missed.">        if (!ECKey.verify(sigHash.getBytes(), signature, getPubKey()))</span>
+<span class="nc" id="L784">            throw new SignatureException();</span>
+<span class="nc" id="L785">    }</span>
+
+    /**
+     * Returns true if the given pubkey is canonical, i.e. the correct length taking into account compression.
+     */
+    public static boolean isPubKeyCanonical(byte[] pubkey) {
+<span class="pc bpc" id="L791" title="1 of 2 branches missed.">        if (pubkey.length &lt; 33)</span>
+<span class="nc" id="L792">            return false;</span>
+<span class="pc bpc" id="L793" title="1 of 2 branches missed.">        if (pubkey[0] == 0x04) {</span>
+            // Uncompressed pubkey
+<span class="nc bnc" id="L795" title="All 2 branches missed.">            if (pubkey.length != 65)</span>
+<span class="nc" id="L796">                return false;</span>
+<span class="pc bpc" id="L797" title="1 of 4 branches missed.">        } else if (pubkey[0] == 0x02 || pubkey[0] == 0x03) {</span>
+            // Compressed pubkey
+<span class="fc bfc" id="L799" title="All 2 branches covered.">            if (pubkey.length != 33)</span>
+<span class="fc" id="L800">                return false;</span>
+        } else
+<span class="nc" id="L802">            return false;</span>
+<span class="fc" id="L803">        return true;</span>
+    }
+
+    private static ECKey extractKeyFromASN1(byte[] asn1privkey) {
+        // To understand this code, see the definition of the ASN.1 format for EC private keys in the OpenSSL source
+        // code in ec_asn1.c:
+        //
+        // ASN1_SEQUENCE(EC_PRIVATEKEY) = {
+        //   ASN1_SIMPLE(EC_PRIVATEKEY, version, LONG),
+        //   ASN1_SIMPLE(EC_PRIVATEKEY, privateKey, ASN1_OCTET_STRING),
+        //   ASN1_EXP_OPT(EC_PRIVATEKEY, parameters, ECPKPARAMETERS, 0),
+        //   ASN1_EXP_OPT(EC_PRIVATEKEY, publicKey, ASN1_BIT_STRING, 1)
+        // } ASN1_SEQUENCE_END(EC_PRIVATEKEY)
+        //
+        try {
+<span class="fc" id="L818">            ASN1InputStream decoder = new ASN1InputStream(asn1privkey);</span>
+<span class="fc" id="L819">            DLSequence seq = (DLSequence) decoder.readObject();</span>
+<span class="pc bpc" id="L820" title="1 of 2 branches missed.">            checkArgument(decoder.readObject() == null, &quot;Input contains extra bytes&quot;);</span>
+<span class="fc" id="L821">            decoder.close();</span>
+
+<span class="pc bpc" id="L823" title="1 of 2 branches missed.">            checkArgument(seq.size() == 4, &quot;Input does not appear to be an ASN.1 OpenSSL EC private key&quot;);</span>
+
+<span class="fc" id="L825">            checkArgument(((ASN1Integer) seq.getObjectAt(0)).getValue().equals(BigInteger.ONE),</span>
+                    &quot;Input is of wrong version&quot;);
+
+<span class="fc" id="L828">            byte[] privbits = ((ASN1OctetString) seq.getObjectAt(1)).getOctets();</span>
+<span class="fc" id="L829">            BigInteger privkey = new BigInteger(1, privbits);</span>
+
+<span class="fc" id="L831">            ASN1TaggedObject pubkey = (ASN1TaggedObject) seq.getObjectAt(3);</span>
+<span class="pc bpc" id="L832" title="1 of 2 branches missed.">            checkArgument(pubkey.getTagNo() == 1, &quot;Input has 'publicKey' with bad tag number&quot;);</span>
+<span class="fc" id="L833">            byte[] pubbits = ((DERBitString)pubkey.getObject()).getBytes();</span>
+<span class="pc bpc" id="L834" title="1 of 4 branches missed.">            checkArgument(pubbits.length == 33 || pubbits.length == 65, &quot;Input has 'publicKey' with invalid length&quot;);</span>
+<span class="fc" id="L835">            int encoding = pubbits[0] &amp; 0xFF;</span>
+            // Only allow compressed(2,3) and uncompressed(4), not infinity(0) or hybrid(6,7)
+<span class="pc bpc" id="L837" title="2 of 4 branches missed.">            checkArgument(encoding &gt;= 2 &amp;&amp; encoding &lt;= 4, &quot;Input has 'publicKey' with invalid encoding&quot;);</span>
+
+            // Now sanity check to ensure the pubkey bytes match the privkey.
+<span class="fc bfc" id="L840" title="All 2 branches covered.">            boolean compressed = (pubbits.length == 33);</span>
+<span class="fc" id="L841">            ECKey key = new ECKey(privkey, null, compressed);</span>
+<span class="pc bpc" id="L842" title="1 of 2 branches missed.">            if (!Arrays.equals(key.getPubKey(), pubbits))</span>
+<span class="nc" id="L843">                throw new IllegalArgumentException(&quot;Public key in ASN.1 structure does not match private key.&quot;);</span>
+<span class="fc" id="L844">            return key;</span>
+<span class="nc" id="L845">        } catch (IOException e) {</span>
+<span class="nc" id="L846">            throw new RuntimeException(e);  // Cannot happen, reading from memory stream.</span>
+        }
+    }
+
+    /**
+     * Signs a text message using the standard Bitcoin messaging signing format and returns the signature as a base64
+     * encoded string.
+     *
+     * @throws IllegalStateException if this ECKey does not have the private part.
+     * @throws KeyCrypterException if this ECKey is encrypted and no AESKey is provided or it does not decrypt the ECKey.
+     */
+    public String signMessage(String message) throws KeyCrypterException {
+<span class="fc" id="L858">        return signMessage(message, null);</span>
+    }
+
+    /**
+     * Signs a text message using the standard Bitcoin messaging signing format and returns the signature as a base64
+     * encoded string.
+     *
+     * @throws IllegalStateException if this ECKey does not have the private part.
+     * @throws KeyCrypterException if this ECKey is encrypted and no AESKey is provided or it does not decrypt the ECKey.
+     */
+    public String signMessage(String message, @Nullable KeyParameter aesKey) throws KeyCrypterException {
+<span class="fc" id="L869">        byte[] data = Utils.formatMessageForSigning(message);</span>
+<span class="fc" id="L870">        Sha256Hash hash = Sha256Hash.twiceOf(data);</span>
+<span class="fc" id="L871">        ECDSASignature sig = sign(hash, aesKey);</span>
+        // Now we have to work backwards to figure out the recId needed to recover the signature.
+<span class="fc" id="L873">        int recId = -1;</span>
+<span class="pc bpc" id="L874" title="1 of 2 branches missed.">        for (int i = 0; i &lt; 4; i++) {</span>
+<span class="fc" id="L875">            ECKey k = ECKey.recoverFromSignature(i, sig, hash, isCompressed());</span>
+<span class="pc bpc" id="L876" title="1 of 4 branches missed.">            if (k != null &amp;&amp; k.pub.equals(pub)) {</span>
+<span class="fc" id="L877">                recId = i;</span>
+<span class="fc" id="L878">                break;</span>
+            }
+        }
+<span class="pc bpc" id="L881" title="1 of 2 branches missed.">        if (recId == -1)</span>
+<span class="nc" id="L882">            throw new RuntimeException(&quot;Could not construct a recoverable key. This should never happen.&quot;);</span>
+<span class="pc bpc" id="L883" title="1 of 2 branches missed.">        int headerByte = recId + 27 + (isCompressed() ? 4 : 0);</span>
+<span class="fc" id="L884">        byte[] sigData = new byte[65];  // 1 header + 32 bytes for R + 32 bytes for S</span>
+<span class="fc" id="L885">        sigData[0] = (byte)headerByte;</span>
+<span class="fc" id="L886">        System.arraycopy(Utils.bigIntegerToBytes(sig.r, 32), 0, sigData, 1, 32);</span>
+<span class="fc" id="L887">        System.arraycopy(Utils.bigIntegerToBytes(sig.s, 32), 0, sigData, 33, 32);</span>
+<span class="fc" id="L888">        return new String(Base64.encode(sigData), Charset.forName(&quot;UTF-8&quot;));</span>
+    }
+
+    /**
+     * Given an arbitrary piece of text and a Bitcoin-format message signature encoded in base64, returns an ECKey
+     * containing the public key that was used to sign it. This can then be compared to the expected public key to
+     * determine if the signature was correct. These sorts of signatures are compatible with the Bitcoin-Qt/bitcoind
+     * format generated by signmessage/verifymessage RPCs and GUI menu options. They are intended for humans to verify
+     * their communications with each other, hence the base64 format and the fact that the input is text.
+     *
+     * @param message Some piece of human readable text.
+     * @param signatureBase64 The Bitcoin-format message signature in base64
+     * @throws SignatureException If the public key could not be recovered or if there was a signature format error.
+     */
+    public static ECKey signedMessageToKey(String message, String signatureBase64) throws SignatureException {
+        byte[] signatureEncoded;
+        try {
+<span class="fc" id="L905">            signatureEncoded = Base64.decode(signatureBase64);</span>
+<span class="nc" id="L906">        } catch (RuntimeException e) {</span>
+            // This is what you get back from Bouncy Castle if base64 doesn't decode :(
+<span class="nc" id="L908">            throw new SignatureException(&quot;Could not decode base64&quot;, e);</span>
+<span class="fc" id="L909">        }</span>
+        // Parse the signature bytes into r/s and the selector value.
+<span class="pc bpc" id="L911" title="1 of 2 branches missed.">        if (signatureEncoded.length &lt; 65)</span>
+<span class="nc" id="L912">            throw new SignatureException(&quot;Signature truncated, expected 65 bytes and got &quot; + signatureEncoded.length);</span>
+<span class="fc" id="L913">        int header = signatureEncoded[0] &amp; 0xFF;</span>
+        // The header byte: 0x1B = first key with even y, 0x1C = first key with odd y,
+        //                  0x1D = second key with even y, 0x1E = second key with odd y
+<span class="pc bpc" id="L916" title="2 of 4 branches missed.">        if (header &lt; 27 || header &gt; 34)</span>
+<span class="nc" id="L917">            throw new SignatureException(&quot;Header byte out of range: &quot; + header);</span>
+<span class="fc" id="L918">        BigInteger r = new BigInteger(1, Arrays.copyOfRange(signatureEncoded, 1, 33));</span>
+<span class="fc" id="L919">        BigInteger s = new BigInteger(1, Arrays.copyOfRange(signatureEncoded, 33, 65));</span>
+<span class="fc" id="L920">        ECDSASignature sig = new ECDSASignature(r, s);</span>
+<span class="fc" id="L921">        byte[] messageBytes = Utils.formatMessageForSigning(message);</span>
+        // Note that the C++ code doesn't actually seem to specify any character encoding. Presumably it's whatever
+        // JSON-SPIRIT hands back. Assume UTF-8 for now.
+<span class="fc" id="L924">        Sha256Hash messageHash = Sha256Hash.twiceOf(messageBytes);</span>
+<span class="fc" id="L925">        boolean compressed = false;</span>
+<span class="pc bpc" id="L926" title="1 of 2 branches missed.">        if (header &gt;= 31) {</span>
+<span class="fc" id="L927">            compressed = true;</span>
+<span class="fc" id="L928">            header -= 4;</span>
+        }
+<span class="fc" id="L930">        int recId = header - 27;</span>
+<span class="fc" id="L931">        ECKey key = ECKey.recoverFromSignature(recId, sig, messageHash, compressed);</span>
+<span class="pc bpc" id="L932" title="1 of 2 branches missed.">        if (key == null)</span>
+<span class="nc" id="L933">            throw new SignatureException(&quot;Could not recover public key from signature&quot;);</span>
+<span class="fc" id="L934">        return key;</span>
+    }
+
+    /**
+     * Convenience wrapper around {@link ECKey#signedMessageToKey(String, String)}. If the key derived from the
+     * signature is not the same as this one, throws a SignatureException.
+     */
+    public void verifyMessage(String message, String signatureBase64) throws SignatureException {
+<span class="fc" id="L942">        ECKey key = ECKey.signedMessageToKey(message, signatureBase64);</span>
+<span class="fc bfc" id="L943" title="All 2 branches covered.">        if (!key.pub.equals(pub))</span>
+<span class="fc" id="L944">            throw new SignatureException(&quot;Signature did not match for message&quot;);</span>
+<span class="fc" id="L945">    }</span>
+
+    /**
+     * &lt;p&gt;Given the components of a signature and a selector value, recover and return the public key
+     * that generated the signature according to the algorithm in SEC1v2 section 4.1.6.&lt;/p&gt;
+     *
+     * &lt;p&gt;The recId is an index from 0 to 3 which indicates which of the 4 possible keys is the correct one. Because
+     * the key recovery operation yields multiple potential keys, the correct key must either be stored alongside the
+     * signature, or you must be willing to try each recId in turn until you find one that outputs the key you are
+     * expecting.&lt;/p&gt;
+     *
+     * &lt;p&gt;If this method returns null it means recovery was not possible and recId should be iterated.&lt;/p&gt;
+     *
+     * &lt;p&gt;Given the above two points, a correct usage of this method is inside a for loop from 0 to 3, and if the
+     * output is null OR a key that is not the one you expect, you try again with the next recId.&lt;/p&gt;
+     *
+     * @param recId Which possible key to recover.
+     * @param sig the R and S components of the signature, wrapped.
+     * @param message Hash of the data that was signed.
+     * @param compressed Whether or not the original pubkey was compressed.
+     * @return An ECKey containing only the public part, or null if recovery wasn't possible.
+     */
+    @Nullable
+    public static ECKey recoverFromSignature(int recId, ECDSASignature sig, Sha256Hash message, boolean compressed) {
+<span class="pc bpc" id="L969" title="1 of 2 branches missed.">        Preconditions.checkArgument(recId &gt;= 0, &quot;recId must be positive&quot;);</span>
+<span class="pc bpc" id="L970" title="1 of 2 branches missed.">        Preconditions.checkArgument(sig.r.signum() &gt;= 0, &quot;r must be positive&quot;);</span>
+<span class="pc bpc" id="L971" title="1 of 2 branches missed.">        Preconditions.checkArgument(sig.s.signum() &gt;= 0, &quot;s must be positive&quot;);</span>
+<span class="fc" id="L972">        Preconditions.checkNotNull(message);</span>
+        // 1.0 For j from 0 to h   (h == recId here and the loop is outside this function)
+        //   1.1 Let x = r + jn
+<span class="fc" id="L975">        BigInteger n = CURVE.getN();  // Curve order.</span>
+<span class="fc" id="L976">        BigInteger i = BigInteger.valueOf((long) recId / 2);</span>
+<span class="fc" id="L977">        BigInteger x = sig.r.add(i.multiply(n));</span>
+        //   1.2. Convert the integer x to an octet string X of length mlen using the conversion routine
+        //        specified in Section 2.3.7, where mlen = ⌈(log2 p)/8⌉ or mlen = ⌈m/8⌉.
+        //   1.3. Convert the octet string (16 set binary digits)||X to an elliptic curve point R using the
+        //        conversion routine specified in Section 2.3.4. If this conversion routine outputs “invalid”, then
+        //        do another iteration of Step 1.
+        //
+        // More concisely, what these points mean is to use X as a compressed public key.
+<span class="fc" id="L985">        BigInteger prime = SecP256K1Curve.q;</span>
+<span class="pc bpc" id="L986" title="1 of 2 branches missed.">        if (x.compareTo(prime) &gt;= 0) {</span>
+            // Cannot have point co-ordinates larger than this as everything takes place modulo Q.
+<span class="nc" id="L988">            return null;</span>
+        }
+        // Compressed keys require you to know an extra bit of data about the y-coord as there are two possibilities.
+        // So it's encoded in the recId.
+<span class="fc bfc" id="L992" title="All 2 branches covered.">        ECPoint R = decompressKey(x, (recId &amp; 1) == 1);</span>
+        //   1.4. If nR != point at infinity, then do another iteration of Step 1 (callers responsibility).
+<span class="pc bpc" id="L994" title="1 of 2 branches missed.">        if (!R.multiply(n).isInfinity())</span>
+<span class="nc" id="L995">            return null;</span>
+        //   1.5. Compute e from M using Steps 2 and 3 of ECDSA signature verification.
+<span class="fc" id="L997">        BigInteger e = message.toBigInteger();</span>
+        //   1.6. For k from 1 to 2 do the following.   (loop is outside this function via iterating recId)
+        //   1.6.1. Compute a candidate public key as:
+        //               Q = mi(r) * (sR - eG)
+        //
+        // Where mi(x) is the modular multiplicative inverse. We transform this into the following:
+        //               Q = (mi(r) * s ** R) + (mi(r) * -e ** G)
+        // Where -e is the modular additive inverse of e, that is z such that z + e = 0 (mod n). In the above equation
+        // ** is point multiplication and + is point addition (the EC group operator).
+        //
+        // We can find the additive inverse by subtracting e from zero then taking the mod. For example the additive
+        // inverse of 3 modulo 11 is 8 because 3 + 8 mod 11 = 0, and -3 mod 11 = 8.
+<span class="fc" id="L1009">        BigInteger eInv = BigInteger.ZERO.subtract(e).mod(n);</span>
+<span class="fc" id="L1010">        BigInteger rInv = sig.r.modInverse(n);</span>
+<span class="fc" id="L1011">        BigInteger srInv = rInv.multiply(sig.s).mod(n);</span>
+<span class="fc" id="L1012">        BigInteger eInvrInv = rInv.multiply(eInv).mod(n);</span>
+<span class="fc" id="L1013">        ECPoint q = ECAlgorithms.sumOfTwoMultiplies(CURVE.getG(), eInvrInv, R, srInv);</span>
+<span class="fc" id="L1014">        return ECKey.fromPublicOnly(q.getEncoded(compressed));</span>
+    }
+
+    /** Decompress a compressed public key (x co-ord and low-bit of y-coord). */
+    private static ECPoint decompressKey(BigInteger xBN, boolean yBit) {
+<span class="fc" id="L1019">        X9IntegerConverter x9 = new X9IntegerConverter();</span>
+<span class="fc" id="L1020">        byte[] compEnc = x9.integerToBytes(xBN, 1 + x9.getByteLength(CURVE.getCurve()));</span>
+<span class="fc bfc" id="L1021" title="All 2 branches covered.">        compEnc[0] = (byte)(yBit ? 0x03 : 0x02);</span>
+<span class="fc" id="L1022">        return CURVE.getCurve().decodePoint(compEnc);</span>
+    }
+
+    /**
+     * Returns a 32 byte array containing the private key.
+     * @throws org.bitcoinj.core.ECKey.MissingPrivateKeyException if the private key bytes are missing/encrypted.
+     */
+    public byte[] getPrivKeyBytes() {
+<span class="fc" id="L1030">        return Utils.bigIntegerToBytes(getPrivKey(), 32);</span>
+    }
+
+    /**
+     * Exports the private key in the form used by Bitcoin Core's &quot;dumpprivkey&quot; and &quot;importprivkey&quot; commands. Use
+     * the {@link org.bitcoinj.core.DumpedPrivateKey#toString()} method to get the string.
+     *
+     * @param params The network this key is intended for use on.
+     * @return Private key bytes as a {@link DumpedPrivateKey}.
+     * @throws IllegalStateException if the private key is not available.
+     */
+    public DumpedPrivateKey getPrivateKeyEncoded(NetworkParameters params) {
+<span class="fc" id="L1042">        return new DumpedPrivateKey(params, getPrivKeyBytes(), isCompressed());</span>
+    }
+
+    /**
+     * Returns the creation time of this key or zero if the key was deserialized from a version that did not store
+     * that data.
+     */
+    @Override
+    public long getCreationTimeSeconds() {
+<span class="fc" id="L1051">        return creationTimeSeconds;</span>
+    }
+
+    /**
+     * Sets the creation time of this key. Zero is a convention to mean &quot;unavailable&quot;. This method can be useful when
+     * you have a raw key you are importing from somewhere else.
+     */
+    public void setCreationTimeSeconds(long newCreationTimeSeconds) {
+<span class="pc bpc" id="L1059" title="1 of 2 branches missed.">        if (newCreationTimeSeconds &lt; 0)</span>
+<span class="nc" id="L1060">            throw new IllegalArgumentException(&quot;Cannot set creation time to negative value: &quot; + newCreationTimeSeconds);</span>
+<span class="fc" id="L1061">        creationTimeSeconds = newCreationTimeSeconds;</span>
+<span class="fc" id="L1062">    }</span>
+
+    /**
+     * Create an encrypted private key with the keyCrypter and the AES key supplied.
+     * This method returns a new encrypted key and leaves the original unchanged.
+     *
+     * @param keyCrypter The keyCrypter that specifies exactly how the encrypted bytes are created.
+     * @param aesKey The KeyParameter with the AES encryption key (usually constructed with keyCrypter#deriveKey and cached as it is slow to create).
+     * @return encryptedKey
+     */
+    public ECKey encrypt(KeyCrypter keyCrypter, KeyParameter aesKey) throws KeyCrypterException {
+<span class="fc" id="L1073">        checkNotNull(keyCrypter);</span>
+<span class="fc" id="L1074">        final byte[] privKeyBytes = getPrivKeyBytes();</span>
+<span class="fc" id="L1075">        EncryptedData encryptedPrivateKey = keyCrypter.encrypt(privKeyBytes, aesKey);</span>
+<span class="fc" id="L1076">        ECKey result = ECKey.fromEncrypted(encryptedPrivateKey, keyCrypter, getPubKey());</span>
+<span class="fc" id="L1077">        result.setCreationTimeSeconds(creationTimeSeconds);</span>
+<span class="fc" id="L1078">        return result;</span>
+    }
+
+    /**
+     * Create a decrypted private key with the keyCrypter and AES key supplied. Note that if the aesKey is wrong, this
+     * has some chance of throwing KeyCrypterException due to the corrupted padding that will result, but it can also
+     * just yield a garbage key.
+     *
+     * @param keyCrypter The keyCrypter that specifies exactly how the decrypted bytes are created.
+     * @param aesKey The KeyParameter with the AES encryption key (usually constructed with keyCrypter#deriveKey and cached).
+     */
+    public ECKey decrypt(KeyCrypter keyCrypter, KeyParameter aesKey) throws KeyCrypterException {
+<span class="fc" id="L1090">        checkNotNull(keyCrypter);</span>
+        // Check that the keyCrypter matches the one used to encrypt the keys, if set.
+<span class="pc bpc" id="L1092" title="2 of 4 branches missed.">        if (this.keyCrypter != null &amp;&amp; !this.keyCrypter.equals(keyCrypter))</span>
+<span class="nc" id="L1093">            throw new KeyCrypterException(&quot;The keyCrypter being used to decrypt the key is different to the one that was used to encrypt it&quot;);</span>
+<span class="pc bpc" id="L1094" title="1 of 2 branches missed.">        checkState(encryptedPrivateKey != null, &quot;This key is not encrypted&quot;);</span>
+<span class="fc" id="L1095">        byte[] unencryptedPrivateKey = keyCrypter.decrypt(encryptedPrivateKey, aesKey);</span>
+<span class="fc" id="L1096">        ECKey key = ECKey.fromPrivate(unencryptedPrivateKey);</span>
+<span class="pc bpc" id="L1097" title="1 of 2 branches missed.">        if (!isCompressed())</span>
+<span class="nc" id="L1098">            key = key.decompress();</span>
+<span class="pc bpc" id="L1099" title="1 of 2 branches missed.">        if (!Arrays.equals(key.getPubKey(), getPubKey()))</span>
+<span class="nc" id="L1100">            throw new KeyCrypterException(&quot;Provided AES key is wrong&quot;);</span>
+<span class="fc" id="L1101">        key.setCreationTimeSeconds(creationTimeSeconds);</span>
+<span class="fc" id="L1102">        return key;</span>
+    }
+
+    /**
+     * Create a decrypted private key with AES key. Note that if the AES key is wrong, this
+     * has some chance of throwing KeyCrypterException due to the corrupted padding that will result, but it can also
+     * just yield a garbage key.
+     *
+     * @param aesKey The KeyParameter with the AES encryption key (usually constructed with keyCrypter#deriveKey and cached).
+     */
+    public ECKey decrypt(KeyParameter aesKey) throws KeyCrypterException {
+<span class="fc" id="L1113">        final KeyCrypter crypter = getKeyCrypter();</span>
+<span class="pc bpc" id="L1114" title="1 of 2 branches missed.">        if (crypter == null)</span>
+<span class="nc" id="L1115">            throw new KeyCrypterException(&quot;No key crypter available&quot;);</span>
+<span class="fc" id="L1116">        return decrypt(crypter, aesKey);</span>
+    }
+
+    /**
+     * Creates decrypted private key if needed.
+     */
+    public ECKey maybeDecrypt(@Nullable KeyParameter aesKey) throws KeyCrypterException {
+<span class="pc bpc" id="L1123" title="3 of 4 branches missed.">        return isEncrypted() &amp;&amp; aesKey != null ? decrypt(aesKey) : this;</span>
+    }
+
+    /**
+     * &lt;p&gt;Check that it is possible to decrypt the key with the keyCrypter and that the original key is returned.&lt;/p&gt;
+     *
+     * &lt;p&gt;Because it is a critical failure if the private keys cannot be decrypted successfully (resulting of loss of all
+     * bitcoins controlled by the private key) you can use this method to check when you *encrypt* a wallet that
+     * it can definitely be decrypted successfully.&lt;/p&gt;
+     *
+     * &lt;p&gt;See {@link Wallet#encrypt(KeyCrypter keyCrypter, KeyParameter aesKey)} for example usage.&lt;/p&gt;
+     *
+     * @return true if the encrypted key can be decrypted back to the original key successfully.
+     */
+    public static boolean encryptionIsReversible(ECKey originalKey, ECKey encryptedKey, KeyCrypter keyCrypter, KeyParameter aesKey) {
+        try {
+<span class="fc" id="L1139">            ECKey rebornUnencryptedKey = encryptedKey.decrypt(keyCrypter, aesKey);</span>
+<span class="fc" id="L1140">            byte[] originalPrivateKeyBytes = originalKey.getPrivKeyBytes();</span>
+<span class="fc" id="L1141">            byte[] rebornKeyBytes = rebornUnencryptedKey.getPrivKeyBytes();</span>
+<span class="pc bpc" id="L1142" title="1 of 2 branches missed.">            if (!Arrays.equals(originalPrivateKeyBytes, rebornKeyBytes)) {</span>
+<span class="nc" id="L1143">                log.error(&quot;The check that encryption could be reversed failed for {}&quot;, originalKey);</span>
+<span class="nc" id="L1144">                return false;</span>
+            }
+<span class="fc" id="L1146">            return true;</span>
+<span class="fc" id="L1147">        } catch (KeyCrypterException kce) {</span>
+<span class="fc" id="L1148">            log.error(kce.getMessage());</span>
+<span class="fc" id="L1149">            return false;</span>
+        }
+    }
+
+    /**
+     * Indicates whether the private key is encrypted (true) or not (false).
+     * A private key is deemed to be encrypted when there is both a KeyCrypter and the encryptedPrivateKey is non-zero.
+     */
+    @Override
+    public boolean isEncrypted() {
+<span class="pc bpc" id="L1159" title="2 of 6 branches missed.">        return keyCrypter != null &amp;&amp; encryptedPrivateKey != null &amp;&amp; encryptedPrivateKey.encryptedBytes.length &gt; 0;</span>
+    }
+
+    @Nullable
+    @Override
+    public Protos.Wallet.EncryptionType getEncryptionType() {
+<span class="pc bpc" id="L1165" title="1 of 2 branches missed.">        return keyCrypter != null ? keyCrypter.getUnderstoodEncryptionType() : Protos.Wallet.EncryptionType.UNENCRYPTED;</span>
+    }
+
+    /**
+     * A wrapper for {@link #getPrivKeyBytes()} that returns null if the private key bytes are missing or would have
+     * to be derived (for the HD key case).
+     */
+    @Override
+    @Nullable
+    public byte[] getSecretBytes() {
+<span class="fc bfc" id="L1175" title="All 2 branches covered.">        if (hasPrivKey())</span>
+<span class="fc" id="L1176">            return getPrivKeyBytes();</span>
+        else
+<span class="fc" id="L1178">            return null;</span>
+    }
+
+    /** An alias for {@link #getEncryptedPrivateKey()} */
+    @Nullable
+    @Override
+    public EncryptedData getEncryptedData() {
+<span class="fc" id="L1185">        return getEncryptedPrivateKey();</span>
+    }
+
+    /**
+     * Returns the the encrypted private key bytes and initialisation vector for this ECKey, or null if the ECKey
+     * is not encrypted.
+     */
+    @Nullable
+    public EncryptedData getEncryptedPrivateKey() {
+<span class="fc" id="L1194">        return encryptedPrivateKey;</span>
+    }
+
+    /**
+     * Returns the KeyCrypter that was used to encrypt to encrypt this ECKey. You need this to decrypt the ECKey.
+     */
+    @Nullable
+    public KeyCrypter getKeyCrypter() {
+<span class="fc" id="L1202">        return keyCrypter;</span>
+    }
+
+<span class="fc" id="L1205">    public static class MissingPrivateKeyException extends RuntimeException {</span>
+    }
+
+<span class="fc" id="L1208">    public static class KeyIsEncryptedException extends MissingPrivateKeyException {</span>
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="fc bfc" id="L1213" title="All 2 branches covered.">        if (this == o) return true;</span>
+<span class="pc bpc" id="L1214" title="2 of 4 branches missed.">        if (o == null || !(o instanceof ECKey)) return false;</span>
+<span class="fc" id="L1215">        ECKey other = (ECKey) o;</span>
+<span class="fc bfc" id="L1216" title="All 2 branches covered.">        return Objects.equal(this.priv, other.priv)</span>
+<span class="fc bfc" id="L1217" title="All 2 branches covered.">                &amp;&amp; Objects.equal(this.pub, other.pub)</span>
+<span class="pc bpc" id="L1218" title="1 of 2 branches missed.">                &amp;&amp; Objects.equal(this.creationTimeSeconds, other.creationTimeSeconds)</span>
+<span class="pc bpc" id="L1219" title="1 of 2 branches missed.">                &amp;&amp; Objects.equal(this.keyCrypter, other.keyCrypter)</span>
+<span class="pc bpc" id="L1220" title="1 of 2 branches missed.">                &amp;&amp; Objects.equal(this.encryptedPrivateKey, other.encryptedPrivateKey);</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="fc" id="L1225">        return pub.hashCode();</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="fc" id="L1230">        return toString(false, null, null);</span>
+    }
+
+    /**
+     * Produce a string rendering of the ECKey INCLUDING the private key.
+     * Unless you absolutely need the private key it is better for security reasons to just use {@link #toString()}.
+     */
+    public String toStringWithPrivate(@Nullable KeyParameter aesKey, NetworkParameters params) {
+<span class="fc" id="L1238">        return toString(true, aesKey, params);</span>
+    }
+
+    public String getPrivateKeyAsHex() {
+<span class="fc" id="L1242">        return Utils.HEX.encode(getPrivKeyBytes());</span>
+    }
+
+    public String getPublicKeyAsHex() {
+<span class="fc" id="L1246">        return Utils.HEX.encode(pub.getEncoded());</span>
+    }
+
+    public String getPrivateKeyAsWiF(NetworkParameters params) {
+<span class="fc" id="L1250">        return getPrivateKeyEncoded(params).toString();</span>
+    }
+
+    private String toString(boolean includePrivate, @Nullable KeyParameter aesKey, NetworkParameters params) {
+<span class="fc" id="L1254">        final MoreObjects.ToStringHelper helper = MoreObjects.toStringHelper(this).omitNullValues();</span>
+<span class="fc" id="L1255">        helper.add(&quot;pub HEX&quot;, getPublicKeyAsHex());</span>
+<span class="fc bfc" id="L1256" title="All 2 branches covered.">        if (includePrivate) {</span>
+<span class="pc bpc" id="L1257" title="1 of 2 branches missed.">            ECKey decryptedKey = isEncrypted() ? decrypt(checkNotNull(aesKey)) : this;</span>
+            try {
+<span class="fc" id="L1259">                helper.add(&quot;priv HEX&quot;, decryptedKey.getPrivateKeyAsHex());</span>
+<span class="fc" id="L1260">                helper.add(&quot;priv WIF&quot;, decryptedKey.getPrivateKeyAsWiF(params));</span>
+<span class="nc" id="L1261">            } catch (IllegalStateException e) {</span>
+                // TODO: Make hasPrivKey() work for deterministic keys and fix this.
+<span class="nc" id="L1263">            } catch (Exception e) {</span>
+<span class="nc" id="L1264">                final String message = e.getMessage();</span>
+<span class="nc bnc" id="L1265" title="All 2 branches missed.">                helper.add(&quot;priv EXCEPTION&quot;, e.getClass().getName() + (message != null ? &quot;: &quot; + message : &quot;&quot;));</span>
+<span class="pc" id="L1266">            }</span>
+        }
+<span class="pc bpc" id="L1268" title="1 of 2 branches missed.">        if (creationTimeSeconds &gt; 0)</span>
+<span class="nc" id="L1269">            helper.add(&quot;creationTimeSeconds&quot;, creationTimeSeconds);</span>
+<span class="fc" id="L1270">        helper.add(&quot;keyCrypter&quot;, keyCrypter);</span>
+<span class="fc bfc" id="L1271" title="All 2 branches covered.">        if (includePrivate)</span>
+<span class="fc" id="L1272">            helper.add(&quot;encryptedPrivateKey&quot;, encryptedPrivateKey);</span>
+<span class="fc" id="L1273">        helper.add(&quot;isEncrypted&quot;, isEncrypted());</span>
+<span class="fc" id="L1274">        helper.add(&quot;isPubKeyOnly&quot;, isPubKeyOnly());</span>
+<span class="fc" id="L1275">        return helper.toString();</span>
+    }
+
+    public void formatKeyWithAddress(boolean includePrivateKeys, @Nullable KeyParameter aesKey, StringBuilder builder,
+            NetworkParameters params) {
+<span class="nc" id="L1280">        final Address address = toAddress(params);</span>
+<span class="nc" id="L1281">        builder.append(&quot;  addr:&quot;);</span>
+<span class="nc" id="L1282">        builder.append(address.toString());</span>
+<span class="nc" id="L1283">        builder.append(&quot;  hash160:&quot;);</span>
+<span class="nc" id="L1284">        builder.append(Utils.HEX.encode(getPubKeyHash()));</span>
+<span class="nc bnc" id="L1285" title="All 2 branches missed.">        if (creationTimeSeconds &gt; 0)</span>
+<span class="nc" id="L1286">            builder.append(&quot;  creationTimeSeconds:&quot;).append(creationTimeSeconds);</span>
+<span class="nc" id="L1287">        builder.append(&quot;\n&quot;);</span>
+<span class="nc bnc" id="L1288" title="All 2 branches missed.">        if (includePrivateKeys) {</span>
+<span class="nc" id="L1289">            builder.append(&quot;  &quot;);</span>
+<span class="nc" id="L1290">            builder.append(toStringWithPrivate(aesKey, params));</span>
+<span class="nc" id="L1291">            builder.append(&quot;\n&quot;);</span>
+        }
+<span class="nc" id="L1293">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

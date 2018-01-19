@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>BIP38PrivateKey.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.crypto</a> &gt; <span class="el_source">BIP38PrivateKey.java</span></div><h1>BIP38PrivateKey.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.crypto;
+
+import org.bitcoinj.core.*;
+import com.google.common.base.Charsets;
+import com.google.common.base.Objects;
+import com.google.common.primitives.Bytes;
+import com.lambdaworks.crypto.SCrypt;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
+
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.math.BigInteger;
+import java.security.GeneralSecurityException;
+import java.text.Normalizer;
+import java.util.Arrays;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+
+/**
+ * Implementation of &lt;a href=&quot;https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki&quot;&gt;BIP 38&lt;/a&gt;
+ * passphrase-protected private keys. Currently, only decryption is supported.
+ */
+public class BIP38PrivateKey extends VersionedChecksummedBytes {
+
+    public transient NetworkParameters params;
+    public final boolean ecMultiply;
+    public final boolean compressed;
+    public final boolean hasLotAndSequence;
+    public final byte[] addressHash;
+    public final byte[] content;
+
+<span class="fc" id="L52">    public static final class BadPassphraseException extends Exception {</span>
+    }
+
+    /**
+     * Construct a password-protected private key from its Base58 representation.
+     * @param params
+     *            The network parameters of the chain that the key is for.
+     * @param base58
+     *            The textual form of the password-protected private key.
+     * @throws AddressFormatException
+     *             if the given base58 doesn't parse or the checksum is invalid
+     */
+    public static BIP38PrivateKey fromBase58(NetworkParameters params, String base58) throws AddressFormatException {
+<span class="fc" id="L65">        return new BIP38PrivateKey(params, base58);</span>
+    }
+
+    /** @deprecated Use {@link #fromBase58(NetworkParameters, String)} */
+    @Deprecated
+    public BIP38PrivateKey(NetworkParameters params, String encoded) throws AddressFormatException {
+<span class="fc" id="L71">        super(encoded);</span>
+<span class="fc" id="L72">        this.params = checkNotNull(params);</span>
+<span class="pc bpc" id="L73" title="1 of 2 branches missed.">        if (version != 0x01)</span>
+<span class="nc" id="L74">            throw new AddressFormatException(&quot;Mismatched version number: &quot; + version);</span>
+<span class="pc bpc" id="L75" title="1 of 2 branches missed.">        if (bytes.length != 38)</span>
+<span class="nc" id="L76">            throw new AddressFormatException(&quot;Wrong number of bytes, excluding version byte: &quot; + bytes.length);</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">        hasLotAndSequence = (bytes[1] &amp; 0x04) != 0; // bit 2</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">        compressed = (bytes[1] &amp; 0x20) != 0; // bit 5</span>
+<span class="pc bpc" id="L79" title="1 of 2 branches missed.">        if ((bytes[1] &amp; 0x01) != 0) // bit 0</span>
+<span class="nc" id="L80">            throw new AddressFormatException(&quot;Bit 0x01 reserved for future use.&quot;);</span>
+<span class="pc bpc" id="L81" title="1 of 2 branches missed.">        if ((bytes[1] &amp; 0x02) != 0) // bit 1</span>
+<span class="nc" id="L82">            throw new AddressFormatException(&quot;Bit 0x02 reserved for future use.&quot;);</span>
+<span class="pc bpc" id="L83" title="1 of 2 branches missed.">        if ((bytes[1] &amp; 0x08) != 0) // bit 3</span>
+<span class="nc" id="L84">            throw new AddressFormatException(&quot;Bit 0x08 reserved for future use.&quot;);</span>
+<span class="pc bpc" id="L85" title="1 of 2 branches missed.">        if ((bytes[1] &amp; 0x10) != 0) // bit 4</span>
+<span class="nc" id="L86">            throw new AddressFormatException(&quot;Bit 0x10 reserved for future use.&quot;);</span>
+<span class="fc" id="L87">        final int byte0 = bytes[0] &amp; 0xff;</span>
+<span class="fc bfc" id="L88" title="All 2 branches covered.">        if (byte0 == 0x42) {</span>
+            // Non-EC-multiplied key
+<span class="pc bpc" id="L90" title="1 of 2 branches missed.">            if ((bytes[1] &amp; 0xc0) != 0xc0) // bits 6+7</span>
+<span class="nc" id="L91">                throw new AddressFormatException(&quot;Bits 0x40 and 0x80 must be set for non-EC-multiplied keys.&quot;);</span>
+<span class="fc" id="L92">            ecMultiply = false;</span>
+<span class="pc bpc" id="L93" title="1 of 2 branches missed.">            if (hasLotAndSequence)</span>
+<span class="nc" id="L94">                throw new AddressFormatException(&quot;Non-EC-multiplied keys cannot have lot/sequence.&quot;);</span>
+<span class="pc bpc" id="L95" title="1 of 2 branches missed.">        } else if (byte0 == 0x43) {</span>
+            // EC-multiplied key
+<span class="pc bpc" id="L97" title="1 of 2 branches missed.">            if ((bytes[1] &amp; 0xc0) != 0x00) // bits 6+7</span>
+<span class="nc" id="L98">                throw new AddressFormatException(&quot;Bits 0x40 and 0x80 must be cleared for EC-multiplied keys.&quot;);</span>
+<span class="fc" id="L99">            ecMultiply = true;</span>
+        } else {
+<span class="nc" id="L101">            throw new AddressFormatException(&quot;Second byte must by 0x42 or 0x43.&quot;);</span>
+        }
+<span class="fc" id="L103">        addressHash = Arrays.copyOfRange(bytes, 2, 6);</span>
+<span class="fc" id="L104">        content = Arrays.copyOfRange(bytes, 6, 38);</span>
+<span class="fc" id="L105">    }</span>
+
+    public ECKey decrypt(String passphrase) throws BadPassphraseException {
+<span class="fc" id="L108">        String normalizedPassphrase = Normalizer.normalize(passphrase, Normalizer.Form.NFC);</span>
+<span class="fc bfc" id="L109" title="All 2 branches covered.">        ECKey key = ecMultiply ? decryptEC(normalizedPassphrase) : decryptNoEC(normalizedPassphrase);</span>
+<span class="fc" id="L110">        Sha256Hash hash = Sha256Hash.twiceOf(key.toAddress(params).toString().getBytes(Charsets.US_ASCII));</span>
+<span class="fc" id="L111">        byte[] actualAddressHash = Arrays.copyOfRange(hash.getBytes(), 0, 4);</span>
+<span class="fc bfc" id="L112" title="All 2 branches covered.">        if (!Arrays.equals(actualAddressHash, addressHash))</span>
+<span class="fc" id="L113">            throw new BadPassphraseException();</span>
+<span class="fc" id="L114">        return key;</span>
+    }
+
+    private ECKey decryptNoEC(String normalizedPassphrase) {
+        try {
+<span class="fc" id="L119">            byte[] derived = SCrypt.scrypt(normalizedPassphrase.getBytes(Charsets.UTF_8), addressHash, 16384, 8, 8, 64);</span>
+<span class="fc" id="L120">            byte[] key = Arrays.copyOfRange(derived, 32, 64);</span>
+<span class="fc" id="L121">            SecretKeySpec keyspec = new SecretKeySpec(key, &quot;AES&quot;);</span>
+
+<span class="fc" id="L123">            DRMWorkaround.maybeDisableExportControls();</span>
+<span class="fc" id="L124">            Cipher cipher = Cipher.getInstance(&quot;AES/ECB/NoPadding&quot;);</span>
+
+<span class="fc" id="L126">            cipher.init(Cipher.DECRYPT_MODE, keyspec);</span>
+<span class="fc" id="L127">            byte[] decrypted = cipher.doFinal(content, 0, 32);</span>
+<span class="fc bfc" id="L128" title="All 2 branches covered.">            for (int i = 0; i &lt; 32; i++)</span>
+<span class="fc" id="L129">                decrypted[i] ^= derived[i];</span>
+<span class="fc" id="L130">            return ECKey.fromPrivate(decrypted, compressed);</span>
+<span class="nc" id="L131">        } catch (GeneralSecurityException x) {</span>
+<span class="nc" id="L132">            throw new RuntimeException(x);</span>
+        }
+    }
+
+    private ECKey decryptEC(String normalizedPassphrase) {
+        try {
+<span class="fc" id="L138">            byte[] ownerEntropy = Arrays.copyOfRange(content, 0, 8);</span>
+<span class="fc bfc" id="L139" title="All 2 branches covered.">            byte[] ownerSalt = hasLotAndSequence ? Arrays.copyOfRange(ownerEntropy, 0, 4) : ownerEntropy;</span>
+
+<span class="fc" id="L141">            byte[] passFactorBytes = SCrypt.scrypt(normalizedPassphrase.getBytes(Charsets.UTF_8), ownerSalt, 16384, 8, 8, 32);</span>
+<span class="fc bfc" id="L142" title="All 2 branches covered.">            if (hasLotAndSequence) {</span>
+<span class="fc" id="L143">                byte[] hashBytes = Bytes.concat(passFactorBytes, ownerEntropy);</span>
+<span class="pc bpc" id="L144" title="1 of 2 branches missed.">                checkState(hashBytes.length == 40);</span>
+<span class="fc" id="L145">                passFactorBytes = Sha256Hash.hashTwice(hashBytes);</span>
+            }
+<span class="fc" id="L147">            BigInteger passFactor = new BigInteger(1, passFactorBytes);</span>
+<span class="fc" id="L148">            ECKey k = ECKey.fromPrivate(passFactor, true);</span>
+
+<span class="fc" id="L150">            byte[] salt = Bytes.concat(addressHash, ownerEntropy);</span>
+<span class="pc bpc" id="L151" title="1 of 2 branches missed.">            checkState(salt.length == 12);</span>
+<span class="fc" id="L152">            byte[] derived = SCrypt.scrypt(k.getPubKey(), salt, 1024, 1, 1, 64);</span>
+<span class="fc" id="L153">            byte[] aeskey = Arrays.copyOfRange(derived, 32, 64);</span>
+
+<span class="fc" id="L155">            SecretKeySpec keyspec = new SecretKeySpec(aeskey, &quot;AES&quot;);</span>
+<span class="fc" id="L156">            Cipher cipher = Cipher.getInstance(&quot;AES/ECB/NoPadding&quot;);</span>
+<span class="fc" id="L157">            cipher.init(Cipher.DECRYPT_MODE, keyspec);</span>
+
+<span class="fc" id="L159">            byte[] encrypted2 = Arrays.copyOfRange(content, 16, 32);</span>
+<span class="fc" id="L160">            byte[] decrypted2 = cipher.doFinal(encrypted2);</span>
+<span class="pc bpc" id="L161" title="1 of 2 branches missed.">            checkState(decrypted2.length == 16);</span>
+<span class="fc bfc" id="L162" title="All 2 branches covered.">            for (int i = 0; i &lt; 16; i++)</span>
+<span class="fc" id="L163">                decrypted2[i] ^= derived[i + 16];</span>
+
+<span class="fc" id="L165">            byte[] encrypted1 = Bytes.concat(Arrays.copyOfRange(content, 8, 16), Arrays.copyOfRange(decrypted2, 0, 8));</span>
+<span class="fc" id="L166">            byte[] decrypted1 = cipher.doFinal(encrypted1);</span>
+<span class="pc bpc" id="L167" title="1 of 2 branches missed.">            checkState(decrypted1.length == 16);</span>
+<span class="fc bfc" id="L168" title="All 2 branches covered.">            for (int i = 0; i &lt; 16; i++)</span>
+<span class="fc" id="L169">                decrypted1[i] ^= derived[i];</span>
+
+<span class="fc" id="L171">            byte[] seed = Bytes.concat(decrypted1, Arrays.copyOfRange(decrypted2, 8, 16));</span>
+<span class="pc bpc" id="L172" title="1 of 2 branches missed.">            checkState(seed.length == 24);</span>
+<span class="fc" id="L173">            BigInteger seedFactor = new BigInteger(1, Sha256Hash.hashTwice(seed));</span>
+<span class="pc bpc" id="L174" title="1 of 2 branches missed.">            checkState(passFactor.signum() &gt;= 0);</span>
+<span class="pc bpc" id="L175" title="1 of 2 branches missed.">            checkState(seedFactor.signum() &gt;= 0);</span>
+<span class="fc" id="L176">            BigInteger priv = passFactor.multiply(seedFactor).mod(ECKey.CURVE.getN());</span>
+
+<span class="fc" id="L178">            return ECKey.fromPrivate(priv, compressed);</span>
+<span class="nc" id="L179">        } catch (GeneralSecurityException x) {</span>
+<span class="nc" id="L180">            throw new RuntimeException(x);</span>
+        }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="pc bpc" id="L186" title="1 of 2 branches missed.">        if (this == o) return true;</span>
+<span class="pc bpc" id="L187" title="2 of 4 branches missed.">        if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L188">        BIP38PrivateKey other = (BIP38PrivateKey) o;</span>
+<span class="pc bpc" id="L189" title="2 of 4 branches missed.">        return super.equals(other) &amp;&amp; Objects.equal(this.params, other.params);</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L194">        return Objects.hashCode(super.hashCode(), params);</span>
+    }
+
+    // Java serialization
+
+    private void writeObject(ObjectOutputStream out) throws IOException {
+<span class="fc" id="L200">        out.defaultWriteObject();</span>
+<span class="fc" id="L201">        out.writeUTF(params.getId());</span>
+<span class="fc" id="L202">    }</span>
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+<span class="fc" id="L205">        in.defaultReadObject();</span>
+<span class="fc" id="L206">        params = checkNotNull(NetworkParameters.fromID(in.readUTF()));</span>
+<span class="fc" id="L207">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>PBKDF2SHA512.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.crypto</a> &gt; <span class="el_source">PBKDF2SHA512.java</span></div><h1>PBKDF2SHA512.java</h1><pre class="source lang-java linenums">/*
+ * Copyright (c) 2012 Cole Barnes [cryptofreek{at}gmail{dot}com]
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the &quot;Software&quot;), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ * 
+ */
+
+package org.bitcoinj.crypto;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
+/**
+ * &lt;p&gt;This is a clean-room implementation of PBKDF2 using RFC 2898 as a reference.&lt;/p&gt;
+ *
+ * &lt;p&gt;RFC 2898: http://tools.ietf.org/html/rfc2898#section-5.2&lt;/p&gt;
+ *
+ * &lt;p&gt;This code passes all RFC 6070 test vectors: http://tools.ietf.org/html/rfc6070&lt;/p&gt;
+ *
+ * &lt;p&gt;http://cryptofreek.org/2012/11/29/pbkdf2-pure-java-implementation/&lt;br&gt;
+ * Modified to use SHA-512 - Ken Sedgwick ken@bonsai.com&lt;/p&gt;
+ */
+<span class="nc" id="L42">public class PBKDF2SHA512 {</span>
+    public static byte[] derive(String P, String S, int c, int dkLen) {
+<span class="fc" id="L44">        ByteArrayOutputStream baos = new ByteArrayOutputStream();</span>
+
+        try {
+<span class="fc" id="L47">            int hLen = 20;</span>
+
+<span class="pc bpc" id="L49" title="1 of 2 branches missed.">            if (dkLen &gt; ((Math.pow(2, 32)) - 1) * hLen) {</span>
+<span class="nc" id="L50">                throw new IllegalArgumentException(&quot;derived key too long&quot;);</span>
+            } else {
+<span class="fc" id="L52">                int l = (int) Math.ceil((double) dkLen / (double) hLen);</span>
+                // int r = dkLen - (l-1)*hLen;
+
+<span class="fc bfc" id="L55" title="All 2 branches covered.">                for (int i = 1; i &lt;= l; i++) {</span>
+<span class="fc" id="L56">                    byte[] T = F(P, S, c, i);</span>
+<span class="fc" id="L57">                    baos.write(T);</span>
+                }
+            }
+<span class="nc" id="L60">        } catch (Exception e) {</span>
+<span class="nc" id="L61">            throw new RuntimeException(e);</span>
+<span class="fc" id="L62">        }</span>
+
+<span class="fc" id="L64">        byte[] baDerived = new byte[dkLen];</span>
+<span class="fc" id="L65">        System.arraycopy(baos.toByteArray(), 0, baDerived, 0, baDerived.length);</span>
+
+<span class="fc" id="L67">        return baDerived;</span>
+    }
+
+    private static byte[] F(String P, String S, int c, int i) throws Exception {
+<span class="fc" id="L71">        byte[] U_LAST = null;</span>
+<span class="fc" id="L72">        byte[] U_XOR = null;</span>
+
+<span class="fc" id="L74">        SecretKeySpec key = new SecretKeySpec(P.getBytes(&quot;UTF-8&quot;), &quot;HmacSHA512&quot;);</span>
+<span class="fc" id="L75">        Mac mac = Mac.getInstance(key.getAlgorithm());</span>
+<span class="fc" id="L76">        mac.init(key);</span>
+
+<span class="fc bfc" id="L78" title="All 2 branches covered.">        for (int j = 0; j &lt; c; j++) {</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">            if (j == 0) {</span>
+<span class="fc" id="L80">                byte[] baS = S.getBytes(&quot;UTF-8&quot;);</span>
+<span class="fc" id="L81">                byte[] baI = INT(i);</span>
+<span class="fc" id="L82">                byte[] baU = new byte[baS.length + baI.length];</span>
+
+<span class="fc" id="L84">                System.arraycopy(baS, 0, baU, 0, baS.length);</span>
+<span class="fc" id="L85">                System.arraycopy(baI, 0, baU, baS.length, baI.length);</span>
+
+<span class="fc" id="L87">                U_XOR = mac.doFinal(baU);</span>
+<span class="fc" id="L88">                U_LAST = U_XOR;</span>
+<span class="fc" id="L89">                mac.reset();</span>
+<span class="fc" id="L90">            } else {</span>
+<span class="fc" id="L91">                byte[] baU = mac.doFinal(U_LAST);</span>
+<span class="fc" id="L92">                mac.reset();</span>
+
+<span class="fc bfc" id="L94" title="All 2 branches covered.">                for (int k = 0; k &lt; U_XOR.length; k++) {</span>
+<span class="fc" id="L95">                    U_XOR[k] = (byte) (U_XOR[k] ^ baU[k]);</span>
+                }
+
+<span class="fc" id="L98">                U_LAST = baU;</span>
+            }
+        }
+
+<span class="fc" id="L102">        return U_XOR;</span>
+    }
+
+    private static byte[] INT(int i) {
+<span class="fc" id="L106">        ByteBuffer bb = ByteBuffer.allocate(4);</span>
+<span class="fc" id="L107">        bb.order(ByteOrder.BIG_ENDIAN);</span>
+<span class="fc" id="L108">        bb.putInt(i);</span>
+
+<span class="fc" id="L110">        return bb.array();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

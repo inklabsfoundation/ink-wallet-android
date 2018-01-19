@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>TransactionOutputChanges.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">TransactionOutputChanges.java</span></div><h1>TransactionOutputChanges.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2012 Matt Corallo.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.LinkedList;
+import java.util.List;
+
+/**
+ * &lt;p&gt;TransactionOutputChanges represents a delta to the set of unspent outputs. It used as a return value for
+ * {@link AbstractBlockChain#connectTransactions(int, Block)}. It contains the full list of transaction outputs created
+ * and spent in a block. It DOES contain outputs created that were spent later in the block, as those are needed for
+ * BIP30 (no duplicate txid creation if the previous one was not fully spent prior to this block) verification.&lt;/p&gt;
+ */
+public class TransactionOutputChanges {
+    public final List&lt;UTXO&gt; txOutsCreated;
+    public final List&lt;UTXO&gt; txOutsSpent;
+    
+<span class="fc" id="L35">    public TransactionOutputChanges(List&lt;UTXO&gt; txOutsCreated, List&lt;UTXO&gt; txOutsSpent) {</span>
+<span class="fc" id="L36">        this.txOutsCreated = txOutsCreated;</span>
+<span class="fc" id="L37">        this.txOutsSpent = txOutsSpent;</span>
+<span class="fc" id="L38">    }</span>
+    
+<span class="fc" id="L40">    public TransactionOutputChanges(InputStream in) throws IOException {</span>
+<span class="fc" id="L41">        int numOutsCreated = (in.read() &amp; 0xFF) |</span>
+<span class="fc" id="L42">                             ((in.read() &amp; 0xFF) &lt;&lt; 8) |</span>
+<span class="fc" id="L43">                             ((in.read() &amp; 0xFF) &lt;&lt; 16) |</span>
+<span class="fc" id="L44">                             ((in.read() &amp; 0xFF) &lt;&lt; 24);</span>
+<span class="fc" id="L45">        txOutsCreated = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L46" title="All 2 branches covered.">        for (int i = 0; i &lt; numOutsCreated; i++)</span>
+<span class="fc" id="L47">            txOutsCreated.add(new UTXO(in));</span>
+        
+<span class="fc" id="L49">        int numOutsSpent = (in.read() &amp; 0xFF) |</span>
+<span class="fc" id="L50">                           ((in.read() &amp; 0xFF) &lt;&lt; 8) |</span>
+<span class="fc" id="L51">                           ((in.read() &amp; 0xFF) &lt;&lt; 16) |</span>
+<span class="fc" id="L52">                           ((in.read() &amp; 0xFF) &lt;&lt; 24);</span>
+<span class="fc" id="L53">        txOutsSpent = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L54" title="All 2 branches covered.">        for (int i = 0; i &lt; numOutsSpent; i++)</span>
+<span class="fc" id="L55">            txOutsSpent.add(new UTXO(in));</span>
+<span class="fc" id="L56">    }</span>
+
+    public void serializeToStream(OutputStream bos) throws IOException {
+<span class="fc" id="L59">        int numOutsCreated = txOutsCreated.size();</span>
+<span class="fc" id="L60">        bos.write(0xFF &amp; numOutsCreated);</span>
+<span class="fc" id="L61">        bos.write(0xFF &amp; (numOutsCreated &gt;&gt; 8));</span>
+<span class="fc" id="L62">        bos.write(0xFF &amp; (numOutsCreated &gt;&gt; 16));</span>
+<span class="fc" id="L63">        bos.write(0xFF &amp; (numOutsCreated &gt;&gt; 24));</span>
+<span class="fc bfc" id="L64" title="All 2 branches covered.">        for (UTXO output : txOutsCreated) {</span>
+<span class="fc" id="L65">            output.serializeToStream(bos);</span>
+<span class="fc" id="L66">        }</span>
+        
+<span class="fc" id="L68">        int numOutsSpent = txOutsSpent.size();</span>
+<span class="fc" id="L69">        bos.write(0xFF &amp; numOutsSpent);</span>
+<span class="fc" id="L70">        bos.write(0xFF &amp; (numOutsSpent &gt;&gt; 8));</span>
+<span class="fc" id="L71">        bos.write(0xFF &amp; (numOutsSpent &gt;&gt; 16));</span>
+<span class="fc" id="L72">        bos.write(0xFF &amp; (numOutsSpent &gt;&gt; 24));</span>
+<span class="fc bfc" id="L73" title="All 2 branches covered.">        for (UTXO output : txOutsSpent) {</span>
+<span class="fc" id="L74">            output.serializeToStream(bos);</span>
+<span class="fc" id="L75">        }</span>
+<span class="fc" id="L76">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: org.bitcoinj.protocols.channels.ChannelConnectionTest
+-------------------------------------------------------------------------------
+Tests run: 34, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 13.654 sec - in org.bitcoinj.protocols.channels.ChannelConnectionTest

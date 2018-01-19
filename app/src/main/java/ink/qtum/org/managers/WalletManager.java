@@ -1,7 +1,6 @@
 package ink.qtum.org.managers;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -13,19 +12,16 @@ import org.bitcoinj.core.InsufficientMoneyException;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.Transaction;
-import org.bitcoinj.core.TransactionOutput;
 import org.bitcoinj.core.UTXO;
 import org.bitcoinj.core.UTXOProvider;
 import org.bitcoinj.core.UTXOProviderException;
 import org.bitcoinj.params.QtumMainNetParams;
-import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.wallet.DeterministicSeed;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
 import org.spongycastle.util.encoders.Hex;
 
-import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -41,7 +37,6 @@ import ink.qtum.org.utils.CryptoUtils;
 import ink.qtum.org.utils.FileUtils;
 
 import static ink.qtum.org.models.Constants.BIP_39_WORDLIST_ASSET;
-import static org.bitcoinj.script.ScriptOpCodes.OP_RETURN;
 
 /**
  * Created by SV on 21.12.2017.
@@ -55,7 +50,8 @@ public class WalletManager {
 
     private Wallet wallet;
     private String walletFriendlyAddress;
-    private Coin myBalance;
+    private Address walletAddress;
+    private Coin walletQtumBalance;
     private Context context;
     private static NetworkParameters params = QtumMainNetParams.get();
     private String mnemonicKey;
@@ -74,6 +70,7 @@ public class WalletManager {
 
         mnemonicKey = Joiner.on(" ").join(seed.getMnemonicCode());
         sharedManager.setLastSyncedBlock(CryptoUtils.encodeBase64(mnemonicKey));
+        walletAddress = wallet.currentReceiveAddress();
         walletFriendlyAddress = wallet.currentReceiveAddress().toString();
         callback.onWalletCreated(wallet);
 
@@ -84,8 +81,7 @@ public class WalletManager {
     }
 
     public String getWalletFriendlyAddress() {
-//        return "QPKacYwu6iXMytVVzwtZP7G4iKe9bmr4op";
-        return wallet.currentReceiveAddress().toString();
+        return walletFriendlyAddress;
     }
 
     public void restoreWallet(String mnemonicCode, WalletCreationCallback callback) {
@@ -98,11 +94,15 @@ public class WalletManager {
         wallet = Wallet.fromSeed(params, seed);
         mnemonicKey = Joiner.on(" ").join(seed.getMnemonicCode());
         sharedManager.setLastSyncedBlock(CryptoUtils.encodeBase64(mnemonicKey));
+        walletAddress = wallet.currentReceiveAddress();
         walletFriendlyAddress = wallet.currentReceiveAddress().toString();
 
         callback.onWalletCreated(wallet);
+        updateWallet();
+    }
 
-        Requestor.getUTXOList(wallet.currentReceiveAddress().toString(), new ApiMethods.RequestListener() {
+    public void updateWallet(){
+        Requestor.getUTXOList(walletFriendlyAddress, new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
                 setUTXO((List<UtxoItemResponse>)response);
@@ -117,17 +117,13 @@ public class WalletManager {
 
     private void setUTXO(List<UtxoItemResponse> utxoList) {
 
-        Address a = wallet.currentReceiveAddress();
+        Address a = walletAddress;
         final List<UTXO> utxos = new ArrayList<>();
 
-        Log.d("svcom", "resp size - " + utxoList.size());
         for (UtxoItemResponse utxo : utxoList) {
             Sha256Hash hash = Sha256Hash.wrap(utxo.getTxid());
             utxos.add(new UTXO(hash, utxo.getVout(), Coin.valueOf(utxo.getSatoshis()),
                     utxo.getHeight(), false, ScriptBuilder.createOutputScript(a)));
-        }
-        for (UTXO u : utxos) {
-            Log.d("svcom", "u - " + u.getValue().toFriendlyString());
         }
 
         UTXOProvider utxoProvider = new UTXOProvider() {
@@ -147,18 +143,17 @@ public class WalletManager {
             }
         };
         wallet.setUTXOProvider(utxoProvider);
+        walletQtumBalance = wallet.getBalance();
     }
 
-    public static String SMALL_SENDING = "insufficientMoney";
-    public static String NOT_ENOUGH_MONEY = "notEnough";
+    private final static String SMALL_SENDING = "insufficientMoney";
+    private final static String NOT_ENOUGH_MONEY = "notEnough";
 
     public String generateQtumHexTx(String toAddress, long sumInSatoshi, long feeInSatoshi) {
         Address RECEIVER = Address.fromBase58(params, toAddress);
 
         Coin AMOUNT = Coin.valueOf(sumInSatoshi);
         Coin FEE = Coin.valueOf(feeInSatoshi);
-        Log.d("svcom", "tx - amount = " + AMOUNT.toFriendlyString() + " fee = " + FEE.toFriendlyString());
-        Log.d("svcom", "tx - amount = " + AMOUNT.toFriendlyString() + " fee = " + feeInSatoshi);
         /**
          * available default fee
          * Transaction.REFERENCE_DEFAULT_MIN_TX_FEE;
@@ -166,7 +161,7 @@ public class WalletManager {
          */
         SendRequest sendRequest = SendRequest.to(RECEIVER, AMOUNT);
         sendRequest.shuffleOutputs = false;
-        sendRequest.changeAddress = wallet.currentReceiveAddress();
+        sendRequest.changeAddress = walletAddress;
         sendRequest.feePerKb = FEE;
         sendRequest.shuffleOutputs = false;
 
@@ -176,28 +171,12 @@ public class WalletManager {
         String hex = "";
         try {
             trx = wallet.sendCoinsOffline(sendRequest);
-
-            String description = "hello from SV";
-            ScriptBuilder sb = new ScriptBuilder();
-
-            Script descriptionScript = sb.op(OP_RETURN).data(description.getBytes()).build();
-
-            TransactionOutput output = new TransactionOutput(params, null, Coin.ZERO, descriptionScript.getProgram());
-            trx.addOutput(output);
-
-
-            byte[] bytes = description.getBytes();
-            Log.d("svcom", "bytes - " + bytes);
-            Log.d("svcom", "decode bytes - " + (new String(bytes, "UTF-8")));
-
-            Log.d( "svcom", "size = " + trx.bitcoinSerialize().length);
             hex = Hex.toHexString(trx.bitcoinSerialize());
 
-            Log.d("svcom", "hex: " + hex);
         } catch (InsufficientMoneyException e) {
             e.printStackTrace();
             return NOT_ENOUGH_MONEY;
-        } catch (Wallet.DustySendRequested|UnsupportedEncodingException e) {
+        } catch (Wallet.DustySendRequested e) {
             e.printStackTrace();
             return SMALL_SENDING;
         }
@@ -215,6 +194,10 @@ public class WalletManager {
         } catch (AddressFormatException e){
             return false;
         }
+    }
+
+    public Coin getQtumBalance(){
+        return walletQtumBalance;
     }
 
 }

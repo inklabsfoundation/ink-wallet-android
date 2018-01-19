@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>VersionedChecksummedBytes.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">VersionedChecksummedBytes.java</span></div><h1>VersionedChecksummedBytes.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import static com.google.common.base.Preconditions.checkArgument;
+
+import java.io.Serializable;
+import java.util.Arrays;
+
+import com.google.common.base.Objects;
+import com.google.common.primitives.Ints;
+import com.google.common.primitives.UnsignedBytes;
+
+/**
+ * &lt;p&gt;In Bitcoin the following format is often used to represent some type of key:&lt;/p&gt;
+ * &lt;p/&gt;
+ * &lt;pre&gt;[one version byte] [data bytes] [4 checksum bytes]&lt;/pre&gt;
+ * &lt;p/&gt;
+ * &lt;p&gt;and the result is then Base58 encoded. This format is used for addresses, and private keys exported using the
+ * dumpprivkey command.&lt;/p&gt;
+ */
+public class VersionedChecksummedBytes implements Serializable, Cloneable, Comparable&lt;VersionedChecksummedBytes&gt; {
+    protected final int version;
+    protected byte[] bytes;
+
+<span class="fc" id="L40">    protected VersionedChecksummedBytes(String encoded) throws AddressFormatException {</span>
+<span class="fc" id="L41">        byte[] versionAndDataBytes = Base58.decodeChecked(encoded);</span>
+<span class="fc" id="L42">        byte versionByte = versionAndDataBytes[0];</span>
+<span class="fc" id="L43">        version = versionByte &amp; 0xFF;</span>
+<span class="fc" id="L44">        bytes = new byte[versionAndDataBytes.length - 1];</span>
+<span class="fc" id="L45">        System.arraycopy(versionAndDataBytes, 1, bytes, 0, versionAndDataBytes.length - 1);</span>
+<span class="fc" id="L46">    }</span>
+
+<span class="fc" id="L48">    protected VersionedChecksummedBytes(int version, byte[] bytes) {</span>
+<span class="pc bpc" id="L49" title="2 of 4 branches missed.">        checkArgument(version &gt;= 0 &amp;&amp; version &lt; 256);</span>
+<span class="fc" id="L50">        this.version = version;</span>
+<span class="fc" id="L51">        this.bytes = bytes;</span>
+<span class="fc" id="L52">    }</span>
+
+    /**
+     * Returns the base-58 encoded String representation of this
+     * object, including version and checksum bytes.
+     */
+    public final String toBase58() {
+        // A stringified buffer is:
+        //   1 byte version + data bytes + 4 bytes check code (a truncated hash)
+<span class="fc" id="L61">        byte[] addressBytes = new byte[1 + bytes.length + 4];</span>
+<span class="fc" id="L62">        addressBytes[0] = (byte) version;</span>
+<span class="fc" id="L63">        System.arraycopy(bytes, 0, addressBytes, 1, bytes.length);</span>
+<span class="fc" id="L64">        byte[] checksum = Sha256Hash.hashTwice(addressBytes, 0, bytes.length + 1);</span>
+<span class="fc" id="L65">        System.arraycopy(checksum, 0, addressBytes, bytes.length + 1, 4);</span>
+<span class="fc" id="L66">        return Base58.encode(addressBytes);</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="fc" id="L71">        return toBase58();</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L76">        return Objects.hashCode(version, Arrays.hashCode(bytes));</span>
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="fc bfc" id="L81" title="All 2 branches covered.">        if (this == o) return true;</span>
+<span class="pc bpc" id="L82" title="2 of 4 branches missed.">        if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L83">        VersionedChecksummedBytes other = (VersionedChecksummedBytes) o;</span>
+<span class="pc bpc" id="L84" title="1 of 4 branches missed.">        return this.version == other.version &amp;&amp; Arrays.equals(this.bytes, other.bytes);</span>
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * This implementation narrows the return type to &lt;code&gt;VersionedChecksummedBytes&lt;/code&gt;
+     * and allows subclasses to throw &lt;code&gt;CloneNotSupportedException&lt;/code&gt; even though it
+     * is never thrown by this implementation.
+     */
+    @Override
+    public VersionedChecksummedBytes clone() throws CloneNotSupportedException {
+<span class="fc" id="L96">        return (VersionedChecksummedBytes) super.clone();</span>
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * This implementation uses an optimized Google Guava method to compare &lt;code&gt;bytes&lt;/code&gt;.
+     */
+    @Override
+    public int compareTo(VersionedChecksummedBytes o) {
+<span class="fc" id="L106">        int result = Ints.compare(this.version, o.version);</span>
+<span class="pc bpc" id="L107" title="1 of 2 branches missed.">        return result != 0 ? result : UnsignedBytes.lexicographicalComparator().compare(this.bytes, o.bytes);</span>
+    }
+
+    /**
+     * Returns the &quot;version&quot; or &quot;header&quot; byte: the first byte of the data. This is used to disambiguate what the
+     * contents apply to, for example, which network the key or address is valid on.
+     *
+     * @return A positive number between 0 and 255.
+     */
+    public int getVersion() {
+<span class="nc" id="L117">        return version;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

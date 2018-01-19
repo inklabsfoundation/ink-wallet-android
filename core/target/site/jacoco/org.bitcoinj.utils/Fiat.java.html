@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>Fiat.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.utils</a> &gt; <span class="el_source">Fiat.java</span></div><h1>Fiat.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.utils;
+
+import static com.google.common.base.Preconditions.checkArgument;
+
+import java.io.Serializable;
+import java.math.BigDecimal;
+
+import org.bitcoinj.core.Monetary;
+import com.google.common.base.Objects;
+import com.google.common.math.LongMath;
+import com.google.common.primitives.Longs;
+
+/**
+ * Represents a monetary fiat value. It was decided to not fold this into {@link org.bitcoinj.core.Coin} because of type
+ * safety. Fiat values always come with an attached currency code.
+ * 
+ * This class is immutable.
+ */
+public final class Fiat implements Monetary, Comparable&lt;Fiat&gt;, Serializable {
+
+    /**
+     * The absolute value of exponent of the value of a &quot;smallest unit&quot; in scientific notation. We picked 4 rather than
+     * 2, because in financial applications it's common to use sub-cent precision.
+     */
+    public static final int SMALLEST_UNIT_EXPONENT = 4;
+
+    /**
+     * The number of smallest units of this monetary value.
+     */
+    public final long value;
+    public final String currencyCode;
+
+<span class="fc" id="L49">    private Fiat(final String currencyCode, final long value) {</span>
+<span class="fc" id="L50">        this.value = value;</span>
+<span class="fc" id="L51">        this.currencyCode = currencyCode;</span>
+<span class="fc" id="L52">    }</span>
+
+    public static Fiat valueOf(final String currencyCode, final long value) {
+<span class="fc" id="L55">        return new Fiat(currencyCode, value);</span>
+    }
+
+    @Override
+    public int smallestUnitExponent() {
+<span class="fc" id="L60">        return SMALLEST_UNIT_EXPONENT;</span>
+    }
+
+    /**
+     * Returns the number of &quot;smallest units&quot; of this monetary value.
+     */
+    @Override
+    public long getValue() {
+<span class="fc" id="L68">        return value;</span>
+    }
+
+    public String getCurrencyCode() {
+<span class="nc" id="L72">        return currencyCode;</span>
+    }
+
+    /**
+     * &lt;p&gt;
+     * Parses an amount expressed in the way humans are used to.
+     * &lt;p/&gt;
+     * &lt;p&gt;
+     * This takes string in a format understood by {@link BigDecimal#BigDecimal(String)}, for example &quot;0&quot;, &quot;1&quot;, &quot;0.10&quot;,
+     * &quot;1.23E3&quot;, &quot;1234.5E-5&quot;.
+     * &lt;p/&gt;
+     *
+     * @throws IllegalArgumentException
+     *             if you try to specify more than 4 digits after the comma, or a value out of range.
+     */
+    public static Fiat parseFiat(final String currencyCode, final String str) {
+        try {
+<span class="fc" id="L89">            long val = new BigDecimal(str).movePointRight(SMALLEST_UNIT_EXPONENT).longValueExact();</span>
+<span class="fc" id="L90">            return Fiat.valueOf(currencyCode, val);</span>
+<span class="fc" id="L91">        } catch (ArithmeticException e) {</span>
+<span class="fc" id="L92">            throw new IllegalArgumentException(e);</span>
+        }
+    }
+
+    /**
+     * &lt;p&gt;
+     * Parses an amount expressed in the way humans are used to. The amount is cut to 4 digits after the comma.
+     * &lt;p/&gt;
+     * &lt;p&gt;
+     * This takes string in a format understood by {@link BigDecimal#BigDecimal(String)}, for example &quot;0&quot;, &quot;1&quot;, &quot;0.10&quot;,
+     * &quot;1.23E3&quot;, &quot;1234.5E-5&quot;.
+     * &lt;p/&gt;
+     *
+     * @throws IllegalArgumentException
+     *             if you try to specify a value out of range.
+     */
+    public static Fiat parseFiatInexact(final String currencyCode, final String str) {
+        try {
+<span class="fc" id="L110">            long val = new BigDecimal(str).movePointRight(SMALLEST_UNIT_EXPONENT).longValue();</span>
+<span class="fc" id="L111">            return Fiat.valueOf(currencyCode, val);</span>
+<span class="nc" id="L112">        } catch (ArithmeticException e) {</span>
+<span class="nc" id="L113">            throw new IllegalArgumentException(e);</span>
+        }
+    }
+
+    public Fiat add(final Fiat value) {
+<span class="nc" id="L118">        checkArgument(value.currencyCode.equals(currencyCode));</span>
+<span class="nc" id="L119">        return new Fiat(currencyCode, LongMath.checkedAdd(this.value, value.value));</span>
+    }
+
+    public Fiat subtract(final Fiat value) {
+<span class="nc" id="L123">        checkArgument(value.currencyCode.equals(currencyCode));</span>
+<span class="nc" id="L124">        return new Fiat(currencyCode, LongMath.checkedSubtract(this.value, value.value));</span>
+    }
+
+    public Fiat multiply(final long factor) {
+<span class="nc" id="L128">        return new Fiat(currencyCode, LongMath.checkedMultiply(this.value, factor));</span>
+    }
+
+    public Fiat divide(final long divisor) {
+<span class="nc" id="L132">        return new Fiat(currencyCode, this.value / divisor);</span>
+    }
+
+    public Fiat[] divideAndRemainder(final long divisor) {
+<span class="nc" id="L136">        return new Fiat[] { new Fiat(currencyCode, this.value / divisor), new Fiat(currencyCode, this.value % divisor) };</span>
+    }
+
+    public long divide(final Fiat divisor) {
+<span class="nc" id="L140">        checkArgument(divisor.currencyCode.equals(currencyCode));</span>
+<span class="nc" id="L141">        return this.value / divisor.value;</span>
+    }
+
+    /**
+     * Returns true if and only if this instance represents a monetary value greater than zero, otherwise false.
+     */
+    public boolean isPositive() {
+<span class="fc bfc" id="L148" title="All 2 branches covered.">        return signum() == 1;</span>
+    }
+
+    /**
+     * Returns true if and only if this instance represents a monetary value less than zero, otherwise false.
+     */
+    public boolean isNegative() {
+<span class="nc bnc" id="L155" title="All 2 branches missed.">        return signum() == -1;</span>
+    }
+
+    /**
+     * Returns true if and only if this instance represents zero monetary value, otherwise false.
+     */
+    public boolean isZero() {
+<span class="nc bnc" id="L162" title="All 2 branches missed.">        return signum() == 0;</span>
+    }
+
+    /**
+     * Returns true if the monetary value represented by this instance is greater than that of the given other Fiat,
+     * otherwise false.
+     */
+    public boolean isGreaterThan(Fiat other) {
+<span class="nc bnc" id="L170" title="All 2 branches missed.">        return compareTo(other) &gt; 0;</span>
+    }
+
+    /**
+     * Returns true if the monetary value represented by this instance is less than that of the given other Fiat,
+     * otherwise false.
+     */
+    public boolean isLessThan(Fiat other) {
+<span class="nc bnc" id="L178" title="All 2 branches missed.">        return compareTo(other) &lt; 0;</span>
+    }
+
+    @Override
+    public int signum() {
+<span class="pc bpc" id="L183" title="1 of 2 branches missed.">        if (this.value == 0)</span>
+<span class="nc" id="L184">            return 0;</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">        return this.value &lt; 0 ? -1 : 1;</span>
+    }
+
+    public Fiat negate() {
+<span class="nc" id="L189">        return new Fiat(currencyCode, -this.value);</span>
+    }
+
+    /**
+     * Returns the number of &quot;smallest units&quot; of this monetary value. It's deprecated in favour of accessing {@link #value}
+     * directly.
+     */
+    public long longValue() {
+<span class="nc" id="L197">        return this.value;</span>
+    }
+
+<span class="fc" id="L200">    private static final MonetaryFormat FRIENDLY_FORMAT = MonetaryFormat.FIAT.postfixCode();</span>
+
+    /**
+     * Returns the value as a 0.12 type string. More digits after the decimal place will be used if necessary, but two
+     * will always be present.
+     */
+    public String toFriendlyString() {
+<span class="fc" id="L207">        return FRIENDLY_FORMAT.code(0, currencyCode).format(this).toString();</span>
+    }
+
+<span class="fc" id="L210">    private static final MonetaryFormat PLAIN_FORMAT = MonetaryFormat.FIAT.minDecimals(0).repeatOptionalDecimals(1, 4).noCode();</span>
+
+    /**
+     * &lt;p&gt;
+     * Returns the value as a plain string. The result is unformatted with no trailing zeroes. For
+     * instance, a value of 150000 &quot;smallest units&quot; gives an output string of &quot;0.0015&quot;.
+     * &lt;/p&gt;
+     */
+    public String toPlainString() {
+<span class="fc" id="L219">        return PLAIN_FORMAT.format(this).toString();</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="nc" id="L224">        return Long.toString(value);</span>
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+<span class="pc bpc" id="L229" title="1 of 2 branches missed.">        if (o == this) return true;</span>
+<span class="pc bpc" id="L230" title="2 of 4 branches missed.">        if (o == null || o.getClass() != getClass()) return false;</span>
+<span class="fc" id="L231">        final Fiat other = (Fiat) o;</span>
+<span class="pc bpc" id="L232" title="2 of 4 branches missed.">        return this.value == other.value &amp;&amp; this.currencyCode.equals(other.currencyCode);</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L237">        return Objects.hashCode(value, currencyCode);</span>
+    }
+
+    @Override
+    public int compareTo(final Fiat other) {
+<span class="nc bnc" id="L242" title="All 2 branches missed.">        if (!this.currencyCode.equals(other.currencyCode))</span>
+<span class="nc" id="L243">            return this.currencyCode.compareTo(other.currencyCode);</span>
+<span class="nc" id="L244">        return Longs.compare(this.value, other.value);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

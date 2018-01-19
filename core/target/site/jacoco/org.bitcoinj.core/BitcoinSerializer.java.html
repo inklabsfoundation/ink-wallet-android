@@ -1,0 +1,384 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>BitcoinSerializer.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">BitcoinSerializer.java</span></div><h1>BitcoinSerializer.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.BufferUnderflowException;
+import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.bitcoinj.core.Utils.*;
+
+/**
+ * &lt;p&gt;Methods to serialize and de-serialize messages to the Bitcoin network format as defined in
+ * &lt;a href=&quot;https://en.bitcoin.it/wiki/Protocol_specification&quot;&gt;the protocol specification&lt;/a&gt;.&lt;/p&gt;
+ *
+ * &lt;p&gt;To be able to serialize and deserialize new Message subclasses the following criteria needs to be met.&lt;/p&gt;
+ *
+ * &lt;ul&gt;
+ * &lt;li&gt;The proper Class instance needs to be mapped to its message name in the names variable below&lt;/li&gt;
+ * &lt;li&gt;There needs to be a constructor matching: NetworkParameters params, byte[] payload&lt;/li&gt;
+ * &lt;li&gt;Message.bitcoinSerializeToStream() needs to be properly subclassed&lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+public class BitcoinSerializer extends MessageSerializer {
+<span class="fc" id="L45">    private static final Logger log = LoggerFactory.getLogger(BitcoinSerializer.class);</span>
+    private static final int COMMAND_LEN = 12;
+
+    private final NetworkParameters params;
+    private final boolean parseRetain;
+
+<span class="fc" id="L51">    private static final Map&lt;Class&lt;? extends Message&gt;, String&gt; names = new HashMap&lt;&gt;();</span>
+
+    static {
+<span class="fc" id="L54">        names.put(VersionMessage.class, &quot;version&quot;);</span>
+<span class="fc" id="L55">        names.put(InventoryMessage.class, &quot;inv&quot;);</span>
+<span class="fc" id="L56">        names.put(Block.class, &quot;block&quot;);</span>
+<span class="fc" id="L57">        names.put(GetDataMessage.class, &quot;getdata&quot;);</span>
+<span class="fc" id="L58">        names.put(Transaction.class, &quot;tx&quot;);</span>
+<span class="fc" id="L59">        names.put(AddressMessage.class, &quot;addr&quot;);</span>
+<span class="fc" id="L60">        names.put(Ping.class, &quot;ping&quot;);</span>
+<span class="fc" id="L61">        names.put(Pong.class, &quot;pong&quot;);</span>
+<span class="fc" id="L62">        names.put(VersionAck.class, &quot;verack&quot;);</span>
+<span class="fc" id="L63">        names.put(GetBlocksMessage.class, &quot;getblocks&quot;);</span>
+<span class="fc" id="L64">        names.put(GetHeadersMessage.class, &quot;getheaders&quot;);</span>
+<span class="fc" id="L65">        names.put(GetAddrMessage.class, &quot;getaddr&quot;);</span>
+<span class="fc" id="L66">        names.put(HeadersMessage.class, &quot;headers&quot;);</span>
+<span class="fc" id="L67">        names.put(BloomFilter.class, &quot;filterload&quot;);</span>
+<span class="fc" id="L68">        names.put(FilteredBlock.class, &quot;merkleblock&quot;);</span>
+<span class="fc" id="L69">        names.put(NotFoundMessage.class, &quot;notfound&quot;);</span>
+<span class="fc" id="L70">        names.put(MemoryPoolMessage.class, &quot;mempool&quot;);</span>
+<span class="fc" id="L71">        names.put(RejectMessage.class, &quot;reject&quot;);</span>
+<span class="fc" id="L72">        names.put(GetUTXOsMessage.class, &quot;getutxos&quot;);</span>
+<span class="fc" id="L73">        names.put(UTXOsMessage.class, &quot;utxos&quot;);</span>
+<span class="fc" id="L74">        names.put(SendHeadersMessage.class, &quot;sendheaders&quot;);</span>
+<span class="fc" id="L75">    }</span>
+
+    /**
+     * Constructs a BitcoinSerializer with the given behavior.
+     *
+     * @param params           networkParams used to create Messages instances and termining packetMagic
+     * @param parseRetain      retain the backing byte array of a message for fast reserialization.
+     */
+<span class="fc" id="L83">    public BitcoinSerializer(NetworkParameters params, boolean parseRetain) {</span>
+<span class="fc" id="L84">        this.params = params;</span>
+<span class="fc" id="L85">        this.parseRetain = parseRetain;</span>
+<span class="fc" id="L86">    }</span>
+
+    /**
+     * Writes message to to the output stream.
+     */
+    @Override
+    public void serialize(String name, byte[] message, OutputStream out) throws IOException {
+<span class="fc" id="L93">        byte[] header = new byte[4 + COMMAND_LEN + 4 + 4 /* checksum */];</span>
+<span class="fc" id="L94">        uint32ToByteArrayBE(params.getPacketMagic(), header, 0);</span>
+
+        // The header array is initialized to zero by Java so we don't have to worry about
+        // NULL terminating the string here.
+<span class="pc bpc" id="L98" title="1 of 4 branches missed.">        for (int i = 0; i &lt; name.length() &amp;&amp; i &lt; COMMAND_LEN; i++) {</span>
+<span class="fc" id="L99">            header[4 + i] = (byte) (name.codePointAt(i) &amp; 0xFF);</span>
+        }
+
+<span class="fc" id="L102">        Utils.uint32ToByteArrayLE(message.length, header, 4 + COMMAND_LEN);</span>
+
+<span class="fc" id="L104">        byte[] hash = Sha256Hash.hashTwice(message);</span>
+<span class="fc" id="L105">        System.arraycopy(hash, 0, header, 4 + COMMAND_LEN + 4, 4);</span>
+<span class="fc" id="L106">        out.write(header);</span>
+<span class="fc" id="L107">        out.write(message);</span>
+
+<span class="pc bpc" id="L109" title="1 of 2 branches missed.">        if (log.isDebugEnabled())</span>
+<span class="nc" id="L110">            log.debug(&quot;Sending {} message: {}&quot;, name, HEX.encode(header) + HEX.encode(message));</span>
+<span class="fc" id="L111">    }</span>
+
+    /**
+     * Writes message to to the output stream.
+     */
+    @Override
+    public void serialize(Message message, OutputStream out) throws IOException {
+<span class="fc" id="L118">        String name = names.get(message.getClass());</span>
+<span class="fc bfc" id="L119" title="All 2 branches covered.">        if (name == null) {</span>
+<span class="fc" id="L120">            throw new Error(&quot;BitcoinSerializer doesn't currently know how to serialize &quot; + message.getClass());</span>
+        }
+<span class="fc" id="L122">        serialize(name, message.bitcoinSerialize(), out);</span>
+<span class="fc" id="L123">    }</span>
+
+    /**
+     * Reads a message from the given ByteBuffer and returns it.
+     */
+    @Override
+    public Message deserialize(ByteBuffer in) throws ProtocolException, IOException {
+        // A Bitcoin protocol message has the following format.
+        //
+        //   - 4 byte magic number: 0xfabfb5da for the testnet or
+        //                          0xf9beb4d9 for production
+        //   - 12 byte command in ASCII
+        //   - 4 byte payload size
+        //   - 4 byte checksum
+        //   - Payload data
+        //
+        // The checksum is the first 4 bytes of a SHA256 hash of the message payload. It isn't
+        // present for all messages, notably, the first one on a connection.
+        //
+        // Bitcoin Core ignores garbage before the magic header bytes. We have to do the same because
+        // sometimes it sends us stuff that isn't part of any message.
+<span class="fc" id="L144">        seekPastMagicBytes(in);</span>
+<span class="fc" id="L145">        BitcoinPacketHeader header = new BitcoinPacketHeader(in);</span>
+        // Now try to read the whole message.
+<span class="fc" id="L147">        return deserializePayload(header, in);</span>
+    }
+
+    /**
+     * Deserializes only the header in case packet meta data is needed before decoding
+     * the payload. This method assumes you have already called seekPastMagicBytes()
+     */
+    @Override
+    public BitcoinPacketHeader deserializeHeader(ByteBuffer in) throws ProtocolException, IOException {
+<span class="fc" id="L156">        return new BitcoinPacketHeader(in);</span>
+    }
+
+    /**
+     * Deserialize payload only.  You must provide a header, typically obtained by calling
+     * {@link BitcoinSerializer#deserializeHeader}.
+     */
+    @Override
+    public Message deserializePayload(BitcoinPacketHeader header, ByteBuffer in) throws ProtocolException, BufferUnderflowException {
+<span class="fc" id="L165">        byte[] payloadBytes = new byte[header.size];</span>
+<span class="fc" id="L166">        in.get(payloadBytes, 0, header.size);</span>
+
+        // Verify the checksum.
+        byte[] hash;
+<span class="fc" id="L170">        hash = Sha256Hash.hashTwice(payloadBytes);</span>
+<span class="pc bpc" id="L171" title="4 of 8 branches missed.">        if (header.checksum[0] != hash[0] || header.checksum[1] != hash[1] ||</span>
+                header.checksum[2] != hash[2] || header.checksum[3] != hash[3]) {
+<span class="nc" id="L173">            throw new ProtocolException(&quot;Checksum failed to verify, actual &quot; +</span>
+<span class="nc" id="L174">                    HEX.encode(hash) +</span>
+<span class="nc" id="L175">                    &quot; vs &quot; + HEX.encode(header.checksum));</span>
+        }
+
+<span class="pc bpc" id="L178" title="1 of 2 branches missed.">        if (log.isDebugEnabled()) {</span>
+<span class="nc" id="L179">            log.debug(&quot;Received {} byte '{}' message: {}&quot;, header.size, header.command,</span>
+<span class="nc" id="L180">                    HEX.encode(payloadBytes));</span>
+        }
+
+        try {
+<span class="fc" id="L184">            return makeMessage(header.command, header.size, payloadBytes, hash, header.checksum);</span>
+<span class="fc" id="L185">        } catch (Exception e) {</span>
+<span class="fc" id="L186">            throw new ProtocolException(&quot;Error deserializing message &quot; + HEX.encode(payloadBytes) + &quot;\n&quot;, e);</span>
+        }
+    }
+
+    private Message makeMessage(String command, int length, byte[] payloadBytes, byte[] hash, byte[] checksum) throws ProtocolException {
+        // We use an if ladder rather than reflection because reflection is very slow on Android.
+        Message message;
+<span class="fc bfc" id="L193" title="All 2 branches covered.">        if (command.equals(&quot;version&quot;)) {</span>
+<span class="fc" id="L194">            return new VersionMessage(params, payloadBytes);</span>
+<span class="fc bfc" id="L195" title="All 2 branches covered.">        } else if (command.equals(&quot;inv&quot;)) { </span>
+<span class="fc" id="L196">            message = makeInventoryMessage(payloadBytes, length);</span>
+<span class="fc bfc" id="L197" title="All 2 branches covered.">        } else if (command.equals(&quot;block&quot;)) {</span>
+<span class="fc" id="L198">            message = makeBlock(payloadBytes, length);</span>
+<span class="fc bfc" id="L199" title="All 2 branches covered.">        } else if (command.equals(&quot;merkleblock&quot;)) {</span>
+<span class="fc" id="L200">            message = makeFilteredBlock(payloadBytes);</span>
+<span class="fc bfc" id="L201" title="All 2 branches covered.">        } else if (command.equals(&quot;getdata&quot;)) {</span>
+<span class="fc" id="L202">            message = new GetDataMessage(params, payloadBytes, this, length);</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">        } else if (command.equals(&quot;getblocks&quot;)) {</span>
+<span class="fc" id="L204">            message = new GetBlocksMessage(params, payloadBytes);</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">        } else if (command.equals(&quot;getheaders&quot;)) {</span>
+<span class="fc" id="L206">            message = new GetHeadersMessage(params, payloadBytes);</span>
+<span class="fc bfc" id="L207" title="All 2 branches covered.">        } else if (command.equals(&quot;tx&quot;)) {</span>
+<span class="fc" id="L208">            message = makeTransaction(payloadBytes, 0, length, hash);</span>
+<span class="fc bfc" id="L209" title="All 2 branches covered.">        } else if (command.equals(&quot;addr&quot;)) {</span>
+<span class="fc" id="L210">            message = makeAddressMessage(payloadBytes, length);</span>
+<span class="fc bfc" id="L211" title="All 2 branches covered.">        } else if (command.equals(&quot;ping&quot;)) {</span>
+<span class="fc" id="L212">            message = new Ping(params, payloadBytes);</span>
+<span class="fc bfc" id="L213" title="All 2 branches covered.">        } else if (command.equals(&quot;pong&quot;)) {</span>
+<span class="fc" id="L214">            message = new Pong(params, payloadBytes);</span>
+<span class="fc bfc" id="L215" title="All 2 branches covered.">        } else if (command.equals(&quot;verack&quot;)) {</span>
+<span class="fc" id="L216">            return new VersionAck(params, payloadBytes);</span>
+<span class="fc bfc" id="L217" title="All 2 branches covered.">        } else if (command.equals(&quot;headers&quot;)) {</span>
+<span class="fc" id="L218">            return new HeadersMessage(params, payloadBytes);</span>
+<span class="pc bpc" id="L219" title="1 of 2 branches missed.">        } else if (command.equals(&quot;alert&quot;)) {</span>
+<span class="nc" id="L220">            return makeAlertMessage(payloadBytes);</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">        } else if (command.equals(&quot;filterload&quot;)) {</span>
+<span class="fc" id="L222">            return makeBloomFilter(payloadBytes);</span>
+<span class="fc bfc" id="L223" title="All 2 branches covered.">        } else if (command.equals(&quot;notfound&quot;)) {</span>
+<span class="fc" id="L224">            return new NotFoundMessage(params, payloadBytes);</span>
+<span class="fc bfc" id="L225" title="All 2 branches covered.">        } else if (command.equals(&quot;mempool&quot;)) {</span>
+<span class="fc" id="L226">            return new MemoryPoolMessage();</span>
+<span class="fc bfc" id="L227" title="All 2 branches covered.">        } else if (command.equals(&quot;reject&quot;)) {</span>
+<span class="fc" id="L228">            return new RejectMessage(params, payloadBytes);</span>
+<span class="fc bfc" id="L229" title="All 2 branches covered.">        } else if (command.equals(&quot;utxos&quot;)) {</span>
+<span class="fc" id="L230">            return new UTXOsMessage(params, payloadBytes);</span>
+<span class="fc bfc" id="L231" title="All 2 branches covered.">        } else if (command.equals(&quot;getutxos&quot;)) {</span>
+<span class="fc" id="L232">            return new GetUTXOsMessage(params, payloadBytes);</span>
+<span class="pc bpc" id="L233" title="1 of 2 branches missed.">        } else if (command.equals(&quot;sendheaders&quot;)) {</span>
+<span class="fc" id="L234">            return new SendHeadersMessage(params, payloadBytes);</span>
+        } else {
+<span class="nc" id="L236">            log.warn(&quot;No support for deserializing message with name {}&quot;, command);</span>
+<span class="nc" id="L237">            return new UnknownMessage(params, command, payloadBytes);</span>
+        }
+<span class="fc" id="L239">        return message;</span>
+    }
+
+    /**
+     * Get the network parameters for this serializer.
+     */
+    public NetworkParameters getParameters() {
+<span class="nc" id="L246">        return params;</span>
+    }
+
+    /**
+     * Make an address message from the payload. Extension point for alternative
+     * serialization format support.
+     */
+    @Override
+    public AddressMessage makeAddressMessage(byte[] payloadBytes, int length) throws ProtocolException {
+<span class="fc" id="L255">        return new AddressMessage(params, payloadBytes, this, length);</span>
+    }
+
+    /**
+     * Make an alert message from the payload. Extension point for alternative
+     * serialization format support.
+     */
+    @Override
+    public Message makeAlertMessage(byte[] payloadBytes) throws ProtocolException {
+<span class="nc" id="L264">        return new AlertMessage(params, payloadBytes);</span>
+    }
+
+    /**
+     * Make a block from the payload. Extension point for alternative
+     * serialization format support.
+     */
+    @Override
+    public Block makeBlock(final byte[] payloadBytes, final int offset, final int length) throws ProtocolException {
+<span class="fc" id="L273">        return new Block(params, payloadBytes, offset, this, length);</span>
+    }
+
+    /**
+     * Make an filter message from the payload. Extension point for alternative
+     * serialization format support.
+     */
+    @Override
+    public Message makeBloomFilter(byte[] payloadBytes) throws ProtocolException {
+<span class="fc" id="L282">        return new BloomFilter(params, payloadBytes);</span>
+    }
+
+    /**
+     * Make a filtered block from the payload. Extension point for alternative
+     * serialization format support.
+     */
+    @Override
+    public FilteredBlock makeFilteredBlock(byte[] payloadBytes) throws ProtocolException {
+<span class="fc" id="L291">        return new FilteredBlock(params, payloadBytes);</span>
+    }
+
+    /**
+     * Make an inventory message from the payload. Extension point for alternative
+     * serialization format support.
+     */
+    @Override
+    public InventoryMessage makeInventoryMessage(byte[] payloadBytes, int length) throws ProtocolException {
+<span class="fc" id="L300">        return new InventoryMessage(params, payloadBytes, this, length);</span>
+    }
+
+    /**
+     * Make a transaction from the payload. Extension point for alternative
+     * serialization format support.
+     */
+    @Override
+    public Transaction makeTransaction(byte[] payloadBytes, int offset,
+        int length, byte[] hash) throws ProtocolException {
+<span class="fc" id="L310">        Transaction tx = new Transaction(params, payloadBytes, offset, null, this, length);</span>
+<span class="fc bfc" id="L311" title="All 2 branches covered.">        if (hash != null)</span>
+<span class="fc" id="L312">            tx.setHash(Sha256Hash.wrapReversed(hash));</span>
+<span class="fc" id="L313">        return tx;</span>
+    }
+
+    @Override
+    public void seekPastMagicBytes(ByteBuffer in) throws BufferUnderflowException {
+<span class="fc" id="L318">        int magicCursor = 3;  // Which byte of the magic we're looking for currently.</span>
+        while (true) {
+<span class="fc" id="L320">            byte b = in.get();</span>
+            // We're looking for a run of bytes that is the same as the packet magic but we want to ignore partial
+            // magics that aren't complete. So we keep track of where we're up to with magicCursor.
+<span class="fc" id="L323">            byte expectedByte = (byte)(0xFF &amp; params.getPacketMagic() &gt;&gt;&gt; (magicCursor * 8));</span>
+<span class="fc bfc" id="L324" title="All 2 branches covered.">            if (b == expectedByte) {</span>
+<span class="fc" id="L325">                magicCursor--;</span>
+<span class="fc bfc" id="L326" title="All 2 branches covered.">                if (magicCursor &lt; 0) {</span>
+                    // We found the magic sequence.
+<span class="fc" id="L328">                    return;</span>
+                } else {
+                    // We still have further to go to find the next message.
+                }
+            } else {
+<span class="fc" id="L333">                magicCursor = 3;</span>
+            }
+<span class="fc" id="L335">        }</span>
+    }
+
+    /**
+     * Whether the serializer will produce cached mode Messages
+     */
+    @Override
+    public boolean isParseRetainMode() {
+<span class="fc" id="L343">        return parseRetain;</span>
+    }
+
+
+    public static class BitcoinPacketHeader {
+        /** The largest number of bytes that a header can represent */
+        public static final int HEADER_LENGTH = COMMAND_LEN + 4 + 4;
+
+        public final byte[] header;
+        public final String command;
+        public final int size;
+        public final byte[] checksum;
+
+<span class="fc" id="L356">        public BitcoinPacketHeader(ByteBuffer in) throws ProtocolException, BufferUnderflowException {</span>
+<span class="fc" id="L357">            header = new byte[HEADER_LENGTH];</span>
+<span class="fc" id="L358">            in.get(header, 0, header.length);</span>
+
+<span class="fc" id="L360">            int cursor = 0;</span>
+
+            // The command is a NULL terminated string, unless the command fills all twelve bytes
+            // in which case the termination is implicit.
+<span class="pc bpc" id="L364" title="1 of 4 branches missed.">            for (; header[cursor] != 0 &amp;&amp; cursor &lt; COMMAND_LEN; cursor++) ;</span>
+<span class="fc" id="L365">            byte[] commandBytes = new byte[cursor];</span>
+<span class="fc" id="L366">            System.arraycopy(header, 0, commandBytes, 0, cursor);</span>
+<span class="fc" id="L367">            command = Utils.toString(commandBytes, &quot;US-ASCII&quot;);</span>
+<span class="fc" id="L368">            cursor = COMMAND_LEN;</span>
+
+<span class="fc" id="L370">            size = (int) readUint32(header, cursor);</span>
+<span class="fc" id="L371">            cursor += 4;</span>
+
+<span class="pc bpc" id="L373" title="1 of 4 branches missed.">            if (size &gt; Message.MAX_SIZE || size &lt; 0)</span>
+<span class="fc" id="L374">                throw new ProtocolException(&quot;Message size too large: &quot; + size);</span>
+
+            // Old clients don't send the checksum.
+<span class="fc" id="L377">            checksum = new byte[4];</span>
+            // Note that the size read above includes the checksum bytes.
+<span class="fc" id="L379">            System.arraycopy(header, cursor, checksum, 0, 4);</span>
+<span class="fc" id="L380">            cursor += 4;</span>
+<span class="fc" id="L381">        }</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

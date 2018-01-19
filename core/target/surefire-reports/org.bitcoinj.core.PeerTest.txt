@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: org.bitcoinj.core.PeerTest
+-------------------------------------------------------------------------------
+Tests run: 96, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 11.229 sec - in org.bitcoinj.core.PeerTest

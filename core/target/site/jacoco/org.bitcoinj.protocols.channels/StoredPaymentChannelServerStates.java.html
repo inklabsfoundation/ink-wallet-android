@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>StoredPaymentChannelServerStates.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.protocols.channels</a> &gt; <span class="el_source">StoredPaymentChannelServerStates.java</span></div><h1>StoredPaymentChannelServerStates.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.protocols.channels;
+
+import com.google.common.collect.ImmutableMap;
+import org.bitcoinj.core.*;
+import org.bitcoinj.utils.Threading;
+import org.bitcoinj.wallet.Wallet;
+import org.bitcoinj.wallet.WalletExtension;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.SettableFuture;
+import com.google.protobuf.ByteString;
+import net.jcip.annotations.GuardedBy;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
+
+import static com.google.common.base.Preconditions.*;
+
+/**
+ * Keeps track of a set of {@link StoredServerChannel}s and expires them 2 hours before their refund transactions
+ * unlock.
+ */
+public class StoredPaymentChannelServerStates implements WalletExtension {
+<span class="fc" id="L45">    private static final org.slf4j.Logger log = LoggerFactory.getLogger(StoredPaymentChannelServerStates.class);</span>
+
+<span class="fc" id="L47">    static final String EXTENSION_ID = StoredPaymentChannelServerStates.class.getName();</span>
+    static final int MAX_SECONDS_TO_WAIT_FOR_BROADCASTER_TO_BE_SET = 10;
+
+<span class="pc" id="L50">    @GuardedBy(&quot;lock&quot;) @VisibleForTesting final Map&lt;Sha256Hash, StoredServerChannel&gt; mapChannels = new HashMap&lt;&gt;();</span>
+    private Wallet wallet;
+<span class="pc" id="L52">    private final SettableFuture&lt;TransactionBroadcaster&gt; broadcasterFuture = SettableFuture.create();</span>
+
+<span class="pc" id="L54">    private final Timer channelTimeoutHandler = new Timer(true);</span>
+
+<span class="pc" id="L56">    private final ReentrantLock lock = Threading.lock(&quot;StoredPaymentChannelServerStates&quot;);</span>
+
+    /**
+     * The offset between the refund transaction's lock time and the time channels will be automatically closed.
+     * This defines a window during which we must get the last payment transaction verified, ie it should allow time for
+     * network propagation and for the payment transaction to be included in a block. Note that the channel expire time
+     * is measured in terms of our local clock, and the refund transaction's lock time is measured in terms of Bitcoin
+     * block header timestamps, which are allowed to drift up to two hours in the future, as measured by relaying nodes.
+     */
+    public static final long CHANNEL_EXPIRE_OFFSET = -2*60*60;
+
+    /**
+     * Creates a new PaymentChannelServerStateManager and associates it with the given {@link Wallet} and
+     * {@link TransactionBroadcaster} which are used to complete and announce payment transactions.
+     */
+<span class="fc" id="L71">    public StoredPaymentChannelServerStates(@Nullable Wallet wallet, TransactionBroadcaster broadcaster) {</span>
+<span class="fc" id="L72">        setTransactionBroadcaster(broadcaster);</span>
+<span class="fc" id="L73">        this.wallet = wallet;</span>
+<span class="fc" id="L74">    }</span>
+
+    /**
+     * Creates a new PaymentChannelServerStateManager and associates it with the given {@link Wallet}
+     *
+     * Use this constructor if you use WalletAppKit, it will provide the broadcaster for you (no need to call the setter)
+     */
+<span class="nc" id="L81">    public StoredPaymentChannelServerStates(@Nullable Wallet wallet) {</span>
+<span class="nc" id="L82">        this.wallet = wallet;</span>
+<span class="nc" id="L83">    }</span>
+
+    /**
+     * Use this setter if the broadcaster is not available during instantiation and you're not using WalletAppKit.
+     * This setter will let you delay the setting of the broadcaster until the Bitcoin network is ready.
+     *
+     * @param broadcaster Used when the payment channels are closed
+     */
+    public final void setTransactionBroadcaster(TransactionBroadcaster broadcaster) {
+<span class="fc" id="L92">        this.broadcasterFuture.set(checkNotNull(broadcaster));</span>
+<span class="fc" id="L93">    }</span>
+
+    /** Returns this extension from the given wallet, or null if no such extension was added. */
+    @Nullable
+    public static StoredPaymentChannelServerStates getFromWallet(Wallet wallet) {
+<span class="nc" id="L98">        return (StoredPaymentChannelServerStates) wallet.getExtensions().get(EXTENSION_ID);</span>
+    }
+
+    /**
+     * &lt;p&gt;Closes the given channel using {@link ServerConnectionEventHandler#closeChannel()} and
+     * {@link PaymentChannelV1ServerState#close()} to notify any connected client of channel closure and to complete and
+     * broadcast the latest payment transaction.&lt;/p&gt;
+     *
+     * &lt;p&gt;Removes the given channel from this set of {@link StoredServerChannel}s and notifies the wallet of a change to
+     * this wallet extension.&lt;/p&gt;
+     */
+    public void closeChannel(StoredServerChannel channel) {
+<span class="fc" id="L110">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L112" title="All 2 branches covered.">            if (mapChannels.remove(channel.contract.getHash()) == null)</span>
+<span class="fc" id="L113">                return;</span>
+        } finally {
+<span class="pc" id="L115">            lock.unlock();</span>
+<span class="fc" id="L116">        }</span>
+<span class="fc" id="L117">        synchronized (channel) {</span>
+<span class="fc" id="L118">            channel.closeConnectedHandler();</span>
+            try {
+<span class="fc" id="L120">                TransactionBroadcaster broadcaster = getBroadcaster();</span>
+<span class="fc" id="L121">                channel.getOrCreateState(wallet, broadcaster).close();</span>
+<span class="nc" id="L122">            } catch (InsufficientMoneyException e) {</span>
+<span class="nc" id="L123">                log.error(&quot;Exception when closing channel&quot;, e);</span>
+<span class="nc" id="L124">            } catch (VerificationException e) {</span>
+<span class="nc" id="L125">                log.error(&quot;Exception when closing channel&quot;, e);</span>
+<span class="pc" id="L126">            }</span>
+<span class="fc" id="L127">            channel.state = null;</span>
+<span class="pc" id="L128">        }</span>
+<span class="fc" id="L129">        updatedChannel(channel);</span>
+<span class="fc" id="L130">    }</span>
+
+    /**
+     * If the broadcaster has not been set for MAX_SECONDS_TO_WAIT_FOR_BROADCASTER_TO_BE_SET seconds, then
+     * the programmer probably forgot to set it and we should throw exception.
+     */
+    private TransactionBroadcaster getBroadcaster() {
+        try {
+<span class="fc" id="L138">            return broadcasterFuture.get(MAX_SECONDS_TO_WAIT_FOR_BROADCASTER_TO_BE_SET, TimeUnit.SECONDS);</span>
+<span class="nc" id="L139">        } catch (InterruptedException e) {</span>
+<span class="nc" id="L140">            throw new RuntimeException(e);</span>
+<span class="nc" id="L141">        } catch (ExecutionException e) {</span>
+<span class="nc" id="L142">            throw new RuntimeException(e);</span>
+<span class="nc" id="L143">        } catch (TimeoutException e) {</span>
+<span class="nc" id="L144">            String err = &quot;Transaction broadcaster not set&quot;;</span>
+<span class="nc" id="L145">            log.error(err);</span>
+<span class="nc" id="L146">            throw new RuntimeException(err,e);</span>
+        }
+    }
+
+    /**
+     * Gets the {@link StoredServerChannel} with the given channel id (ie contract transaction hash).
+     */
+    public StoredServerChannel getChannel(Sha256Hash id) {
+<span class="fc" id="L154">        lock.lock();</span>
+        try {
+<span class="fc" id="L156">            return mapChannels.get(id);</span>
+        } finally {
+<span class="pc" id="L158">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Get a copy of all {@link StoredServerChannel}s
+     */
+    public Map&lt;Sha256Hash, StoredServerChannel&gt; getChannelMap() {
+<span class="nc" id="L166">        lock.lock();</span>
+        try {
+<span class="nc" id="L168">            return ImmutableMap.copyOf(mapChannels);</span>
+        } finally {
+<span class="nc" id="L170">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Notifies the set of stored states that a channel has been updated. Use to notify the wallet of an update to this
+     * wallet extension.
+     */
+    public void updatedChannel(final StoredServerChannel channel) {
+<span class="fc" id="L179">        log.info(&quot;Stored server channel {} was updated&quot;, channel.hashCode());</span>
+<span class="fc" id="L180">        wallet.addOrUpdateExtension(this);</span>
+<span class="fc" id="L181">    }</span>
+
+    /**
+     * &lt;p&gt;Puts the given channel in the channels map and automatically closes it 2 hours before its refund transaction
+     * becomes spendable.&lt;/p&gt;
+     *
+     * &lt;p&gt;Because there must be only one, canonical {@link StoredServerChannel} per channel, this method throws if the
+     * channel is already present in the set of channels.&lt;/p&gt;
+     */
+    public void putChannel(final StoredServerChannel channel) {
+<span class="fc" id="L191">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L193" title="1 of 2 branches missed.">            checkArgument(mapChannels.put(channel.contract.getHash(), checkNotNull(channel)) == null);</span>
+            // Add the difference between real time and Utils.now() so that test-cases can use a mock clock.
+<span class="fc" id="L195">            Date autocloseTime = new Date((channel.refundTransactionUnlockTimeSecs + CHANNEL_EXPIRE_OFFSET) * 1000L</span>
+<span class="fc" id="L196">                    + (System.currentTimeMillis() - Utils.currentTimeMillis()));</span>
+<span class="fc" id="L197">            log.info(&quot;Scheduling channel for automatic closure at {}: {}&quot;, autocloseTime, channel);</span>
+<span class="fc" id="L198">            channelTimeoutHandler.schedule(new TimerTask() {</span>
+                @Override
+                public void run() {
+<span class="fc" id="L201">                    log.info(&quot;Auto-closing channel: {}&quot;, channel);</span>
+                    try {
+<span class="fc" id="L203">                        closeChannel(channel);</span>
+<span class="nc" id="L204">                    } catch (Exception e) {</span>
+                        // Something went wrong closing the channel - we catch
+                        // here or else we take down the whole Timer.
+<span class="nc" id="L207">                        log.error(&quot;Auto-closing channel failed&quot;, e);</span>
+<span class="fc" id="L208">                    }</span>
+<span class="fc" id="L209">                }</span>
+            }, autocloseTime);
+        } finally {
+<span class="pc" id="L212">            lock.unlock();</span>
+<span class="fc" id="L213">        }</span>
+<span class="fc" id="L214">        updatedChannel(channel);</span>
+<span class="fc" id="L215">    }</span>
+
+    @Override
+    public String getWalletExtensionID() {
+<span class="fc" id="L219">        return EXTENSION_ID;</span>
+    }
+
+    @Override
+    public boolean isWalletExtensionMandatory() {
+<span class="fc" id="L224">        return false;</span>
+    }
+
+    @Override
+    public byte[] serializeWalletExtension() {
+<span class="fc" id="L229">        lock.lock();</span>
+        try {
+<span class="fc" id="L231">            final NetworkParameters params = getNetworkParameters();</span>
+            // If we haven't attached to a wallet yet we can't check against network parameters
+<span class="pc bpc" id="L233" title="1 of 2 branches missed.">            final boolean hasMaxMoney = params != null ? params.hasMaxMoney() : true;</span>
+<span class="pc bpc" id="L234" title="1 of 2 branches missed.">            final Coin networkMaxMoney = params != null ? params.getMaxMoney() : NetworkParameters.MAX_MONEY;</span>
+<span class="fc" id="L235">            ServerState.StoredServerPaymentChannels.Builder builder = ServerState.StoredServerPaymentChannels.newBuilder();</span>
+<span class="fc bfc" id="L236" title="All 2 branches covered.">            for (StoredServerChannel channel : mapChannels.values()) {</span>
+                // First a few asserts to make sure things won't break
+                // TODO: Pull MAX_MONEY from network parameters
+<span class="pc bpc" id="L239" title="2 of 4 branches missed.">                checkState(channel.bestValueToMe.signum() &gt;= 0 &amp;&amp; </span>
+<span class="pc bpc" id="L240" title="1 of 2 branches missed.">                        (!hasMaxMoney || channel.bestValueToMe.compareTo(networkMaxMoney) &lt;= 0));</span>
+<span class="pc bpc" id="L241" title="1 of 2 branches missed.">                checkState(channel.refundTransactionUnlockTimeSecs &gt; 0);</span>
+<span class="fc" id="L242">                checkNotNull(channel.myKey.getPrivKeyBytes());</span>
+<span class="fc" id="L243">                ServerState.StoredServerPaymentChannel.Builder channelBuilder = ServerState.StoredServerPaymentChannel.newBuilder()</span>
+<span class="fc" id="L244">                        .setMajorVersion(channel.majorVersion)</span>
+<span class="fc" id="L245">                        .setBestValueToMe(channel.bestValueToMe.value)</span>
+<span class="fc" id="L246">                        .setRefundTransactionUnlockTimeSecs(channel.refundTransactionUnlockTimeSecs)</span>
+<span class="fc" id="L247">                        .setContractTransaction(ByteString.copyFrom(channel.contract.unsafeBitcoinSerialize()))</span>
+<span class="fc" id="L248">                        .setMyKey(ByteString.copyFrom(channel.myKey.getPrivKeyBytes()));</span>
+<span class="fc bfc" id="L249" title="All 2 branches covered.">                if (channel.majorVersion == 1) {</span>
+<span class="fc" id="L250">                    channelBuilder.setClientOutput(ByteString.copyFrom(channel.clientOutput.unsafeBitcoinSerialize()));</span>
+                } else {
+<span class="fc" id="L252">                    channelBuilder.setClientKey(ByteString.copyFrom(channel.clientKey.getPubKey()));</span>
+                }
+<span class="pc bpc" id="L254" title="1 of 2 branches missed.">                if (channel.bestValueSignature != null)</span>
+<span class="fc" id="L255">                    channelBuilder.setBestValueSignature(ByteString.copyFrom(channel.bestValueSignature));</span>
+<span class="fc" id="L256">                builder.addChannels(channelBuilder);</span>
+<span class="fc" id="L257">            }</span>
+<span class="fc" id="L258">            return builder.build().toByteArray();</span>
+        } finally {
+<span class="pc" id="L260">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public void deserializeWalletExtension(Wallet containingWallet, byte[] data) throws Exception {
+<span class="fc" id="L266">        lock.lock();</span>
+        try {
+<span class="fc" id="L268">            this.wallet = containingWallet;</span>
+<span class="fc" id="L269">            ServerState.StoredServerPaymentChannels states = ServerState.StoredServerPaymentChannels.parseFrom(data);</span>
+<span class="fc" id="L270">            NetworkParameters params = containingWallet.getParams();</span>
+<span class="fc bfc" id="L271" title="All 2 branches covered.">            for (ServerState.StoredServerPaymentChannel storedState : states.getChannelsList()) {</span>
+<span class="fc" id="L272">                final int majorVersion = storedState.getMajorVersion();</span>
+<span class="fc" id="L273">                TransactionOutput clientOutput = null;</span>
+<span class="fc" id="L274">                ECKey clientKey = null;</span>
+<span class="fc bfc" id="L275" title="All 2 branches covered.">                if (majorVersion == 1) {</span>
+<span class="fc" id="L276">                    clientOutput = new TransactionOutput(params, null, storedState.getClientOutput().toByteArray(), 0);</span>
+                } else {
+<span class="fc" id="L278">                    clientKey = ECKey.fromPublicOnly(storedState.getClientKey().toByteArray());</span>
+                }
+<span class="fc" id="L280">                StoredServerChannel channel = new StoredServerChannel(null,</span>
+                        majorVersion,
+<span class="fc" id="L282">                        params.getDefaultSerializer().makeTransaction(storedState.getContractTransaction().toByteArray()),</span>
+                        clientOutput,
+<span class="fc" id="L284">                        storedState.getRefundTransactionUnlockTimeSecs(),</span>
+<span class="fc" id="L285">                        ECKey.fromPrivate(storedState.getMyKey().toByteArray()),</span>
+                        clientKey,
+<span class="fc" id="L287">                        Coin.valueOf(storedState.getBestValueToMe()),</span>
+<span class="pc bpc" id="L288" title="1 of 2 branches missed.">                        storedState.hasBestValueSignature() ? storedState.getBestValueSignature().toByteArray() : null);</span>
+<span class="fc" id="L289">                putChannel(channel);</span>
+<span class="fc" id="L290">            }</span>
+        } finally {
+<span class="pc" id="L292">            lock.unlock();</span>
+<span class="fc" id="L293">        }</span>
+<span class="fc" id="L294">    }</span>
+
+    @Override
+    public String toString() {
+<span class="nc" id="L298">        lock.lock();</span>
+        try {
+<span class="nc" id="L300">            StringBuilder buf = new StringBuilder();</span>
+<span class="nc bnc" id="L301" title="All 2 branches missed.">            for (StoredServerChannel stored : mapChannels.values()) {</span>
+<span class="nc" id="L302">                buf.append(stored);</span>
+<span class="nc" id="L303">            }</span>
+<span class="nc" id="L304">            return buf.toString();</span>
+        } finally {
+<span class="nc" id="L306">            lock.unlock();</span>
+        }
+    }
+
+    private @Nullable NetworkParameters getNetworkParameters() {
+<span class="pc bpc" id="L311" title="1 of 2 branches missed.">        return wallet != null ? wallet.getNetworkParameters() : null;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

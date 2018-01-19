@@ -1,0 +1,519 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>WalletAppKit.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.kits</a> &gt; <span class="el_source">WalletAppKit.java</span></div><h1>WalletAppKit.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.kits;
+
+import com.google.common.collect.*;
+import com.google.common.util.concurrent.*;
+import org.bitcoinj.core.listeners.*;
+import org.bitcoinj.core.*;
+import org.bitcoinj.net.discovery.*;
+import org.bitcoinj.protocols.channels.*;
+import org.bitcoinj.store.*;
+import org.bitcoinj.wallet.*;
+import org.slf4j.*;
+
+import javax.annotation.*;
+import java.io.*;
+import java.net.*;
+import java.nio.channels.*;
+import java.util.*;
+import java.util.concurrent.*;
+
+import static com.google.common.base.Preconditions.*;
+
+/**
+ * &lt;p&gt;Utility class that wraps the boilerplate needed to set up a new SPV bitcoinj app. Instantiate it with a directory
+ * and file prefix, optionally configure a few things, then use startAsync and optionally awaitRunning. The object will
+ * construct and configure a {@link BlockChain}, {@link SPVBlockStore}, {@link Wallet} and {@link PeerGroup}. Depending
+ * on the value of the blockingStartup property, startup will be considered complete once the block chain has fully
+ * synchronized, so it can take a while.&lt;/p&gt;
+ *
+ * &lt;p&gt;To add listeners and modify the objects that are constructed, you can either do that by overriding the
+ * {@link #onSetupCompleted()} method (which will run on a background thread) and make your changes there,
+ * or by waiting for the service to start and then accessing the objects from wherever you want. However, you cannot
+ * access the objects this class creates until startup is complete.&lt;/p&gt;
+ *
+ * &lt;p&gt;The asynchronous design of this class may seem puzzling (just use {@link #awaitRunning()} if you don't want that).
+ * It is to make it easier to fit bitcoinj into GUI apps, which require a high degree of responsiveness on their main
+ * thread which handles all the animation and user interaction. Even when blockingStart is false, initializing bitcoinj
+ * means doing potentially blocking file IO, generating keys and other potentially intensive operations. By running it
+ * on a background thread, there's no risk of accidentally causing UI lag.&lt;/p&gt;
+ *
+ * &lt;p&gt;Note that {@link #awaitRunning()} can throw an unchecked {@link java.lang.IllegalStateException}
+ * if anything goes wrong during startup - you should probably handle it and use {@link Exception#getCause()} to figure
+ * out what went wrong more precisely. Same thing if you just use the {@link #startAsync()} method.&lt;/p&gt;
+ */
+public class WalletAppKit extends AbstractIdleService {
+<span class="nc" id="L62">    protected static final Logger log = LoggerFactory.getLogger(WalletAppKit.class);</span>
+
+    protected final String filePrefix;
+    protected final NetworkParameters params;
+    protected volatile BlockChain vChain;
+    protected volatile BlockStore vStore;
+    protected volatile Wallet vWallet;
+    protected volatile PeerGroup vPeerGroup;
+
+    protected final File directory;
+    protected volatile File vWalletFile;
+
+<span class="nc" id="L74">    protected boolean useAutoSave = true;</span>
+    protected PeerAddress[] peerAddresses;
+    protected DownloadProgressTracker downloadListener;
+<span class="nc" id="L77">    protected boolean autoStop = true;</span>
+    protected InputStream checkpoints;
+<span class="nc" id="L79">    protected boolean blockingStartup = true;</span>
+    protected String userAgent, version;
+    protected WalletProtobufSerializer.WalletFactory walletFactory;
+    @Nullable protected DeterministicSeed restoreFromSeed;
+    @Nullable protected PeerDiscovery discovery;
+
+    protected volatile Context context;
+
+    /**
+     * Creates a new WalletAppKit, with a newly created {@link Context}. Files will be stored in the given directory.
+     */
+    public WalletAppKit(NetworkParameters params, File directory, String filePrefix) {
+<span class="nc" id="L91">        this(new Context(params), directory, filePrefix);</span>
+<span class="nc" id="L92">    }</span>
+
+    /**
+     * Creates a new WalletAppKit, with the given {@link Context}. Files will be stored in the given directory.
+     */
+<span class="nc" id="L97">    public WalletAppKit(Context context, File directory, String filePrefix) {</span>
+<span class="nc" id="L98">        this.context = context;</span>
+<span class="nc" id="L99">        this.params = checkNotNull(context.getParams());</span>
+<span class="nc" id="L100">        this.directory = checkNotNull(directory);</span>
+<span class="nc" id="L101">        this.filePrefix = checkNotNull(filePrefix);</span>
+<span class="nc" id="L102">    }</span>
+
+    /** Will only connect to the given addresses. Cannot be called after startup. */
+    public WalletAppKit setPeerNodes(PeerAddress... addresses) {
+<span class="nc bnc" id="L106" title="All 2 branches missed.">        checkState(state() == State.NEW, &quot;Cannot call after startup&quot;);</span>
+<span class="nc" id="L107">        this.peerAddresses = addresses;</span>
+<span class="nc" id="L108">        return this;</span>
+    }
+
+    /** Will only connect to localhost. Cannot be called after startup. */
+    public WalletAppKit connectToLocalHost() {
+        try {
+<span class="nc" id="L114">            final InetAddress localHost = InetAddress.getLocalHost();</span>
+<span class="nc" id="L115">            return setPeerNodes(new PeerAddress(params, localHost, params.getPort()));</span>
+<span class="nc" id="L116">        } catch (UnknownHostException e) {</span>
+            // Borked machine with no loopback adapter configured properly.
+<span class="nc" id="L118">            throw new RuntimeException(e);</span>
+        }
+    }
+
+    /** If true, the wallet will save itself to disk automatically whenever it changes. */
+    public WalletAppKit setAutoSave(boolean value) {
+<span class="nc bnc" id="L124" title="All 2 branches missed.">        checkState(state() == State.NEW, &quot;Cannot call after startup&quot;);</span>
+<span class="nc" id="L125">        useAutoSave = value;</span>
+<span class="nc" id="L126">        return this;</span>
+    }
+
+    /**
+     * If you want to learn about the sync process, you can provide a listener here. For instance, a
+     * {@link DownloadProgressTracker} is a good choice. This has no effect unless setBlockingStartup(false) has been called
+     * too, due to some missing implementation code.
+     */
+    public WalletAppKit setDownloadListener(DownloadProgressTracker listener) {
+<span class="nc" id="L135">        this.downloadListener = listener;</span>
+<span class="nc" id="L136">        return this;</span>
+    }
+
+    /** If true, will register a shutdown hook to stop the library. Defaults to true. */
+    public WalletAppKit setAutoStop(boolean autoStop) {
+<span class="nc" id="L141">        this.autoStop = autoStop;</span>
+<span class="nc" id="L142">        return this;</span>
+    }
+
+    /**
+     * If set, the file is expected to contain a checkpoints file calculated with BuildCheckpoints. It makes initial
+     * block sync faster for new users - please refer to the documentation on the bitcoinj website
+     * (https://bitcoinj.github.io/speeding-up-chain-sync) for further details.
+     */
+    public WalletAppKit setCheckpoints(InputStream checkpoints) {
+<span class="nc bnc" id="L151" title="All 2 branches missed.">        if (this.checkpoints != null)</span>
+<span class="nc" id="L152">            Utils.closeUnchecked(this.checkpoints);</span>
+<span class="nc" id="L153">        this.checkpoints = checkNotNull(checkpoints);</span>
+<span class="nc" id="L154">        return this;</span>
+    }
+
+    /**
+     * If true (the default) then the startup of this service won't be considered complete until the network has been
+     * brought up, peer connections established and the block chain synchronised. Therefore {@link #awaitRunning()} can
+     * potentially take a very long time. If false, then startup is considered complete once the network activity
+     * begins and peer connections/block chain sync will continue in the background.
+     */
+    public WalletAppKit setBlockingStartup(boolean blockingStartup) {
+<span class="nc" id="L164">        this.blockingStartup = blockingStartup;</span>
+<span class="nc" id="L165">        return this;</span>
+    }
+
+    /**
+     * Sets the string that will appear in the subver field of the version message.
+     * @param userAgent A short string that should be the name of your app, e.g. &quot;My Wallet&quot;
+     * @param version A short string that contains the version number, e.g. &quot;1.0-BETA&quot;
+     */
+    public WalletAppKit setUserAgent(String userAgent, String version) {
+<span class="nc" id="L174">        this.userAgent = checkNotNull(userAgent);</span>
+<span class="nc" id="L175">        this.version = checkNotNull(version);</span>
+<span class="nc" id="L176">        return this;</span>
+    }
+
+    /**
+     * Sets a wallet factory which will be used when the kit creates a new wallet.
+     */
+    public WalletAppKit setWalletFactory(WalletProtobufSerializer.WalletFactory walletFactory) {
+<span class="nc" id="L183">        this.walletFactory = walletFactory;</span>
+<span class="nc" id="L184">        return this;</span>
+    }
+
+    /**
+     * If a seed is set here then any existing wallet that matches the file name will be renamed to a backup name,
+     * the chain file will be deleted, and the wallet object will be instantiated with the given seed instead of
+     * a fresh one being created. This is intended for restoring a wallet from the original seed. To implement restore
+     * you would shut down the existing appkit, if any, then recreate it with the seed given by the user, then start
+     * up the new kit. The next time your app starts it should work as normal (that is, don't keep calling this each
+     * time).
+     */
+    public WalletAppKit restoreWalletFromSeed(DeterministicSeed seed) {
+<span class="nc" id="L196">        this.restoreFromSeed = seed;</span>
+<span class="nc" id="L197">        return this;</span>
+    }
+
+    /**
+     * Sets the peer discovery class to use. If none is provided then DNS is used, which is a reasonable default.
+     */
+    public WalletAppKit setDiscovery(@Nullable PeerDiscovery discovery) {
+<span class="nc" id="L204">        this.discovery = discovery;</span>
+<span class="nc" id="L205">        return this;</span>
+    }
+
+    /**
+     * &lt;p&gt;Override this to return wallet extensions if any are necessary.&lt;/p&gt;
+     *
+     * &lt;p&gt;When this is called, chain(), store(), and peerGroup() will return the created objects, however they are not
+     * initialized/started.&lt;/p&gt;
+     */
+    protected List&lt;WalletExtension&gt; provideWalletExtensions() throws Exception {
+<span class="nc" id="L215">        return ImmutableList.of();</span>
+    }
+
+    /**
+     * Override this to use a {@link BlockStore} that isn't the default of {@link SPVBlockStore}.
+     */
+    protected BlockStore provideBlockStore(File file) throws BlockStoreException {
+<span class="nc" id="L222">        return new SPVBlockStore(params, file);</span>
+    }
+
+    /**
+     * This method is invoked on a background thread after all objects are initialised, but before the peer group
+     * or block chain download is started. You can tweak the objects configuration here.
+     */
+<span class="nc" id="L229">    protected void onSetupCompleted() { }</span>
+
+    /**
+     * Tests to see if the spvchain file has an operating system file lock on it. Useful for checking if your app
+     * is already running. If another copy of your app is running and you start the appkit anyway, an exception will
+     * be thrown during the startup process. Returns false if the chain file does not exist or is a directory.
+     */
+    public boolean isChainFileLocked() throws IOException {
+<span class="nc" id="L237">        RandomAccessFile file2 = null;</span>
+        try {
+<span class="nc" id="L239">            File file = new File(directory, filePrefix + &quot;.spvchain&quot;);</span>
+<span class="nc bnc" id="L240" title="All 2 branches missed.">            if (!file.exists())</span>
+<span class="nc" id="L241">                return false;</span>
+<span class="nc bnc" id="L242" title="All 2 branches missed.">            if (file.isDirectory())</span>
+<span class="nc" id="L243">                return false;</span>
+<span class="nc" id="L244">            file2 = new RandomAccessFile(file, &quot;rw&quot;);</span>
+<span class="nc" id="L245">            FileLock lock = file2.getChannel().tryLock();</span>
+<span class="nc bnc" id="L246" title="All 2 branches missed.">            if (lock == null)</span>
+<span class="nc" id="L247">                return true;</span>
+<span class="nc" id="L248">            lock.release();</span>
+<span class="nc" id="L249">            return false;</span>
+        } finally {
+<span class="nc bnc" id="L251" title="All 10 branches missed.">            if (file2 != null)</span>
+<span class="nc" id="L252">                file2.close();</span>
+        }
+    }
+
+    @Override
+    protected void startUp() throws Exception {
+        // Runs in a separate thread.
+<span class="nc" id="L259">        Context.propagate(context);</span>
+<span class="nc bnc" id="L260" title="All 2 branches missed.">        if (!directory.exists()) {</span>
+<span class="nc bnc" id="L261" title="All 2 branches missed.">            if (!directory.mkdirs()) {</span>
+<span class="nc" id="L262">                throw new IOException(&quot;Could not create directory &quot; + directory.getAbsolutePath());</span>
+            }
+        }
+<span class="nc" id="L265">        log.info(&quot;Starting up with directory = {}&quot;, directory);</span>
+        try {
+<span class="nc" id="L267">            File chainFile = new File(directory, filePrefix + &quot;.spvchain&quot;);</span>
+<span class="nc" id="L268">            boolean chainFileExists = chainFile.exists();</span>
+<span class="nc" id="L269">            vWalletFile = new File(directory, filePrefix + &quot;.wallet&quot;);</span>
+<span class="nc bnc" id="L270" title="All 6 branches missed.">            boolean shouldReplayWallet = (vWalletFile.exists() &amp;&amp; !chainFileExists) || restoreFromSeed != null;</span>
+<span class="nc" id="L271">            vWallet = createOrLoadWallet(shouldReplayWallet);</span>
+
+            // Initiate Bitcoin network objects (block store, blockchain and peer group)
+<span class="nc" id="L274">            vStore = provideBlockStore(chainFile);</span>
+<span class="nc bnc" id="L275" title="All 4 branches missed.">            if (!chainFileExists || restoreFromSeed != null) {</span>
+<span class="nc bnc" id="L276" title="All 4 branches missed.">                if (checkpoints == null &amp;&amp; !Utils.isAndroidRuntime()) {</span>
+<span class="nc" id="L277">                    checkpoints = CheckpointManager.openStream(params);</span>
+                }
+
+<span class="nc bnc" id="L280" title="All 2 branches missed.">                if (checkpoints != null) {</span>
+                    // Initialize the chain file with a checkpoint to speed up first-run sync.
+                    long time;
+<span class="nc bnc" id="L283" title="All 2 branches missed.">                    if (restoreFromSeed != null) {</span>
+<span class="nc" id="L284">                        time = restoreFromSeed.getCreationTimeSeconds();</span>
+<span class="nc bnc" id="L285" title="All 2 branches missed.">                        if (chainFileExists) {</span>
+<span class="nc" id="L286">                            log.info(&quot;Deleting the chain file in preparation from restore.&quot;);</span>
+<span class="nc" id="L287">                            vStore.close();</span>
+<span class="nc bnc" id="L288" title="All 2 branches missed.">                            if (!chainFile.delete())</span>
+<span class="nc" id="L289">                                throw new IOException(&quot;Failed to delete chain file in preparation for restore.&quot;);</span>
+<span class="nc" id="L290">                            vStore = new SPVBlockStore(params, chainFile);</span>
+                        }
+                    } else {
+<span class="nc" id="L293">                        time = vWallet.getEarliestKeyCreationTime();</span>
+                    }
+<span class="nc bnc" id="L295" title="All 2 branches missed.">                    if (time &gt; 0)</span>
+<span class="nc" id="L296">                        CheckpointManager.checkpoint(params, checkpoints, vStore, time);</span>
+                    else
+<span class="nc" id="L298">                        log.warn(&quot;Creating a new uncheckpointed block store due to a wallet with a creation time of zero: this will result in a very slow chain sync&quot;);</span>
+<span class="nc bnc" id="L299" title="All 2 branches missed.">                } else if (chainFileExists) {</span>
+<span class="nc" id="L300">                    log.info(&quot;Deleting the chain file in preparation from restore.&quot;);</span>
+<span class="nc" id="L301">                    vStore.close();</span>
+<span class="nc bnc" id="L302" title="All 2 branches missed.">                    if (!chainFile.delete())</span>
+<span class="nc" id="L303">                        throw new IOException(&quot;Failed to delete chain file in preparation for restore.&quot;);</span>
+<span class="nc" id="L304">                    vStore = new SPVBlockStore(params, chainFile);</span>
+                }
+            }
+<span class="nc" id="L307">            vChain = new BlockChain(params, vStore);</span>
+<span class="nc" id="L308">            vPeerGroup = createPeerGroup();</span>
+<span class="nc bnc" id="L309" title="All 2 branches missed.">            if (this.userAgent != null)</span>
+<span class="nc" id="L310">                vPeerGroup.setUserAgent(userAgent, version);</span>
+
+            // Set up peer addresses or discovery first, so if wallet extensions try to broadcast a transaction
+            // before we're actually connected the broadcast waits for an appropriate number of connections.
+<span class="nc bnc" id="L314" title="All 2 branches missed.">            if (peerAddresses != null) {</span>
+<span class="nc bnc" id="L315" title="All 2 branches missed.">                for (PeerAddress addr : peerAddresses) vPeerGroup.addAddress(addr);</span>
+<span class="nc" id="L316">                vPeerGroup.setMaxConnections(peerAddresses.length);</span>
+<span class="nc" id="L317">                peerAddresses = null;</span>
+<span class="nc bnc" id="L318" title="All 2 branches missed.">            } else if (!params.getId().equals(NetworkParameters.ID_REGTEST)) {</span>
+<span class="nc bnc" id="L319" title="All 2 branches missed.">                vPeerGroup.addPeerDiscovery(discovery != null ? discovery : new DnsDiscovery(params));</span>
+            }
+<span class="nc" id="L321">            vChain.addWallet(vWallet);</span>
+<span class="nc" id="L322">            vPeerGroup.addWallet(vWallet);</span>
+<span class="nc" id="L323">            onSetupCompleted();</span>
+
+<span class="nc bnc" id="L325" title="All 2 branches missed.">            if (blockingStartup) {</span>
+<span class="nc" id="L326">                vPeerGroup.start();</span>
+                // Make sure we shut down cleanly.
+<span class="nc" id="L328">                installShutdownHook();</span>
+<span class="nc" id="L329">                completeExtensionInitiations(vPeerGroup);</span>
+
+                // TODO: Be able to use the provided download listener when doing a blocking startup.
+<span class="nc" id="L332">                final DownloadProgressTracker listener = new DownloadProgressTracker();</span>
+<span class="nc" id="L333">                vPeerGroup.startBlockChainDownload(listener);</span>
+<span class="nc" id="L334">                listener.await();</span>
+<span class="nc" id="L335">            } else {</span>
+<span class="nc" id="L336">                Futures.addCallback(vPeerGroup.startAsync(), new FutureCallback() {</span>
+                    @Override
+                    public void onSuccess(@Nullable Object result) {
+<span class="nc" id="L339">                        completeExtensionInitiations(vPeerGroup);</span>
+<span class="nc bnc" id="L340" title="All 2 branches missed.">                        final DownloadProgressTracker l = downloadListener == null ? new DownloadProgressTracker() : downloadListener;</span>
+<span class="nc" id="L341">                        vPeerGroup.startBlockChainDownload(l);</span>
+<span class="nc" id="L342">                    }</span>
+
+                    @Override
+                    public void onFailure(Throwable t) {
+<span class="nc" id="L346">                        throw new RuntimeException(t);</span>
+
+                    }
+                });
+            }
+<span class="nc" id="L351">        } catch (BlockStoreException e) {</span>
+<span class="nc" id="L352">            throw new IOException(e);</span>
+<span class="nc" id="L353">        }</span>
+<span class="nc" id="L354">    }</span>
+
+    private Wallet createOrLoadWallet(boolean shouldReplayWallet) throws Exception {
+        Wallet wallet;
+
+<span class="nc" id="L359">        maybeMoveOldWalletOutOfTheWay();</span>
+
+<span class="nc bnc" id="L361" title="All 2 branches missed.">        if (vWalletFile.exists()) {</span>
+<span class="nc" id="L362">            wallet = loadWallet(shouldReplayWallet);</span>
+        } else {
+<span class="nc" id="L364">            wallet = createWallet();</span>
+<span class="nc" id="L365">            wallet.freshReceiveKey();</span>
+<span class="nc bnc" id="L366" title="All 2 branches missed.">            for (WalletExtension e : provideWalletExtensions()) {</span>
+<span class="nc" id="L367">                wallet.addExtension(e);</span>
+<span class="nc" id="L368">            }</span>
+
+            // Currently the only way we can be sure that an extension is aware of its containing wallet is by
+            // deserializing the extension (see WalletExtension#deserializeWalletExtension(Wallet, byte[]))
+            // Hence, we first save and then load wallet to ensure any extensions are correctly initialized.
+<span class="nc" id="L373">            wallet.saveToFile(vWalletFile);</span>
+<span class="nc" id="L374">            wallet = loadWallet(false);</span>
+        }
+
+<span class="nc bnc" id="L377" title="All 2 branches missed.">        if (useAutoSave) {</span>
+<span class="nc" id="L378">            this.setupAutoSave(wallet);</span>
+        }
+
+<span class="nc" id="L381">        return wallet;</span>
+    }
+
+    protected void setupAutoSave(Wallet wallet) {
+<span class="nc" id="L385">        wallet.autosaveToFile(vWalletFile, 5, TimeUnit.SECONDS, null);</span>
+<span class="nc" id="L386">    }</span>
+
+    private Wallet loadWallet(boolean shouldReplayWallet) throws Exception {
+        Wallet wallet;
+<span class="nc" id="L390">        FileInputStream walletStream = new FileInputStream(vWalletFile);</span>
+        try {
+<span class="nc" id="L392">            List&lt;WalletExtension&gt; extensions = provideWalletExtensions();</span>
+<span class="nc" id="L393">            WalletExtension[] extArray = extensions.toArray(new WalletExtension[extensions.size()]);</span>
+<span class="nc" id="L394">            Protos.Wallet proto = WalletProtobufSerializer.parseToProto(walletStream);</span>
+            final WalletProtobufSerializer serializer;
+<span class="nc bnc" id="L396" title="All 2 branches missed.">            if (walletFactory != null)</span>
+<span class="nc" id="L397">                serializer = new WalletProtobufSerializer(walletFactory);</span>
+            else
+<span class="nc" id="L399">                serializer = new WalletProtobufSerializer();</span>
+<span class="nc" id="L400">            wallet = serializer.readWallet(params, extArray, proto);</span>
+<span class="nc bnc" id="L401" title="All 2 branches missed.">            if (shouldReplayWallet)</span>
+<span class="nc" id="L402">                wallet.reset();</span>
+        } finally {
+<span class="nc" id="L404">            walletStream.close();</span>
+<span class="nc" id="L405">        }</span>
+<span class="nc" id="L406">        return wallet;</span>
+    }
+
+    protected Wallet createWallet() {
+        KeyChainGroup kcg;
+<span class="nc bnc" id="L411" title="All 2 branches missed.">        if (restoreFromSeed != null)</span>
+<span class="nc" id="L412">            kcg = new KeyChainGroup(params, restoreFromSeed);</span>
+        else
+<span class="nc" id="L414">            kcg = new KeyChainGroup(params);</span>
+<span class="nc bnc" id="L415" title="All 2 branches missed.">        if (walletFactory != null) {</span>
+<span class="nc" id="L416">            return walletFactory.create(params, kcg);</span>
+        } else {
+<span class="nc" id="L418">            return new Wallet(params, kcg);  // default</span>
+        }
+    }
+
+    private void maybeMoveOldWalletOutOfTheWay() {
+<span class="nc bnc" id="L423" title="All 2 branches missed.">        if (restoreFromSeed == null) return;</span>
+<span class="nc bnc" id="L424" title="All 2 branches missed.">        if (!vWalletFile.exists()) return;</span>
+<span class="nc" id="L425">        int counter = 1;</span>
+        File newName;
+        do {
+<span class="nc" id="L428">            newName = new File(vWalletFile.getParent(), &quot;Backup &quot; + counter + &quot; for &quot; + vWalletFile.getName());</span>
+<span class="nc" id="L429">            counter++;</span>
+<span class="nc bnc" id="L430" title="All 2 branches missed.">        } while (newName.exists());</span>
+<span class="nc" id="L431">        log.info(&quot;Renaming old wallet file {} to {}&quot;, vWalletFile, newName);</span>
+<span class="nc bnc" id="L432" title="All 2 branches missed.">        if (!vWalletFile.renameTo(newName)) {</span>
+            // This should not happen unless something is really messed up.
+<span class="nc" id="L434">            throw new RuntimeException(&quot;Failed to rename wallet for restore&quot;);</span>
+        }
+<span class="nc" id="L436">    }</span>
+
+    /*
+     * As soon as the transaction broadcaster han been created we will pass it to the
+     * payment channel extensions
+     */
+    private void completeExtensionInitiations(TransactionBroadcaster transactionBroadcaster) {
+<span class="nc" id="L443">        StoredPaymentChannelClientStates clientStoredChannels = (StoredPaymentChannelClientStates)</span>
+<span class="nc" id="L444">                vWallet.getExtensions().get(StoredPaymentChannelClientStates.class.getName());</span>
+<span class="nc bnc" id="L445" title="All 2 branches missed.">        if(clientStoredChannels != null) {</span>
+<span class="nc" id="L446">            clientStoredChannels.setTransactionBroadcaster(transactionBroadcaster);</span>
+        }
+<span class="nc" id="L448">        StoredPaymentChannelServerStates serverStoredChannels = (StoredPaymentChannelServerStates)</span>
+<span class="nc" id="L449">                vWallet.getExtensions().get(StoredPaymentChannelServerStates.class.getName());</span>
+<span class="nc bnc" id="L450" title="All 2 branches missed.">        if(serverStoredChannels != null) {</span>
+<span class="nc" id="L451">            serverStoredChannels.setTransactionBroadcaster(transactionBroadcaster);</span>
+        }
+<span class="nc" id="L453">    }</span>
+
+
+    protected PeerGroup createPeerGroup() throws TimeoutException {
+<span class="nc" id="L457">        return new PeerGroup(params, vChain);</span>
+    }
+
+    private void installShutdownHook() {
+<span class="nc bnc" id="L461" title="All 2 branches missed.">        if (autoStop) Runtime.getRuntime().addShutdownHook(new Thread() {</span>
+            @Override public void run() {
+                try {
+<span class="nc" id="L464">                    WalletAppKit.this.stopAsync();</span>
+<span class="nc" id="L465">                    WalletAppKit.this.awaitTerminated();</span>
+<span class="nc" id="L466">                } catch (Exception e) {</span>
+<span class="nc" id="L467">                    throw new RuntimeException(e);</span>
+<span class="nc" id="L468">                }</span>
+<span class="nc" id="L469">            }</span>
+        });
+<span class="nc" id="L471">    }</span>
+
+    @Override
+    protected void shutDown() throws Exception {
+        // Runs in a separate thread.
+        try {
+<span class="nc" id="L477">            Context.propagate(context);</span>
+<span class="nc" id="L478">            vPeerGroup.stop();</span>
+<span class="nc" id="L479">            vWallet.saveToFile(vWalletFile);</span>
+<span class="nc" id="L480">            vStore.close();</span>
+
+<span class="nc" id="L482">            vPeerGroup = null;</span>
+<span class="nc" id="L483">            vWallet = null;</span>
+<span class="nc" id="L484">            vStore = null;</span>
+<span class="nc" id="L485">            vChain = null;</span>
+<span class="nc" id="L486">        } catch (BlockStoreException e) {</span>
+<span class="nc" id="L487">            throw new IOException(e);</span>
+<span class="nc" id="L488">        }</span>
+<span class="nc" id="L489">    }</span>
+
+    public NetworkParameters params() {
+<span class="nc" id="L492">        return params;</span>
+    }
+
+    public BlockChain chain() {
+<span class="nc bnc" id="L496" title="All 4 branches missed.">        checkState(state() == State.STARTING || state() == State.RUNNING, &quot;Cannot call until startup is complete&quot;);</span>
+<span class="nc" id="L497">        return vChain;</span>
+    }
+
+    public BlockStore store() {
+<span class="nc bnc" id="L501" title="All 4 branches missed.">        checkState(state() == State.STARTING || state() == State.RUNNING, &quot;Cannot call until startup is complete&quot;);</span>
+<span class="nc" id="L502">        return vStore;</span>
+    }
+
+    public Wallet wallet() {
+<span class="nc bnc" id="L506" title="All 4 branches missed.">        checkState(state() == State.STARTING || state() == State.RUNNING, &quot;Cannot call until startup is complete&quot;);</span>
+<span class="nc" id="L507">        return vWallet;</span>
+    }
+
+    public PeerGroup peerGroup() {
+<span class="nc bnc" id="L511" title="All 4 branches missed.">        checkState(state() == State.STARTING || state() == State.RUNNING, &quot;Cannot call until startup is complete&quot;);</span>
+<span class="nc" id="L512">        return vPeerGroup;</span>
+    }
+
+    public File directory() {
+<span class="nc" id="L516">        return directory;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

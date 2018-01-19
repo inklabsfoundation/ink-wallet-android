@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>DeterministicHierarchy.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.crypto</a> &gt; <span class="el_source">DeterministicHierarchy.java</span></div><h1>DeterministicHierarchy.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Matija Mazi.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.crypto;
+
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Maps;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import static com.google.common.base.Preconditions.checkArgument;
+
+// TODO: This whole API feels a bit object heavy. Do we really need ChildNumber and so many maps, etc?
+// TODO: Should we be representing this using an actual tree arrangement in memory instead of a bunch of hashmaps?
+
+/**
+ * &lt;p&gt;A DeterministicHierarchy calculates and keeps a whole tree (hierarchy) of keys originating from a single
+ * root key. This implements part of the BIP 32 specification. A deterministic key tree is useful because
+ * Bitcoin's privacy system require new keys to be created for each transaction, but managing all these
+ * keys quickly becomes unwieldy. In particular it becomes hard to back up and distribute them. By having
+ * a way to derive random-looking but deterministic keys we can make wallet backup simpler and gain the
+ * ability to hand out {@link DeterministicKey}s to other people who can then create new addresses
+ * on the fly, without having to contact us.&lt;/p&gt;
+ *
+ * &lt;p&gt;The hierarchy is started from a single root key, and a location in the tree is given by a path which
+ * is a list of {@link ChildNumber}s.&lt;/p&gt;
+ */
+public class DeterministicHierarchy {
+<span class="fc" id="L44">    private final Map&lt;ImmutableList&lt;ChildNumber&gt;, DeterministicKey&gt; keys = Maps.newHashMap();</span>
+    private final ImmutableList&lt;ChildNumber&gt; rootPath;
+    // Keep track of how many child keys each node has. This is kind of weak.
+<span class="fc" id="L47">    private final Map&lt;ImmutableList&lt;ChildNumber&gt;, ChildNumber&gt; lastChildNumbers = Maps.newHashMap();</span>
+
+    public static final int BIP32_STANDARDISATION_TIME_SECS = 1369267200;
+
+    /**
+     * Constructs a new hierarchy rooted at the given key. Note that this does not have to be the top of the tree.
+     * You can construct a DeterministicHierarchy for a subtree of a larger tree that you may not own.
+     */
+<span class="fc" id="L55">    public DeterministicHierarchy(DeterministicKey rootKey) {</span>
+<span class="fc" id="L56">        putKey(rootKey);</span>
+<span class="fc" id="L57">        rootPath = rootKey.getPath();</span>
+<span class="fc" id="L58">    }</span>
+
+    /**
+     * Inserts a key into the hierarchy. Used during deserialization: you normally don't need this. Keys must be
+     * inserted in order.
+     */
+    public final void putKey(DeterministicKey key) {
+<span class="fc" id="L65">        ImmutableList&lt;ChildNumber&gt; path = key.getPath();</span>
+        // Update our tracking of what the next child in each branch of the tree should be. Just assume that keys are
+        // inserted in order here.
+<span class="fc" id="L68">        final DeterministicKey parent = key.getParent();</span>
+<span class="fc bfc" id="L69" title="All 2 branches covered.">        if (parent != null)</span>
+<span class="fc" id="L70">            lastChildNumbers.put(parent.getPath(), key.getChildNumber());</span>
+<span class="fc" id="L71">        keys.put(path, key);</span>
+<span class="fc" id="L72">    }</span>
+
+    /**
+     * Returns a key for the given path, optionally creating it.
+     *
+     * @param path the path to the key
+     * @param relativePath whether the path is relative to the root path
+     * @param create whether the key corresponding to path should be created (with any necessary ancestors) if it doesn't exist already
+     * @return next newly created key using the child derivation function
+     * @throws IllegalArgumentException if create is false and the path was not found.
+     */
+    public DeterministicKey get(List&lt;ChildNumber&gt; path, boolean relativePath, boolean create) {
+<span class="pc bpc" id="L84" title="1 of 2 branches missed.">        ImmutableList&lt;ChildNumber&gt; absolutePath = relativePath</span>
+<span class="pc" id="L85">                ? ImmutableList.&lt;ChildNumber&gt;builder().addAll(rootPath).addAll(path).build()</span>
+<span class="fc" id="L86">                : ImmutableList.copyOf(path);</span>
+<span class="fc bfc" id="L87" title="All 2 branches covered.">        if (!keys.containsKey(absolutePath)) {</span>
+<span class="pc bpc" id="L88" title="1 of 2 branches missed.">            if (!create)</span>
+<span class="nc bnc" id="L89" title="All 2 branches missed.">                throw new IllegalArgumentException(String.format(Locale.US, &quot;No key found for %s path %s.&quot;,</span>
+<span class="nc" id="L90">                    relativePath ? &quot;relative&quot; : &quot;absolute&quot;, HDUtils.formatPath(path)));</span>
+<span class="pc bpc" id="L91" title="1 of 2 branches missed.">            checkArgument(absolutePath.size() &gt; 0, &quot;Can't derive the master key: nothing to derive from.&quot;);</span>
+<span class="fc" id="L92">            DeterministicKey parent = get(absolutePath.subList(0, absolutePath.size() - 1), false, true);</span>
+<span class="fc" id="L93">            putKey(HDKeyDerivation.deriveChildKey(parent, absolutePath.get(absolutePath.size() - 1)));</span>
+        }
+<span class="fc" id="L95">        return keys.get(absolutePath);</span>
+    }
+
+    /**
+     * Extends the tree by calculating the next key that hangs off the given parent path. For example, if you pass a
+     * path of 1/2 here and there are already keys 1/2/1 and 1/2/2 then it will derive 1/2/3.
+     *
+     * @param parentPath the path to the parent
+     * @param relative whether the path is relative to the root path
+     * @param createParent whether the parent corresponding to path should be created (with any necessary ancestors) if it doesn't exist already
+     * @param privateDerivation whether to use private or public derivation
+     * @return next newly created key using the child derivation funtcion
+     * @throws IllegalArgumentException if the parent doesn't exist and createParent is false.
+     */
+    public DeterministicKey deriveNextChild(ImmutableList&lt;ChildNumber&gt; parentPath, boolean relative, boolean createParent, boolean privateDerivation) {
+<span class="nc" id="L110">        DeterministicKey parent = get(parentPath, relative, createParent);</span>
+<span class="nc" id="L111">        int nAttempts = 0;</span>
+<span class="nc bnc" id="L112" title="All 2 branches missed.">        while (nAttempts++ &lt; HDKeyDerivation.MAX_CHILD_DERIVATION_ATTEMPTS) {</span>
+            try {
+<span class="nc" id="L114">                ChildNumber createChildNumber = getNextChildNumberToDerive(parent.getPath(), privateDerivation);</span>
+<span class="nc" id="L115">                return deriveChild(parent, createChildNumber);</span>
+<span class="nc" id="L116">            } catch (HDDerivationException ignore) { }</span>
+        }
+<span class="nc" id="L118">        throw new HDDerivationException(&quot;Maximum number of child derivation attempts reached, this is probably an indication of a bug.&quot;);</span>
+    }
+
+    private ChildNumber getNextChildNumberToDerive(ImmutableList&lt;ChildNumber&gt; path, boolean privateDerivation) {
+<span class="nc" id="L122">        ChildNumber lastChildNumber = lastChildNumbers.get(path);</span>
+<span class="nc bnc" id="L123" title="All 2 branches missed.">        ChildNumber nextChildNumber = new ChildNumber(lastChildNumber != null ? lastChildNumber.num() + 1 : 0, privateDerivation);</span>
+<span class="nc" id="L124">        lastChildNumbers.put(path, nextChildNumber);</span>
+<span class="nc" id="L125">        return nextChildNumber;</span>
+    }
+
+    public int getNumChildren(ImmutableList&lt;ChildNumber&gt; path) {
+<span class="fc" id="L129">        final ChildNumber cn = lastChildNumbers.get(path);</span>
+<span class="fc bfc" id="L130" title="All 2 branches covered.">        if (cn == null)</span>
+<span class="fc" id="L131">            return 0;</span>
+        else
+<span class="fc" id="L133">            return cn.num() + 1;   // children start with zero based childnumbers</span>
+    }
+
+    /**
+     * Extends the tree by calculating the requested child for the given path. For example, to get the key at position
+     * 1/2/3 you would pass 1/2 as the parent path and 3 as the child number.
+     *
+     * @param parentPath the path to the parent
+     * @param relative whether the path is relative to the root path
+     * @param createParent whether the parent corresponding to path should be created (with any necessary ancestors) if it doesn't exist already
+     * @return the requested key.
+     * @throws IllegalArgumentException if the parent doesn't exist and createParent is false.
+     */
+    public DeterministicKey deriveChild(List&lt;ChildNumber&gt; parentPath, boolean relative, boolean createParent, ChildNumber createChildNumber) {
+<span class="fc" id="L147">        return deriveChild(get(parentPath, relative, createParent), createChildNumber);</span>
+    }
+
+    private DeterministicKey deriveChild(DeterministicKey parent, ChildNumber createChildNumber) {
+<span class="fc" id="L151">        DeterministicKey childKey = HDKeyDerivation.deriveChildKey(parent, createChildNumber);</span>
+<span class="fc" id="L152">        putKey(childKey);</span>
+<span class="fc" id="L153">        return childKey;</span>
+    }
+
+    /**
+     * Returns the root key that the {@link DeterministicHierarchy} was created with.
+     */
+    public DeterministicKey getRootKey() {
+<span class="nc" id="L160">        return get(rootPath, false, false);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

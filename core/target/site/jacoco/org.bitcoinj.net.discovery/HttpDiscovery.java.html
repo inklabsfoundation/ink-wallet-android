@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>HttpDiscovery.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.net.discovery</a> &gt; <span class="el_source">HttpDiscovery.java</span></div><h1>HttpDiscovery.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 Mike Hearn
+ * Copyright 2015 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.net.discovery;
+
+import com.google.common.annotations.*;
+import com.google.protobuf.*;
+import org.bitcoin.crawler.*;
+import org.bitcoinj.core.*;
+import org.slf4j.*;
+
+import javax.annotation.*;
+import java.io.*;
+import java.net.*;
+import java.security.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.zip.*;
+
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+
+import static com.google.common.base.Preconditions.*;
+
+/**
+ * A class that knows how to read signed sets of seeds over HTTP, using a simple protobuf based protocol. See the
+ * peerseeds.proto file for the definition, with a gzipped delimited SignedPeerSeeds being the root of the data.
+ * This is not currently in use by the Bitcoin community, but rather, is here for experimentation.
+ */
+public class HttpDiscovery implements PeerDiscovery {
+<span class="nc" id="L47">    private static final Logger log = LoggerFactory.getLogger(HttpDiscovery.class);</span>
+
+    public static class Details {
+        @Nullable public final ECKey pubkey;
+        public final URI uri;
+
+<span class="fc" id="L53">        public Details(@Nullable ECKey pubkey, URI uri) {</span>
+<span class="fc" id="L54">            this.pubkey = pubkey;</span>
+<span class="fc" id="L55">            this.uri = uri;</span>
+<span class="fc" id="L56">        }</span>
+    }
+
+    private final Details details;
+    private final NetworkParameters params;
+    private final OkHttpClient client;
+
+    /**
+     * Constructs a discovery object that will read data from the given HTTP[S] URI and, if a public key is provided,
+     * will check the signature using that key.
+     */
+    public HttpDiscovery(NetworkParameters params, URI uri, @Nullable ECKey pubkey) {
+<span class="nc" id="L68">        this(params, new Details(pubkey, uri));</span>
+<span class="nc" id="L69">    }</span>
+
+    /**
+     * Constructs a discovery object that will read data from the given HTTP[S] URI and, if a public key is provided,
+     * will check the signature using that key.
+     */
+    public HttpDiscovery(NetworkParameters params, Details details) {
+<span class="nc" id="L76">        this(params, details, new OkHttpClient());</span>
+<span class="nc" id="L77">    }</span>
+
+<span class="nc" id="L79">    public HttpDiscovery(NetworkParameters params, Details details,  OkHttpClient client) {</span>
+<span class="nc" id="L80">        checkArgument(details.uri.getScheme().startsWith(&quot;http&quot;));</span>
+<span class="nc" id="L81">        this.details = details;</span>
+<span class="nc" id="L82">        this.params = params;</span>
+<span class="nc" id="L83">        this.client = client;</span>
+<span class="nc" id="L84">    }</span>
+
+    @Override
+    public InetSocketAddress[] getPeers(long services, long timeoutValue, TimeUnit timeoutUnit) throws PeerDiscoveryException {
+        try {
+<span class="nc" id="L89">            HttpUrl.Builder url = HttpUrl.get(details.uri).newBuilder();</span>
+<span class="nc bnc" id="L90" title="All 2 branches missed.">            if (services != 0)</span>
+<span class="nc" id="L91">                url.addQueryParameter(&quot;srvmask&quot;, Long.toString(services));</span>
+<span class="nc" id="L92">            Request.Builder request = new Request.Builder();</span>
+<span class="nc" id="L93">            request.url(url.build());</span>
+<span class="nc" id="L94">            request.addHeader(&quot;User-Agent&quot;, VersionMessage.LIBRARY_SUBVER); // TODO Add main version.</span>
+<span class="nc" id="L95">            log.info(&quot;Requesting seeds from {}&quot;, url);</span>
+<span class="nc" id="L96">            Response response = client.newCall(request.build()).execute();</span>
+<span class="nc bnc" id="L97" title="All 2 branches missed.">            if (!response.isSuccessful())</span>
+<span class="nc" id="L98">                throw new PeerDiscoveryException(&quot;HTTP request failed: &quot; + response.code() + &quot; &quot; + response.message());</span>
+<span class="nc" id="L99">            InputStream stream = response.body().byteStream();</span>
+<span class="nc" id="L100">            GZIPInputStream zip = new GZIPInputStream(stream);</span>
+            PeerSeedProtos.SignedPeerSeeds proto;
+            try {
+<span class="nc" id="L103">                proto = PeerSeedProtos.SignedPeerSeeds.parseDelimitedFrom(zip);</span>
+            } finally {
+<span class="nc" id="L105">                zip.close(); // will close InputStream as well</span>
+<span class="nc" id="L106">            }</span>
+
+<span class="nc" id="L108">            return protoToAddrs(proto);</span>
+<span class="nc" id="L109">        } catch (PeerDiscoveryException e1) {</span>
+<span class="nc" id="L110">            throw e1;</span>
+<span class="nc" id="L111">        } catch (Exception e) {</span>
+<span class="nc" id="L112">            throw new PeerDiscoveryException(e);</span>
+        }
+    }
+
+    @VisibleForTesting
+    public InetSocketAddress[] protoToAddrs(PeerSeedProtos.SignedPeerSeeds proto) throws PeerDiscoveryException, InvalidProtocolBufferException, SignatureException {
+<span class="nc bnc" id="L118" title="All 2 branches missed.">        if (details.pubkey != null) {</span>
+<span class="nc bnc" id="L119" title="All 2 branches missed.">            if (!Arrays.equals(proto.getPubkey().toByteArray(), details.pubkey.getPubKey()))</span>
+<span class="nc" id="L120">                throw new PeerDiscoveryException(&quot;Public key mismatch&quot;);</span>
+<span class="nc" id="L121">            byte[] hash = Sha256Hash.hash(proto.getPeerSeeds().toByteArray());</span>
+<span class="nc" id="L122">            details.pubkey.verifyOrThrow(hash, proto.getSignature().toByteArray());</span>
+        }
+<span class="nc" id="L124">        PeerSeedProtos.PeerSeeds seeds = PeerSeedProtos.PeerSeeds.parseFrom(proto.getPeerSeeds());</span>
+<span class="nc bnc" id="L125" title="All 2 branches missed.">        if (seeds.getTimestamp() &lt; Utils.currentTimeSeconds() - (60 * 60 * 24))</span>
+<span class="nc" id="L126">            throw new PeerDiscoveryException(&quot;Seed data is more than one day old: replay attack?&quot;);</span>
+<span class="nc bnc" id="L127" title="All 2 branches missed.">        if (!seeds.getNet().equals(params.getPaymentProtocolId()))</span>
+<span class="nc" id="L128">            throw new PeerDiscoveryException(&quot;Network mismatch&quot;);</span>
+<span class="nc" id="L129">        InetSocketAddress[] results = new InetSocketAddress[seeds.getSeedCount()];</span>
+<span class="nc" id="L130">        int i = 0;</span>
+<span class="nc bnc" id="L131" title="All 2 branches missed.">        for (PeerSeedProtos.PeerSeedData data : seeds.getSeedList())</span>
+<span class="nc" id="L132">            results[i++] = new InetSocketAddress(data.getIpAddress(), data.getPort());</span>
+<span class="nc" id="L133">        return results;</span>
+    }
+
+    @Override
+    public void shutdown() {
+<span class="nc" id="L138">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

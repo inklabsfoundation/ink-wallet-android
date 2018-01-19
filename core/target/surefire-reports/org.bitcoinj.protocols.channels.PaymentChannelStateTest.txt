@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: org.bitcoinj.protocols.channels.PaymentChannelStateTest
+-------------------------------------------------------------------------------
+Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.002 sec - in org.bitcoinj.protocols.channels.PaymentChannelStateTest

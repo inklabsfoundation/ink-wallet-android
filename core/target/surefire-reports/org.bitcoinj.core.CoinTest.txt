@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: org.bitcoinj.core.CoinTest
+-------------------------------------------------------------------------------
+Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 sec - in org.bitcoinj.core.CoinTest

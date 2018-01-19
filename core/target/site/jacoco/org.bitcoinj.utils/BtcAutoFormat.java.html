@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>BtcAutoFormat.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.utils</a> &gt; <span class="el_source">BtcAutoFormat.java</span></div><h1>BtcAutoFormat.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 Adam Mackler
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.utils;
+
+import static org.bitcoinj.core.Coin.SMALLEST_UNIT_EXPONENT;
+import com.google.common.collect.ImmutableList;
+
+import java.math.BigInteger;
+import static java.math.BigDecimal.ONE;
+import static java.math.BigDecimal.ZERO;
+import java.math.BigDecimal;
+import static java.math.RoundingMode.HALF_UP;
+
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.text.NumberFormat;
+
+import java.util.Locale;
+
+/**
+ * &lt;p&gt;This class, a concrete extension of {@link BtcFormat}, is distinguished by its
+ * accommodation of multiple denominational units as follows:
+ *
+ * &lt;p&gt;When formatting Bitcoin monetary values, an instance of this class automatically adjusts
+ * the denominational units in which it represents a given value so as to minimize the number
+ * of consecutive zeros in the number that is displayed, and includes either a currency code or
+ * symbol in the formatted value to indicate which denomination was chosen.
+ *
+ * &lt;p&gt;When parsing &lt;code&gt;String&lt;/code&gt; representations of Bitcoin monetary values, instances of
+ * this class automatically recognize units indicators consisting of currency codes and
+ * symbols, including including those containing currency or metric prefixes such as
+ * &lt;code&gt;&quot;¢&quot;&lt;/code&gt; or &lt;code&gt;&quot;c&quot;&lt;/code&gt; to indicate hundredths, and interpret each number being
+ * parsed in accordance with the recognized denominational units.
+ *
+ * &lt;p&gt;A more detailed explanation, including examples, is in the documentation for the {@link
+ * BtcFormat} class, and further information beyond that is in the documentation for the {@link
+ * java.text.Format} class, from which this class descends.
+
+ * @see          java.text.Format
+ * @see          java.text.NumberFormat
+ * @see          java.text.DecimalFormat
+ * @see          DecimalFormatSymbols
+ * @see          org.bitcoinj.core.Coin
+ */
+
+public final class BtcAutoFormat extends BtcFormat {
+
+    /**
+     * Enum for specifying the style of currency indicators thas are used
+     * when formatting, ether codes or symbols.
+     */
+<span class="pc" id="L66">    public enum Style {</span>
+
+        /* Notes:
+         * 1) The odd-looking character in the replacements below, named &quot;currency sign,&quot; is used in
+         *    the patterns recognized by Java's number formatter.  A single occurrence of this
+         *    character specifies a currency symbol, while two adjacent occurrences indicate an
+         *    international currency code.
+         * 2) The positive and negative patterns each have three parts: prefix, number, suffix.
+         *    The number characters are limited to digits, zero, decimal-separator, group-separator, and
+         *    scientific-notation specifier: [#0.,E]
+         *    All number characters besides 'E' must be single-quoted in order to appear as
+         *    literals in either the prefix or suffix.
+         * These patterns are explained in the documentation for java.text.DecimalFormat.
+         */
+
+        /** Constant for the formatting style that uses a currency code, e.g., &quot;BTC&quot;. */
+<span class="fc" id="L82">        CODE {</span>
+            @Override void apply(DecimalFormat decimalFormat) {
+                /* To switch to using codes from symbols, we replace each single occurrence of the
+                 * currency-sign character with two such characters in a row.
+                 * We also insert a space character between every occurence of this character and an
+                 * adjacent numerical digit or negative sign (that is, between the currency-sign and
+                 * the signed-number). */
+<span class="fc" id="L89">                decimalFormat.applyPattern(</span>
+<span class="fc" id="L90">                    negify(decimalFormat.toPattern()).replaceAll(&quot;¤&quot;,&quot;¤¤&quot;).</span>
+<span class="fc" id="L91">                                                      replaceAll(&quot;([#0.,E-])¤¤&quot;,&quot;$1 ¤¤&quot;).</span>
+<span class="fc" id="L92">                                                      replaceAll(&quot;¤¤([0#.,E-])&quot;,&quot;¤¤ $1&quot;)</span>
+                );
+<span class="fc" id="L94">            }</span>
+        },
+
+        /** Constant for the formatting style that uses a currency symbol, e.g., &quot;฿&quot;. */
+<span class="fc" id="L98">        SYMBOL {</span>
+            @Override void apply(DecimalFormat decimalFormat) {
+                /* To make certain we are using symbols rather than codes, we replace
+                 * each double occurrence of the currency sign character with a single. */
+<span class="fc" id="L102">                decimalFormat.applyPattern(negify(decimalFormat.toPattern()).replaceAll(&quot;¤¤&quot;,&quot;¤&quot;));</span>
+<span class="fc" id="L103">            }</span>
+        };
+
+        /** Effect a style corresponding to an enum value on the given number formatter object. */
+        abstract void apply(DecimalFormat decimalFormat);
+    }
+
+    /** Constructor */
+    protected BtcAutoFormat(Locale locale, Style style, int fractionPlaces) {
+<span class="fc" id="L112">        super((DecimalFormat)NumberFormat.getCurrencyInstance(locale), fractionPlaces, ImmutableList.&lt;Integer&gt;of());</span>
+<span class="fc" id="L113">        style.apply(this.numberFormat);</span>
+<span class="fc" id="L114">    }</span>
+
+    /**
+     * Calculate the appropriate denomination for the given Bitcoin monetary value.  This
+     * method takes a BigInteger representing a quantity of satoshis, and returns the
+     * number of places that value's decimal point is to be moved when formatting said value
+     * in order that the resulting number represents the correct quantity of denominational
+     * units.
+     *
+     * &lt;p&gt;As a side-effect, this sets the units indicators of the underlying NumberFormat object.
+     * Only invoke this from a synchronized method, and be sure to put the DecimalFormatSymbols
+     * back to its proper state, otherwise immutability, equals() and hashCode() fail.
+     */
+    @Override
+    protected int scale(BigInteger satoshis, int fractionPlaces) {
+        /* The algorithm is as follows.  TODO: is there a way to optimize step 4?
+           1. Can we use coin denomination w/ no rounding?  If yes, do it.
+           2. Else, can we use millicoin denomination w/ no rounding? If yes, do it.
+           3. Else, can we use micro denomination w/ no rounding?  If yes, do it.
+           4. Otherwise we must round:
+             (a) round to nearest coin + decimals
+             (b) round to nearest millicoin + decimals
+             (c) round to nearest microcoin + decimals
+             Subtract each of (a), (b) and (c) from the true value, and choose the
+             denomination that gives smallest absolute difference.  It case of tie, use the
+             smaller denomination.
+        */
+        int places;
+<span class="fc" id="L142">        int coinOffset = Math.max(SMALLEST_UNIT_EXPONENT - fractionPlaces, 0);</span>
+<span class="fc" id="L143">        BigDecimal inCoins = new BigDecimal(satoshis).movePointLeft(coinOffset);</span>
+<span class="fc bfc" id="L144" title="All 2 branches covered.">        if (inCoins.remainder(ONE).compareTo(ZERO) == 0) {</span>
+<span class="fc" id="L145">            places = COIN_SCALE;</span>
+        } else {
+<span class="fc" id="L147">            BigDecimal inMillis = inCoins.movePointRight(MILLICOIN_SCALE);</span>
+<span class="fc bfc" id="L148" title="All 2 branches covered.">            if (inMillis.remainder(ONE).compareTo(ZERO) == 0) {</span>
+<span class="fc" id="L149">                places = MILLICOIN_SCALE;</span>
+            } else {
+<span class="fc" id="L151">                BigDecimal inMicros = inCoins.movePointRight(MICROCOIN_SCALE);</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">                if (inMicros.remainder(ONE).compareTo(ZERO) == 0) {</span>
+<span class="fc" id="L153">                    places = MICROCOIN_SCALE;</span>
+                } else {
+                    // no way to avoid rounding: so what denomination gives smallest error?
+<span class="fc" id="L156">                    BigDecimal a = inCoins.subtract(inCoins.setScale(0, HALF_UP)).</span>
+<span class="fc" id="L157">                                   movePointRight(coinOffset).abs();</span>
+<span class="fc" id="L158">                    BigDecimal b = inMillis.subtract(inMillis.setScale(0, HALF_UP)).</span>
+<span class="fc" id="L159">                                   movePointRight(coinOffset - MILLICOIN_SCALE).abs();</span>
+<span class="fc" id="L160">                    BigDecimal c = inMicros.subtract(inMicros.setScale(0, HALF_UP)).</span>
+<span class="fc" id="L161">                                   movePointRight(coinOffset - MICROCOIN_SCALE).abs();</span>
+<span class="pc bpc" id="L162" title="1 of 2 branches missed.">                    if (a.compareTo(b) &lt; 0)</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">                        if (a.compareTo(c) &lt; 0) places = COIN_SCALE;</span>
+<span class="nc" id="L164">                        else places = MICROCOIN_SCALE;</span>
+<span class="pc bpc" id="L165" title="1 of 2 branches missed.">                    else if (b.compareTo(c) &lt; 0) places = MILLICOIN_SCALE;</span>
+<span class="fc" id="L166">                    else places = MICROCOIN_SCALE;</span>
+                }
+            }
+        }
+<span class="fc" id="L170">        prefixUnitsIndicator(numberFormat, places);</span>
+<span class="fc" id="L171">        return places;</span>
+    }
+
+    /** Returns the &lt;code&gt;int&lt;/code&gt; value indicating coin denomination.  This is what causes
+     *  the number in a parsed value that lacks a units indicator to be interpreted as a quantity
+     *  of bitcoins. */
+    @Override
+<span class="nc" id="L178">    protected int scale() { return COIN_SCALE; }</span>
+
+    /** Return the number of decimal places in the fraction part of numbers formatted by this
+     *  instance.  This is the maximum number of fraction places that will be displayed;
+     *  the actual number used is limited to a precision of satoshis. */
+<span class="fc" id="L183">    public int fractionPlaces() { return minimumFractionDigits; }</span>
+
+    /** Return true if the other instance is equivalent to this one.
+      * Formatters for different locales will never be equal, even
+      * if they behave identically. */
+    @Override public boolean equals(Object o) {
+<span class="pc bpc" id="L189" title="1 of 2 branches missed.">        if (this == o) return true;</span>
+<span class="pc bpc" id="L190" title="1 of 2 branches missed.">        if (!(o instanceof BtcAutoFormat)) return false;</span>
+<span class="fc" id="L191">        return super.equals(o);</span>
+    }
+
+    /**
+     * Return a brief description of this formatter. The exact details of the representation
+     * are unspecified and subject to change, but will include some representation of the
+     * pattern and the number of fractional decimal places.
+     */
+    @Override
+<span class="fc" id="L200">    public String toString() { return &quot;Auto-format &quot; + pattern(); }</span>
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

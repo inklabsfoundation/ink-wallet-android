@@ -1,0 +1,844 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>WalletProtobufSerializer.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.wallet</a> &gt; <span class="el_source">WalletProtobufSerializer.java</span></div><h1>WalletProtobufSerializer.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2012 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.wallet;
+
+import org.bitcoinj.core.*;
+import org.bitcoinj.core.TransactionConfidence.ConfidenceType;
+import org.bitcoinj.crypto.KeyCrypter;
+import org.bitcoinj.crypto.KeyCrypterScrypt;
+import org.bitcoinj.script.Script;
+import org.bitcoinj.script.ScriptException;
+import org.bitcoinj.signers.LocalTransactionSigner;
+import org.bitcoinj.signers.TransactionSigner;
+import org.bitcoinj.utils.ExchangeRate;
+import org.bitcoinj.utils.Fiat;
+import org.bitcoinj.wallet.Protos.Wallet.EncryptionType;
+
+import com.google.common.collect.Lists;
+import com.google.protobuf.ByteString;
+import com.google.protobuf.CodedInputStream;
+import com.google.protobuf.CodedOutputStream;
+import com.google.protobuf.TextFormat;
+import com.google.protobuf.WireFormat;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.math.BigInteger;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.*;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+
+/**
+ * Serialize and de-serialize a wallet to a byte stream containing a
+ * &lt;a href=&quot;https://developers.google.com/protocol-buffers/docs/overview&quot;&gt;protocol buffer&lt;/a&gt;. Protocol buffers are
+ * a data interchange format developed by Google with an efficient binary representation, a type safe specification
+ * language and compilers that generate code to work with those data structures for many languages. Protocol buffers
+ * can have their format evolved over time: conceptually they represent data using (tag, length, value) tuples. The
+ * format is defined by the &lt;tt&gt;wallet.proto&lt;/tt&gt; file in the bitcoinj source distribution.&lt;p&gt;
+ *
+ * This class is used through its static methods. The most common operations are writeWallet and readWallet, which do
+ * the obvious operations on Output/InputStreams. You can use a {@link java.io.ByteArrayInputStream} and equivalent
+ * {@link java.io.ByteArrayOutputStream} if you'd like byte arrays instead. The protocol buffer can also be manipulated
+ * in its object form if you'd like to modify the flattened data structure before serialization to binary.&lt;p&gt;
+ *
+ * You can extend the wallet format with additional fields specific to your application if you want, but make sure
+ * to either put the extra data in the provided extension areas, or select tag numbers that are unlikely to be used
+ * by anyone else.&lt;p&gt;
+ *
+ * @author Miron Cuperman
+ * @author Andreas Schildbach
+ */
+public class WalletProtobufSerializer {
+<span class="fc" id="L74">    private static final Logger log = LoggerFactory.getLogger(WalletProtobufSerializer.class);</span>
+    /** Current version used for serializing wallets. A version higher than this is considered from the future. */
+<span class="fc" id="L76">    public static final int CURRENT_WALLET_VERSION = Protos.Wallet.getDefaultInstance().getVersion();</span>
+    // 512 MB
+    private static final int WALLET_SIZE_LIMIT = 512 * 1024 * 1024;
+    // Used for de-serialization
+    protected Map&lt;ByteString, Transaction&gt; txMap;
+
+<span class="fc" id="L82">    private boolean requireMandatoryExtensions = true;</span>
+<span class="fc" id="L83">    private boolean requireAllExtensionsKnown = false;</span>
+<span class="fc" id="L84">    private int walletWriteBufferSize = CodedOutputStream.DEFAULT_BUFFER_SIZE;</span>
+
+    public interface WalletFactory {
+        Wallet create(NetworkParameters params, KeyChainGroup keyChainGroup);
+    }
+
+    private final WalletFactory factory;
+    private KeyChainFactory keyChainFactory;
+
+    public WalletProtobufSerializer() {
+<span class="fc" id="L94">        this(new WalletFactory() {</span>
+            @Override
+            public Wallet create(NetworkParameters params, KeyChainGroup keyChainGroup) {
+<span class="fc" id="L97">                return new Wallet(params, keyChainGroup);</span>
+            }
+        });
+<span class="fc" id="L100">    }</span>
+
+<span class="fc" id="L102">    public WalletProtobufSerializer(WalletFactory factory) {</span>
+<span class="fc" id="L103">        txMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L104">        this.factory = factory;</span>
+<span class="fc" id="L105">        this.keyChainFactory = new DefaultKeyChainFactory();</span>
+<span class="fc" id="L106">    }</span>
+
+    public void setKeyChainFactory(KeyChainFactory keyChainFactory) {
+<span class="nc" id="L109">        this.keyChainFactory = keyChainFactory;</span>
+<span class="nc" id="L110">    }</span>
+
+    /**
+     * If this property is set to false, then unknown mandatory extensions will be ignored instead of causing load
+     * errors. You should only use this if you know exactly what you are doing, as the extension data will NOT be
+     * round-tripped, possibly resulting in a corrupted wallet if you save it back out again.
+     */
+    public void setRequireMandatoryExtensions(boolean value) {
+<span class="nc" id="L118">        requireMandatoryExtensions = value;</span>
+<span class="nc" id="L119">    }</span>
+
+    /**
+     * If this property is set to true, the wallet will fail to load if  any found extensions are unknown..
+     */
+    public void setRequireAllExtensionsKnown(boolean value) {
+<span class="nc" id="L125">        requireAllExtensionsKnown = value;</span>
+<span class="nc" id="L126">    }</span>
+
+    /**
+     * Change buffer size for writing wallet to output stream. Default is {@link com.google.protobuf.CodedOutputStream#DEFAULT_BUFFER_SIZE}
+     * @param walletWriteBufferSize - buffer size in bytes
+     */
+    public void setWalletWriteBufferSize(int walletWriteBufferSize) {
+<span class="nc" id="L133">        this.walletWriteBufferSize = walletWriteBufferSize;</span>
+<span class="nc" id="L134">    }</span>
+
+    /**
+     * Formats the given wallet (transactions and keys) to the given output stream in protocol buffer format.&lt;p&gt;
+     *
+     * Equivalent to &lt;tt&gt;walletToProto(wallet).writeTo(output);&lt;/tt&gt;
+     */
+    public void writeWallet(Wallet wallet, OutputStream output) throws IOException {
+<span class="fc" id="L142">        Protos.Wallet walletProto = walletToProto(wallet);</span>
+<span class="fc" id="L143">        final CodedOutputStream codedOutput = CodedOutputStream.newInstance(output, this.walletWriteBufferSize);</span>
+<span class="fc" id="L144">        walletProto.writeTo(codedOutput);</span>
+<span class="fc" id="L145">        codedOutput.flush();</span>
+<span class="fc" id="L146">    }</span>
+
+    /**
+     * Returns the given wallet formatted as text. The text format is that used by protocol buffers and although it
+     * can also be parsed using {@link TextFormat#merge(CharSequence, com.google.protobuf.Message.Builder)},
+     * it is designed more for debugging than storage. It is not well specified and wallets are largely binary data
+     * structures anyway, consisting as they do of keys (large random numbers) and {@link Transaction}s which also
+     * mostly contain keys and hashes.
+     */
+    public String walletToText(Wallet wallet) {
+<span class="nc" id="L156">        Protos.Wallet walletProto = walletToProto(wallet);</span>
+<span class="nc" id="L157">        return TextFormat.printToString(walletProto);</span>
+    }
+
+    /**
+     * Converts the given wallet to the object representation of the protocol buffers. This can be modified, or
+     * additional data fields set, before serialization takes place.
+     */
+    public Protos.Wallet walletToProto(Wallet wallet) {
+<span class="fc" id="L165">        Protos.Wallet.Builder walletBuilder = Protos.Wallet.newBuilder();</span>
+<span class="fc" id="L166">        walletBuilder.setNetworkIdentifier(wallet.getNetworkParameters().getId());</span>
+<span class="fc bfc" id="L167" title="All 2 branches covered.">        if (wallet.getDescription() != null) {</span>
+<span class="fc" id="L168">            walletBuilder.setDescription(wallet.getDescription());</span>
+        }
+
+<span class="fc bfc" id="L171" title="All 2 branches covered.">        for (WalletTransaction wtx : wallet.getWalletTransactions()) {</span>
+<span class="fc" id="L172">            Protos.Transaction txProto = makeTxProto(wtx);</span>
+<span class="fc" id="L173">            walletBuilder.addTransaction(txProto);</span>
+<span class="fc" id="L174">        }</span>
+
+<span class="fc" id="L176">        walletBuilder.addAllKey(wallet.serializeKeyChainGroupToProtobuf());</span>
+
+<span class="fc bfc" id="L178" title="All 2 branches covered.">        for (Script script : wallet.getWatchedScripts()) {</span>
+            Protos.Script protoScript =
+<span class="fc" id="L180">                    Protos.Script.newBuilder()</span>
+<span class="fc" id="L181">                            .setProgram(ByteString.copyFrom(script.getProgram()))</span>
+<span class="fc" id="L182">                            .setCreationTimestamp(script.getCreationTimeSeconds() * 1000)</span>
+<span class="fc" id="L183">                            .build();</span>
+
+<span class="fc" id="L185">            walletBuilder.addWatchedScript(protoScript);</span>
+<span class="fc" id="L186">        }</span>
+
+        // Populate the lastSeenBlockHash field.
+<span class="fc" id="L189">        Sha256Hash lastSeenBlockHash = wallet.getLastBlockSeenHash();</span>
+<span class="fc bfc" id="L190" title="All 2 branches covered.">        if (lastSeenBlockHash != null) {</span>
+<span class="fc" id="L191">            walletBuilder.setLastSeenBlockHash(hashToByteString(lastSeenBlockHash));</span>
+<span class="fc" id="L192">            walletBuilder.setLastSeenBlockHeight(wallet.getLastBlockSeenHeight());</span>
+        }
+<span class="fc bfc" id="L194" title="All 2 branches covered.">        if (wallet.getLastBlockSeenTimeSecs() &gt; 0)</span>
+<span class="fc" id="L195">            walletBuilder.setLastSeenBlockTimeSecs(wallet.getLastBlockSeenTimeSecs());</span>
+
+        // Populate the scrypt parameters.
+<span class="fc" id="L198">        KeyCrypter keyCrypter = wallet.getKeyCrypter();</span>
+<span class="fc bfc" id="L199" title="All 2 branches covered.">        if (keyCrypter == null) {</span>
+            // The wallet is unencrypted.
+<span class="fc" id="L201">            walletBuilder.setEncryptionType(EncryptionType.UNENCRYPTED);</span>
+        } else {
+            // The wallet is encrypted.
+<span class="fc" id="L204">            walletBuilder.setEncryptionType(keyCrypter.getUnderstoodEncryptionType());</span>
+<span class="pc bpc" id="L205" title="1 of 2 branches missed.">            if (keyCrypter instanceof KeyCrypterScrypt) {</span>
+<span class="fc" id="L206">                KeyCrypterScrypt keyCrypterScrypt = (KeyCrypterScrypt) keyCrypter;</span>
+<span class="fc" id="L207">                walletBuilder.setEncryptionParameters(keyCrypterScrypt.getScryptParameters());</span>
+<span class="fc" id="L208">            } else {</span>
+                // Some other form of encryption has been specified that we do not know how to persist.
+<span class="nc" id="L210">                throw new RuntimeException(&quot;The wallet has encryption of type '&quot; + keyCrypter.getUnderstoodEncryptionType() + &quot;' but this WalletProtobufSerializer does not know how to persist this.&quot;);</span>
+            }
+        }
+
+<span class="fc bfc" id="L214" title="All 2 branches covered.">        if (wallet.getKeyRotationTime() != null) {</span>
+<span class="fc" id="L215">            long timeSecs = wallet.getKeyRotationTime().getTime() / 1000;</span>
+<span class="fc" id="L216">            walletBuilder.setKeyRotationTime(timeSecs);</span>
+        }
+
+<span class="fc" id="L219">        populateExtensions(wallet, walletBuilder);</span>
+
+<span class="fc bfc" id="L221" title="All 2 branches covered.">        for (Map.Entry&lt;String, ByteString&gt; entry : wallet.getTags().entrySet()) {</span>
+<span class="fc" id="L222">            Protos.Tag.Builder tag = Protos.Tag.newBuilder().setTag(entry.getKey()).setData(entry.getValue());</span>
+<span class="fc" id="L223">            walletBuilder.addTags(tag);</span>
+<span class="fc" id="L224">        }</span>
+
+<span class="fc bfc" id="L226" title="All 2 branches covered.">        for (TransactionSigner signer : wallet.getTransactionSigners()) {</span>
+            // do not serialize LocalTransactionSigner as it's being added implicitly
+<span class="fc bfc" id="L228" title="All 2 branches covered.">            if (signer instanceof LocalTransactionSigner)</span>
+<span class="fc" id="L229">                continue;</span>
+<span class="fc" id="L230">            Protos.TransactionSigner.Builder protoSigner = Protos.TransactionSigner.newBuilder();</span>
+<span class="fc" id="L231">            protoSigner.setClassName(signer.getClass().getName());</span>
+<span class="fc" id="L232">            protoSigner.setData(ByteString.copyFrom(signer.serialize()));</span>
+<span class="fc" id="L233">            walletBuilder.addTransactionSigners(protoSigner);</span>
+<span class="fc" id="L234">        }</span>
+
+        // Populate the wallet version.
+<span class="fc" id="L237">        walletBuilder.setVersion(wallet.getVersion());</span>
+
+<span class="fc" id="L239">        return walletBuilder.build();</span>
+    }
+
+    private static void populateExtensions(Wallet wallet, Protos.Wallet.Builder walletBuilder) {
+<span class="fc bfc" id="L243" title="All 2 branches covered.">        for (WalletExtension extension : wallet.getExtensions().values()) {</span>
+<span class="fc" id="L244">            Protos.Extension.Builder proto = Protos.Extension.newBuilder();</span>
+<span class="fc" id="L245">            proto.setId(extension.getWalletExtensionID());</span>
+<span class="fc" id="L246">            proto.setMandatory(extension.isWalletExtensionMandatory());</span>
+<span class="fc" id="L247">            proto.setData(ByteString.copyFrom(extension.serializeWalletExtension()));</span>
+<span class="fc" id="L248">            walletBuilder.addExtension(proto);</span>
+<span class="fc" id="L249">        }</span>
+<span class="fc" id="L250">    }</span>
+
+    private static Protos.Transaction makeTxProto(WalletTransaction wtx) {
+<span class="fc" id="L253">        Transaction tx = wtx.getTransaction();</span>
+<span class="fc" id="L254">        Protos.Transaction.Builder txBuilder = Protos.Transaction.newBuilder();</span>
+
+<span class="fc" id="L256">        txBuilder.setPool(getProtoPool(wtx))</span>
+<span class="fc" id="L257">                 .setHash(hashToByteString(tx.getHash()))</span>
+<span class="fc" id="L258">                 .setVersion((int) tx.getVersion());</span>
+
+<span class="pc bpc" id="L260" title="1 of 2 branches missed.">        if (tx.getUpdateTime() != null) {</span>
+<span class="fc" id="L261">            txBuilder.setUpdatedAt(tx.getUpdateTime().getTime());</span>
+        }
+
+<span class="fc bfc" id="L264" title="All 2 branches covered.">        if (tx.getLockTime() &gt; 0) {</span>
+<span class="fc" id="L265">            txBuilder.setLockTime((int)tx.getLockTime());</span>
+        }
+
+        // Handle inputs.
+<span class="fc bfc" id="L269" title="All 2 branches covered.">        for (TransactionInput input : tx.getInputs()) {</span>
+<span class="fc" id="L270">            Protos.TransactionInput.Builder inputBuilder = Protos.TransactionInput.newBuilder()</span>
+<span class="fc" id="L271">                .setScriptBytes(ByteString.copyFrom(input.getScriptBytes()))</span>
+<span class="fc" id="L272">                .setTransactionOutPointHash(hashToByteString(input.getOutpoint().getHash()))</span>
+<span class="fc" id="L273">                .setTransactionOutPointIndex((int) input.getOutpoint().getIndex());</span>
+<span class="fc bfc" id="L274" title="All 2 branches covered.">            if (input.hasSequence())</span>
+<span class="fc" id="L275">                inputBuilder.setSequence((int) input.getSequenceNumber());</span>
+<span class="fc bfc" id="L276" title="All 2 branches covered.">            if (input.getValue() != null)</span>
+<span class="fc" id="L277">                inputBuilder.setValue(input.getValue().value);</span>
+<span class="fc" id="L278">            txBuilder.addTransactionInput(inputBuilder);</span>
+<span class="fc" id="L279">        }</span>
+
+        // Handle outputs.
+<span class="fc bfc" id="L282" title="All 2 branches covered.">        for (TransactionOutput output : tx.getOutputs()) {</span>
+<span class="fc" id="L283">            Protos.TransactionOutput.Builder outputBuilder = Protos.TransactionOutput.newBuilder()</span>
+<span class="fc" id="L284">                .setScriptBytes(ByteString.copyFrom(output.getScriptBytes()))</span>
+<span class="fc" id="L285">                .setValue(output.getValue().value);</span>
+<span class="fc" id="L286">            final TransactionInput spentBy = output.getSpentBy();</span>
+<span class="fc bfc" id="L287" title="All 2 branches covered.">            if (spentBy != null) {</span>
+<span class="fc" id="L288">                Sha256Hash spendingHash = spentBy.getParentTransaction().getHash();</span>
+<span class="fc" id="L289">                int spentByTransactionIndex = spentBy.getParentTransaction().getInputs().indexOf(spentBy);</span>
+<span class="fc" id="L290">                outputBuilder.setSpentByTransactionHash(hashToByteString(spendingHash))</span>
+<span class="fc" id="L291">                             .setSpentByTransactionIndex(spentByTransactionIndex);</span>
+            }
+<span class="fc" id="L293">            txBuilder.addTransactionOutput(outputBuilder);</span>
+<span class="fc" id="L294">        }</span>
+
+        // Handle which blocks tx was seen in.
+<span class="fc" id="L297">        final Map&lt;Sha256Hash, Integer&gt; appearsInHashes = tx.getAppearsInHashes();</span>
+<span class="fc bfc" id="L298" title="All 2 branches covered.">        if (appearsInHashes != null) {</span>
+<span class="fc bfc" id="L299" title="All 2 branches covered.">            for (Map.Entry&lt;Sha256Hash, Integer&gt; entry : appearsInHashes.entrySet()) {</span>
+<span class="fc" id="L300">                txBuilder.addBlockHash(hashToByteString(entry.getKey()));</span>
+<span class="fc" id="L301">                txBuilder.addBlockRelativityOffsets(entry.getValue());</span>
+<span class="fc" id="L302">            }</span>
+        }
+
+<span class="fc bfc" id="L305" title="All 2 branches covered.">        if (tx.hasConfidence()) {</span>
+<span class="fc" id="L306">            TransactionConfidence confidence = tx.getConfidence();</span>
+<span class="fc" id="L307">            Protos.TransactionConfidence.Builder confidenceBuilder = Protos.TransactionConfidence.newBuilder();</span>
+<span class="fc" id="L308">            writeConfidence(txBuilder, confidence, confidenceBuilder);</span>
+        }
+
+        Protos.Transaction.Purpose purpose;
+<span class="pc bpc" id="L312" title="4 of 8 branches missed.">        switch (tx.getPurpose()) {</span>
+<span class="fc" id="L313">            case UNKNOWN: purpose = Protos.Transaction.Purpose.UNKNOWN; break;</span>
+<span class="fc" id="L314">            case USER_PAYMENT: purpose = Protos.Transaction.Purpose.USER_PAYMENT; break;</span>
+<span class="fc" id="L315">            case KEY_ROTATION: purpose = Protos.Transaction.Purpose.KEY_ROTATION; break;</span>
+<span class="nc" id="L316">            case ASSURANCE_CONTRACT_CLAIM: purpose = Protos.Transaction.Purpose.ASSURANCE_CONTRACT_CLAIM; break;</span>
+<span class="nc" id="L317">            case ASSURANCE_CONTRACT_PLEDGE: purpose = Protos.Transaction.Purpose.ASSURANCE_CONTRACT_PLEDGE; break;</span>
+<span class="nc" id="L318">            case ASSURANCE_CONTRACT_STUB: purpose = Protos.Transaction.Purpose.ASSURANCE_CONTRACT_STUB; break;</span>
+<span class="fc" id="L319">            case RAISE_FEE: purpose = Protos.Transaction.Purpose.RAISE_FEE; break;</span>
+            default:
+<span class="nc" id="L321">                throw new RuntimeException(&quot;New tx purpose serialization not implemented.&quot;);</span>
+        }
+<span class="fc" id="L323">        txBuilder.setPurpose(purpose);</span>
+
+<span class="fc" id="L325">        ExchangeRate exchangeRate = tx.getExchangeRate();</span>
+<span class="pc bpc" id="L326" title="1 of 2 branches missed.">        if (exchangeRate != null) {</span>
+<span class="nc" id="L327">            Protos.ExchangeRate.Builder exchangeRateBuilder = Protos.ExchangeRate.newBuilder()</span>
+<span class="nc" id="L328">                    .setCoinValue(exchangeRate.coin.value).setFiatValue(exchangeRate.fiat.value)</span>
+<span class="nc" id="L329">                    .setFiatCurrencyCode(exchangeRate.fiat.currencyCode);</span>
+<span class="nc" id="L330">            txBuilder.setExchangeRate(exchangeRateBuilder);</span>
+        }
+
+<span class="pc bpc" id="L333" title="1 of 2 branches missed.">        if (tx.getMemo() != null)</span>
+<span class="nc" id="L334">            txBuilder.setMemo(tx.getMemo());</span>
+
+<span class="fc" id="L336">        return txBuilder.build();</span>
+    }
+
+    private static Protos.Transaction.Pool getProtoPool(WalletTransaction wtx) {
+<span class="pc bpc" id="L340" title="1 of 5 branches missed.">        switch (wtx.getPool()) {</span>
+<span class="fc" id="L341">            case UNSPENT: return Protos.Transaction.Pool.UNSPENT;</span>
+<span class="fc" id="L342">            case SPENT: return Protos.Transaction.Pool.SPENT;</span>
+<span class="fc" id="L343">            case DEAD: return Protos.Transaction.Pool.DEAD;</span>
+<span class="fc" id="L344">            case PENDING: return Protos.Transaction.Pool.PENDING;</span>
+            default:
+<span class="nc" id="L346">                throw new RuntimeException(&quot;Unreachable&quot;);</span>
+        }
+    }
+
+    private static void writeConfidence(Protos.Transaction.Builder txBuilder,
+                                        TransactionConfidence confidence,
+                                        Protos.TransactionConfidence.Builder confidenceBuilder) {
+<span class="fc" id="L353">        synchronized (confidence) {</span>
+<span class="fc" id="L354">            confidenceBuilder.setType(Protos.TransactionConfidence.Type.valueOf(confidence.getConfidenceType().getValue()));</span>
+<span class="fc bfc" id="L355" title="All 2 branches covered.">            if (confidence.getConfidenceType() == ConfidenceType.BUILDING) {</span>
+<span class="fc" id="L356">                confidenceBuilder.setAppearedAtHeight(confidence.getAppearedAtChainHeight());</span>
+<span class="fc" id="L357">                confidenceBuilder.setDepth(confidence.getDepthInBlocks());</span>
+            }
+<span class="fc bfc" id="L359" title="All 2 branches covered.">            if (confidence.getConfidenceType() == ConfidenceType.DEAD) {</span>
+                // Copy in the overriding transaction, if available.
+                // (A dead coinbase transaction has no overriding transaction).
+<span class="pc bpc" id="L362" title="1 of 2 branches missed.">                if (confidence.getOverridingTransaction() != null) {</span>
+<span class="fc" id="L363">                    Sha256Hash overridingHash = confidence.getOverridingTransaction().getHash();</span>
+<span class="fc" id="L364">                    confidenceBuilder.setOverridingTransaction(hashToByteString(overridingHash));</span>
+                }
+            }
+<span class="fc" id="L367">            TransactionConfidence.Source source = confidence.getSource();</span>
+<span class="pc bfc" id="L368" title="All 3 branches covered.">            switch (source) {</span>
+<span class="fc" id="L369">                case SELF: confidenceBuilder.setSource(Protos.TransactionConfidence.Source.SOURCE_SELF); break;</span>
+<span class="fc" id="L370">                case NETWORK: confidenceBuilder.setSource(Protos.TransactionConfidence.Source.SOURCE_NETWORK); break;</span>
+                case UNKNOWN:
+                    // Fall through.
+                default:
+<span class="fc" id="L374">                    confidenceBuilder.setSource(Protos.TransactionConfidence.Source.SOURCE_UNKNOWN); break;</span>
+            }
+<span class="pc" id="L376">        }</span>
+
+<span class="fc bfc" id="L378" title="All 2 branches covered.">        for (PeerAddress address : confidence.getBroadcastBy()) {</span>
+<span class="fc" id="L379">            Protos.PeerAddress proto = Protos.PeerAddress.newBuilder()</span>
+<span class="fc" id="L380">                    .setIpAddress(ByteString.copyFrom(address.getAddr().getAddress()))</span>
+<span class="fc" id="L381">                    .setPort(address.getPort())</span>
+<span class="fc" id="L382">                    .setServices(address.getServices().longValue())</span>
+<span class="fc" id="L383">                    .build();</span>
+<span class="fc" id="L384">            confidenceBuilder.addBroadcastBy(proto);</span>
+<span class="fc" id="L385">        }</span>
+<span class="fc" id="L386">        Date lastBroadcastedAt = confidence.getLastBroadcastedAt();</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">        if (lastBroadcastedAt != null)</span>
+<span class="fc" id="L388">            confidenceBuilder.setLastBroadcastedAt(lastBroadcastedAt.getTime());</span>
+<span class="fc" id="L389">        txBuilder.setConfidence(confidenceBuilder);</span>
+<span class="fc" id="L390">    }</span>
+
+    public static ByteString hashToByteString(Sha256Hash hash) {
+<span class="fc" id="L393">        return ByteString.copyFrom(hash.getBytes());</span>
+    }
+
+    public static Sha256Hash byteStringToHash(ByteString bs) {
+<span class="fc" id="L397">        return Sha256Hash.wrap(bs.toByteArray());</span>
+    }
+
+    /**
+     * &lt;p&gt;Loads wallet data from the given protocol buffer and inserts it into the given Wallet object. This is primarily
+     * useful when you wish to pre-register extension objects. Note that if loading fails the provided Wallet object
+     * may be in an indeterminate state and should be thrown away.&lt;/p&gt;
+     *
+     * &lt;p&gt;A wallet can be unreadable for various reasons, such as inability to open the file, corrupt data, internally
+     * inconsistent data, a wallet extension marked as mandatory that cannot be handled and so on. You should always
+     * handle {@link UnreadableWalletException} and communicate failure to the user in an appropriate manner.&lt;/p&gt;
+     *
+     * @throws UnreadableWalletException thrown in various error conditions (see description).
+     */
+    public Wallet readWallet(InputStream input, @Nullable WalletExtension... walletExtensions) throws UnreadableWalletException {
+<span class="fc" id="L412">        return readWallet(input, false, walletExtensions);</span>
+    }
+
+    /**
+     * &lt;p&gt;Loads wallet data from the given protocol buffer and inserts it into the given Wallet object. This is primarily
+     * useful when you wish to pre-register extension objects. Note that if loading fails the provided Wallet object
+     * may be in an indeterminate state and should be thrown away. Do not simply call this method again on the same
+     * Wallet object with {@code forceReset} set {@code true}. It won't work.&lt;/p&gt;
+     *
+     * &lt;p&gt;If {@code forceReset} is {@code true}, then no transactions are loaded from the wallet, and it is configured
+     * to replay transactions from the blockchain (as if the wallet had been loaded and {@link Wallet#reset()}
+     * had been called immediately thereafter).
+     *
+     * &lt;p&gt;A wallet can be unreadable for various reasons, such as inability to open the file, corrupt data, internally
+     * inconsistent data, a wallet extension marked as mandatory that cannot be handled and so on. You should always
+     * handle {@link UnreadableWalletException} and communicate failure to the user in an appropriate manner.&lt;/p&gt;
+     *
+     * @throws UnreadableWalletException thrown in various error conditions (see description).
+     */
+    public Wallet readWallet(InputStream input, boolean forceReset, @Nullable WalletExtension[] extensions) throws UnreadableWalletException {
+        try {
+<span class="fc" id="L433">            Protos.Wallet walletProto = parseToProto(input);</span>
+<span class="fc" id="L434">            final String paramsID = walletProto.getNetworkIdentifier();</span>
+<span class="fc" id="L435">            NetworkParameters params = NetworkParameters.fromID(paramsID);</span>
+<span class="pc bpc" id="L436" title="1 of 2 branches missed.">            if (params == null)</span>
+<span class="nc" id="L437">                throw new UnreadableWalletException(&quot;Unknown network parameters ID &quot; + paramsID);</span>
+<span class="fc" id="L438">            return readWallet(params, extensions, walletProto, forceReset);</span>
+<span class="nc" id="L439">        } catch (IOException e) {</span>
+<span class="nc" id="L440">            throw new UnreadableWalletException(&quot;Could not parse input stream to protobuf&quot;, e);</span>
+<span class="nc" id="L441">        } catch (IllegalStateException e) {</span>
+<span class="nc" id="L442">            throw new UnreadableWalletException(&quot;Could not parse input stream to protobuf&quot;, e);</span>
+<span class="nc" id="L443">        } catch (IllegalArgumentException e) {</span>
+<span class="nc" id="L444">            throw new UnreadableWalletException(&quot;Could not parse input stream to protobuf&quot;, e);</span>
+        }
+    }
+
+    /**
+     * &lt;p&gt;Loads wallet data from the given protocol buffer and inserts it into the given Wallet object. This is primarily
+     * useful when you wish to pre-register extension objects. Note that if loading fails the provided Wallet object
+     * may be in an indeterminate state and should be thrown away.&lt;/p&gt;
+     *
+     * &lt;p&gt;A wallet can be unreadable for various reasons, such as inability to open the file, corrupt data, internally
+     * inconsistent data, a wallet extension marked as mandatory that cannot be handled and so on. You should always
+     * handle {@link UnreadableWalletException} and communicate failure to the user in an appropriate manner.&lt;/p&gt;
+     *
+     * @throws UnreadableWalletException thrown in various error conditions (see description).
+     */
+    public Wallet readWallet(NetworkParameters params, @Nullable WalletExtension[] extensions,
+                             Protos.Wallet walletProto) throws UnreadableWalletException {
+<span class="fc" id="L461">        return readWallet(params, extensions, walletProto, false);</span>
+    }
+
+    /**
+     * &lt;p&gt;Loads wallet data from the given protocol buffer and inserts it into the given Wallet object. This is primarily
+     * useful when you wish to pre-register extension objects. Note that if loading fails the provided Wallet object
+     * may be in an indeterminate state and should be thrown away. Do not simply call this method again on the same
+     * Wallet object with {@code forceReset} set {@code true}. It won't work.&lt;/p&gt;
+     *
+     * &lt;p&gt;If {@code forceReset} is {@code true}, then no transactions are loaded from the wallet, and it is configured
+     * to replay transactions from the blockchain (as if the wallet had been loaded and {@link Wallet#reset()}
+     * had been called immediately thereafter).
+     *
+     * &lt;p&gt;A wallet can be unreadable for various reasons, such as inability to open the file, corrupt data, internally
+     * inconsistent data, a wallet extension marked as mandatory that cannot be handled and so on. You should always
+     * handle {@link UnreadableWalletException} and communicate failure to the user in an appropriate manner.&lt;/p&gt;
+     *
+     * @throws UnreadableWalletException thrown in various error conditions (see description).
+     */
+    public Wallet readWallet(NetworkParameters params, @Nullable WalletExtension[] extensions,
+                             Protos.Wallet walletProto, boolean forceReset) throws UnreadableWalletException {
+<span class="fc bfc" id="L482" title="All 2 branches covered.">        if (walletProto.getVersion() &gt; CURRENT_WALLET_VERSION)</span>
+<span class="fc" id="L483">            throw new UnreadableWalletException.FutureVersion();</span>
+<span class="pc bpc" id="L484" title="1 of 2 branches missed.">        if (!walletProto.getNetworkIdentifier().equals(params.getId()))</span>
+<span class="nc" id="L485">            throw new UnreadableWalletException.WrongNetwork();</span>
+
+        // Read the scrypt parameters that specify how encryption and decryption is performed.
+        KeyChainGroup keyChainGroup;
+<span class="fc bfc" id="L489" title="All 2 branches covered.">        if (walletProto.hasEncryptionParameters()) {</span>
+<span class="fc" id="L490">            Protos.ScryptParameters encryptionParameters = walletProto.getEncryptionParameters();</span>
+<span class="fc" id="L491">            final KeyCrypterScrypt keyCrypter = new KeyCrypterScrypt(encryptionParameters);</span>
+<span class="fc" id="L492">            keyChainGroup = KeyChainGroup.fromProtobufEncrypted(params, walletProto.getKeyList(), keyCrypter, keyChainFactory);</span>
+<span class="fc" id="L493">        } else {</span>
+<span class="fc" id="L494">            keyChainGroup = KeyChainGroup.fromProtobufUnencrypted(params, walletProto.getKeyList(), keyChainFactory);</span>
+        }
+<span class="fc" id="L496">        Wallet wallet = factory.create(params, keyChainGroup);</span>
+
+<span class="fc" id="L498">        List&lt;Script&gt; scripts = Lists.newArrayList();</span>
+<span class="fc bfc" id="L499" title="All 2 branches covered.">        for (Protos.Script protoScript : walletProto.getWatchedScriptList()) {</span>
+            try {
+<span class="fc" id="L501">                Script script =</span>
+<span class="fc" id="L502">                        new Script(protoScript.getProgram().toByteArray(),</span>
+<span class="fc" id="L503">                                protoScript.getCreationTimestamp() / 1000);</span>
+<span class="fc" id="L504">                scripts.add(script);</span>
+<span class="nc" id="L505">            } catch (ScriptException e) {</span>
+<span class="nc" id="L506">                throw new UnreadableWalletException(&quot;Unparseable script in wallet&quot;);</span>
+<span class="fc" id="L507">            }</span>
+<span class="fc" id="L508">        }</span>
+
+<span class="fc" id="L510">        wallet.addWatchedScripts(scripts);</span>
+
+<span class="fc bfc" id="L512" title="All 2 branches covered.">        if (walletProto.hasDescription()) {</span>
+<span class="fc" id="L513">            wallet.setDescription(walletProto.getDescription());</span>
+        }
+
+<span class="pc bpc" id="L516" title="1 of 2 branches missed.">        if (forceReset) {</span>
+            // Should mirror Wallet.reset()
+<span class="nc" id="L518">            wallet.setLastBlockSeenHash(null);</span>
+<span class="nc" id="L519">            wallet.setLastBlockSeenHeight(-1);</span>
+<span class="nc" id="L520">            wallet.setLastBlockSeenTimeSecs(0);</span>
+        } else {
+            // Read all transactions and insert into the txMap.
+<span class="fc bfc" id="L523" title="All 2 branches covered.">            for (Protos.Transaction txProto : walletProto.getTransactionList()) {</span>
+<span class="fc" id="L524">                readTransaction(txProto, wallet.getParams());</span>
+<span class="fc" id="L525">            }</span>
+
+            // Update transaction outputs to point to inputs that spend them
+<span class="fc bfc" id="L528" title="All 2 branches covered.">            for (Protos.Transaction txProto : walletProto.getTransactionList()) {</span>
+<span class="fc" id="L529">                WalletTransaction wtx = connectTransactionOutputs(params, txProto);</span>
+<span class="fc" id="L530">                wallet.addWalletTransaction(wtx);</span>
+<span class="fc" id="L531">            }</span>
+
+            // Update the lastBlockSeenHash.
+<span class="fc bfc" id="L534" title="All 2 branches covered.">            if (!walletProto.hasLastSeenBlockHash()) {</span>
+<span class="fc" id="L535">                wallet.setLastBlockSeenHash(null);</span>
+            } else {
+<span class="fc" id="L537">                wallet.setLastBlockSeenHash(byteStringToHash(walletProto.getLastSeenBlockHash()));</span>
+            }
+<span class="fc bfc" id="L539" title="All 2 branches covered.">            if (!walletProto.hasLastSeenBlockHeight()) {</span>
+<span class="fc" id="L540">                wallet.setLastBlockSeenHeight(-1);</span>
+            } else {
+<span class="fc" id="L542">                wallet.setLastBlockSeenHeight(walletProto.getLastSeenBlockHeight());</span>
+            }
+            // Will default to zero if not present.
+<span class="fc" id="L545">            wallet.setLastBlockSeenTimeSecs(walletProto.getLastSeenBlockTimeSecs());</span>
+
+<span class="fc bfc" id="L547" title="All 2 branches covered.">            if (walletProto.hasKeyRotationTime()) {</span>
+<span class="fc" id="L548">                wallet.setKeyRotationTime(new Date(walletProto.getKeyRotationTime() * 1000));</span>
+            }
+        }
+
+<span class="fc bfc" id="L552" title="All 2 branches covered.">        loadExtensions(wallet, extensions != null ? extensions : new WalletExtension[0], walletProto);</span>
+
+<span class="fc bfc" id="L554" title="All 2 branches covered.">        for (Protos.Tag tag : walletProto.getTagsList()) {</span>
+<span class="fc" id="L555">            wallet.setTag(tag.getTag(), tag.getData());</span>
+<span class="fc" id="L556">        }</span>
+
+<span class="fc bfc" id="L558" title="All 2 branches covered.">        for (Protos.TransactionSigner signerProto : walletProto.getTransactionSignersList()) {</span>
+            try {
+<span class="fc" id="L560">                Class signerClass = Class.forName(signerProto.getClassName());</span>
+<span class="fc" id="L561">                TransactionSigner signer = (TransactionSigner)signerClass.newInstance();</span>
+<span class="fc" id="L562">                signer.deserialize(signerProto.getData().toByteArray());</span>
+<span class="fc" id="L563">                wallet.addTransactionSigner(signer);</span>
+<span class="nc" id="L564">            } catch (Exception e) {</span>
+<span class="nc" id="L565">                throw new UnreadableWalletException(&quot;Unable to deserialize TransactionSigner instance: &quot; +</span>
+<span class="nc" id="L566">                        signerProto.getClassName(), e);</span>
+<span class="fc" id="L567">            }</span>
+<span class="fc" id="L568">        }</span>
+
+<span class="pc bpc" id="L570" title="1 of 2 branches missed.">        if (walletProto.hasVersion()) {</span>
+<span class="fc" id="L571">            wallet.setVersion(walletProto.getVersion());</span>
+        }
+
+        // Make sure the object can be re-used to read another wallet without corruption.
+<span class="fc" id="L575">        txMap.clear();</span>
+
+<span class="fc" id="L577">        return wallet;</span>
+    }
+
+    private void loadExtensions(Wallet wallet, WalletExtension[] extensionsList, Protos.Wallet walletProto) throws UnreadableWalletException {
+<span class="fc" id="L581">        final Map&lt;String, WalletExtension&gt; extensions = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L582" title="All 2 branches covered.">        for (WalletExtension e : extensionsList)</span>
+<span class="fc" id="L583">            extensions.put(e.getWalletExtensionID(), e);</span>
+        // The Wallet object, if subclassed, might have added some extensions to itself already. In that case, don't
+        // expect them to be passed in, just fetch them here and don't re-add.
+<span class="fc" id="L586">        extensions.putAll(wallet.getExtensions());</span>
+<span class="fc bfc" id="L587" title="All 2 branches covered.">        for (Protos.Extension extProto : walletProto.getExtensionList()) {</span>
+<span class="fc" id="L588">            String id = extProto.getId();</span>
+<span class="fc" id="L589">            WalletExtension extension = extensions.get(id);</span>
+<span class="fc bfc" id="L590" title="All 2 branches covered.">            if (extension == null) {</span>
+<span class="fc bfc" id="L591" title="All 2 branches covered.">                if (extProto.getMandatory()) {</span>
+<span class="pc bpc" id="L592" title="1 of 2 branches missed.">                    if (requireMandatoryExtensions)</span>
+<span class="fc" id="L593">                        throw new UnreadableWalletException(&quot;Unknown mandatory extension in wallet: &quot; + id);</span>
+                    else
+<span class="nc" id="L595">                        log.error(&quot;Unknown extension in wallet {}, ignoring&quot;, id);</span>
+<span class="pc bpc" id="L596" title="1 of 2 branches missed.">                } else if (requireAllExtensionsKnown) {</span>
+<span class="nc" id="L597">                    throw new UnreadableWalletException(&quot;Unknown extension in wallet: &quot; + id);</span>
+                }
+            } else {
+<span class="fc" id="L600">                log.info(&quot;Loading wallet extension {}&quot;, id);</span>
+                try {
+<span class="fc" id="L602">                    wallet.deserializeExtension(extension, extProto.getData().toByteArray());</span>
+<span class="fc" id="L603">                } catch (Exception e) {</span>
+<span class="pc bpc" id="L604" title="3 of 4 branches missed.">                    if (extProto.getMandatory() &amp;&amp; requireMandatoryExtensions) {</span>
+<span class="nc" id="L605">                        log.error(&quot;Error whilst reading mandatory extension {}, failing to read wallet&quot;, id);</span>
+<span class="nc" id="L606">                        throw new UnreadableWalletException(&quot;Could not parse mandatory extension in wallet: &quot; + id);</span>
+<span class="pc bpc" id="L607" title="1 of 2 branches missed.">                    } else if (requireAllExtensionsKnown) {</span>
+<span class="nc" id="L608">                        log.error(&quot;Error whilst reading extension {}, failing to read wallet&quot;, id);</span>
+<span class="nc" id="L609">                        throw new UnreadableWalletException(&quot;Could not parse extension in wallet: &quot; + id);</span>
+                    } else {
+<span class="fc" id="L611">                        log.warn(&quot;Error whilst reading extension {}, ignoring extension&quot;, id, e);</span>
+                    }
+<span class="fc" id="L613">                }</span>
+            }
+<span class="fc" id="L615">        }</span>
+<span class="fc" id="L616">    }</span>
+
+    /**
+     * Returns the loaded protocol buffer from the given byte stream. You normally want
+     * {@link Wallet#loadFromFile(java.io.File, WalletExtension...)} instead - this method is designed for low level
+     * work involving the wallet file format itself.
+     */
+    public static Protos.Wallet parseToProto(InputStream input) throws IOException {
+<span class="fc" id="L624">        CodedInputStream codedInput = CodedInputStream.newInstance(input);</span>
+<span class="fc" id="L625">        codedInput.setSizeLimit(WALLET_SIZE_LIMIT);</span>
+<span class="fc" id="L626">        return Protos.Wallet.parseFrom(codedInput);</span>
+    }
+
+    private void readTransaction(Protos.Transaction txProto, NetworkParameters params) throws UnreadableWalletException {
+<span class="fc" id="L630">        Transaction tx = new Transaction(params);</span>
+
+<span class="fc" id="L632">        tx.setVersion(txProto.getVersion());</span>
+
+<span class="pc bpc" id="L634" title="1 of 2 branches missed.">        if (txProto.hasUpdatedAt()) {</span>
+<span class="fc" id="L635">            tx.setUpdateTime(new Date(txProto.getUpdatedAt()));</span>
+        }
+
+<span class="fc bfc" id="L638" title="All 2 branches covered.">        for (Protos.TransactionOutput outputProto : txProto.getTransactionOutputList()) {</span>
+<span class="fc" id="L639">            Coin value = Coin.valueOf(outputProto.getValue());</span>
+<span class="fc" id="L640">            byte[] scriptBytes = outputProto.getScriptBytes().toByteArray();</span>
+<span class="fc" id="L641">            TransactionOutput output = new TransactionOutput(params, tx, value, scriptBytes);</span>
+<span class="fc" id="L642">            tx.addOutput(output);</span>
+<span class="fc" id="L643">        }</span>
+
+<span class="fc bfc" id="L645" title="All 2 branches covered.">        for (Protos.TransactionInput inputProto : txProto.getTransactionInputList()) {</span>
+<span class="fc" id="L646">            byte[] scriptBytes = inputProto.getScriptBytes().toByteArray();</span>
+<span class="fc" id="L647">            TransactionOutPoint outpoint = new TransactionOutPoint(params,</span>
+<span class="fc" id="L648">                    inputProto.getTransactionOutPointIndex() &amp; 0xFFFFFFFFL,</span>
+<span class="fc" id="L649">                    byteStringToHash(inputProto.getTransactionOutPointHash())</span>
+            );
+<span class="fc bfc" id="L651" title="All 2 branches covered.">            Coin value = inputProto.hasValue() ? Coin.valueOf(inputProto.getValue()) : null;</span>
+<span class="fc" id="L652">            TransactionInput input = new TransactionInput(params, tx, scriptBytes, outpoint, value);</span>
+<span class="fc bfc" id="L653" title="All 2 branches covered.">            if (inputProto.hasSequence())</span>
+<span class="fc" id="L654">                input.setSequenceNumber(0xffffffffL &amp; inputProto.getSequence());</span>
+<span class="fc" id="L655">            tx.addInput(input);</span>
+<span class="fc" id="L656">        }</span>
+
+<span class="fc bfc" id="L658" title="All 2 branches covered.">        for (int i = 0; i &lt; txProto.getBlockHashCount(); i++) {</span>
+<span class="fc" id="L659">            ByteString blockHash = txProto.getBlockHash(i);</span>
+<span class="fc" id="L660">            int relativityOffset = 0;</span>
+<span class="pc bpc" id="L661" title="1 of 2 branches missed.">            if (txProto.getBlockRelativityOffsetsCount() &gt; 0)</span>
+<span class="fc" id="L662">                relativityOffset = txProto.getBlockRelativityOffsets(i);</span>
+<span class="fc" id="L663">            tx.addBlockAppearance(byteStringToHash(blockHash), relativityOffset);</span>
+        }
+
+<span class="fc bfc" id="L666" title="All 2 branches covered.">        if (txProto.hasLockTime()) {</span>
+<span class="fc" id="L667">            tx.setLockTime(0xffffffffL &amp; txProto.getLockTime());</span>
+        }
+
+<span class="pc bpc" id="L670" title="1 of 2 branches missed.">        if (txProto.hasPurpose()) {</span>
+<span class="pc bpc" id="L671" title="4 of 8 branches missed.">            switch (txProto.getPurpose()) {</span>
+<span class="fc" id="L672">                case UNKNOWN: tx.setPurpose(Transaction.Purpose.UNKNOWN); break;</span>
+<span class="fc" id="L673">                case USER_PAYMENT: tx.setPurpose(Transaction.Purpose.USER_PAYMENT); break;</span>
+<span class="fc" id="L674">                case KEY_ROTATION: tx.setPurpose(Transaction.Purpose.KEY_ROTATION); break;</span>
+<span class="nc" id="L675">                case ASSURANCE_CONTRACT_CLAIM: tx.setPurpose(Transaction.Purpose.ASSURANCE_CONTRACT_CLAIM); break;</span>
+<span class="nc" id="L676">                case ASSURANCE_CONTRACT_PLEDGE: tx.setPurpose(Transaction.Purpose.ASSURANCE_CONTRACT_PLEDGE); break;</span>
+<span class="nc" id="L677">                case ASSURANCE_CONTRACT_STUB: tx.setPurpose(Transaction.Purpose.ASSURANCE_CONTRACT_STUB); break;</span>
+<span class="fc" id="L678">                case RAISE_FEE: tx.setPurpose(Transaction.Purpose.RAISE_FEE); break;</span>
+<span class="nc" id="L679">                default: throw new RuntimeException(&quot;New purpose serialization not implemented&quot;);</span>
+            }
+        } else {
+            // Old wallet: assume a user payment as that's the only reason a new tx would have been created back then.
+<span class="nc" id="L683">            tx.setPurpose(Transaction.Purpose.USER_PAYMENT);</span>
+        }
+
+<span class="pc bpc" id="L686" title="1 of 2 branches missed.">        if (txProto.hasExchangeRate()) {</span>
+<span class="nc" id="L687">            Protos.ExchangeRate exchangeRateProto = txProto.getExchangeRate();</span>
+<span class="nc" id="L688">            tx.setExchangeRate(new ExchangeRate(Coin.valueOf(exchangeRateProto.getCoinValue()), Fiat.valueOf(</span>
+<span class="nc" id="L689">                    exchangeRateProto.getFiatCurrencyCode(), exchangeRateProto.getFiatValue())));</span>
+        }
+
+<span class="pc bpc" id="L692" title="1 of 2 branches missed.">        if (txProto.hasMemo())</span>
+<span class="nc" id="L693">            tx.setMemo(txProto.getMemo());</span>
+
+        // Transaction should now be complete.
+<span class="fc" id="L696">        Sha256Hash protoHash = byteStringToHash(txProto.getHash());</span>
+<span class="pc bpc" id="L697" title="1 of 2 branches missed.">        if (!tx.getHash().equals(protoHash))</span>
+<span class="nc" id="L698">            throw new UnreadableWalletException(String.format(Locale.US, &quot;Transaction did not deserialize completely: %s vs %s&quot;, tx.getHash(), protoHash));</span>
+<span class="pc bpc" id="L699" title="1 of 2 branches missed.">        if (txMap.containsKey(txProto.getHash()))</span>
+<span class="nc" id="L700">            throw new UnreadableWalletException(&quot;Wallet contained duplicate transaction &quot; + byteStringToHash(txProto.getHash()));</span>
+<span class="fc" id="L701">        txMap.put(txProto.getHash(), tx);</span>
+<span class="fc" id="L702">    }</span>
+
+    private WalletTransaction connectTransactionOutputs(final NetworkParameters params,
+                                                        final org.bitcoinj.wallet.Protos.Transaction txProto) throws UnreadableWalletException {
+<span class="fc" id="L706">        Transaction tx = txMap.get(txProto.getHash());</span>
+        final WalletTransaction.Pool pool;
+<span class="pc bpc" id="L708" title="2 of 6 branches missed.">        switch (txProto.getPool()) {</span>
+<span class="fc" id="L709">            case DEAD: pool = WalletTransaction.Pool.DEAD; break;</span>
+<span class="fc" id="L710">            case PENDING: pool = WalletTransaction.Pool.PENDING; break;</span>
+<span class="fc" id="L711">            case SPENT: pool = WalletTransaction.Pool.SPENT; break;</span>
+<span class="fc" id="L712">            case UNSPENT: pool = WalletTransaction.Pool.UNSPENT; break;</span>
+            // Upgrade old wallets: inactive pool has been merged with the pending pool.
+            // Remove this some time after 0.9 is old and everyone has upgraded.
+            // There should not be any spent outputs in this tx as old wallets would not allow them to be spent
+            // in this state.
+            case INACTIVE:
+            case PENDING_INACTIVE:
+<span class="nc" id="L719">                pool = WalletTransaction.Pool.PENDING;</span>
+<span class="nc" id="L720">                break;</span>
+            default:
+<span class="nc" id="L722">                throw new UnreadableWalletException(&quot;Unknown transaction pool: &quot; + txProto.getPool());</span>
+        }
+<span class="fc bfc" id="L724" title="All 2 branches covered.">        for (int i = 0 ; i &lt; tx.getOutputs().size() ; i++) {</span>
+<span class="fc" id="L725">            TransactionOutput output = tx.getOutputs().get(i);</span>
+<span class="fc" id="L726">            final Protos.TransactionOutput transactionOutput = txProto.getTransactionOutput(i);</span>
+<span class="fc bfc" id="L727" title="All 2 branches covered.">            if (transactionOutput.hasSpentByTransactionHash()) {</span>
+<span class="fc" id="L728">                final ByteString spentByTransactionHash = transactionOutput.getSpentByTransactionHash();</span>
+<span class="fc" id="L729">                Transaction spendingTx = txMap.get(spentByTransactionHash);</span>
+<span class="pc bpc" id="L730" title="1 of 2 branches missed.">                if (spendingTx == null) {</span>
+<span class="nc" id="L731">                    throw new UnreadableWalletException(String.format(Locale.US, &quot;Could not connect %s to %s&quot;,</span>
+<span class="nc" id="L732">                            tx.getHashAsString(), byteStringToHash(spentByTransactionHash)));</span>
+                }
+<span class="fc" id="L734">                final int spendingIndex = transactionOutput.getSpentByTransactionIndex();</span>
+<span class="fc" id="L735">                TransactionInput input = checkNotNull(spendingTx.getInput(spendingIndex));</span>
+<span class="fc" id="L736">                input.connect(output);</span>
+            }
+        }
+
+<span class="fc bfc" id="L740" title="All 2 branches covered.">        if (txProto.hasConfidence()) {</span>
+<span class="fc" id="L741">            Protos.TransactionConfidence confidenceProto = txProto.getConfidence();</span>
+<span class="fc" id="L742">            TransactionConfidence confidence = tx.getConfidence();</span>
+<span class="fc" id="L743">            readConfidence(params, tx, confidenceProto, confidence);</span>
+        }
+
+<span class="fc" id="L746">        return new WalletTransaction(pool, tx);</span>
+    }
+
+    private void readConfidence(final NetworkParameters params, final Transaction tx,
+                                final Protos.TransactionConfidence confidenceProto,
+                                final TransactionConfidence confidence) throws UnreadableWalletException {
+        // We are lenient here because tx confidence is not an essential part of the wallet.
+        // If the tx has an unknown type of confidence, ignore.
+<span class="pc bpc" id="L754" title="1 of 2 branches missed.">        if (!confidenceProto.hasType()) {</span>
+<span class="nc" id="L755">            log.warn(&quot;Unknown confidence type for tx {}&quot;, tx.getHashAsString());</span>
+<span class="nc" id="L756">            return;</span>
+        }
+        ConfidenceType confidenceType;
+<span class="pc bpc" id="L759" title="3 of 6 branches missed.">        switch (confidenceProto.getType()) {</span>
+<span class="fc" id="L760">            case BUILDING: confidenceType = ConfidenceType.BUILDING; break;</span>
+<span class="fc" id="L761">            case DEAD: confidenceType = ConfidenceType.DEAD; break;</span>
+            // These two are equivalent (must be able to read old wallets).
+<span class="nc" id="L763">            case NOT_IN_BEST_CHAIN: confidenceType = ConfidenceType.PENDING; break;</span>
+<span class="fc" id="L764">            case PENDING: confidenceType = ConfidenceType.PENDING; break;</span>
+<span class="nc" id="L765">            case IN_CONFLICT: confidenceType = ConfidenceType.IN_CONFLICT; break;</span>
+            case UNKNOWN:
+                // Fall through.
+            default:
+<span class="nc" id="L769">                confidenceType = ConfidenceType.UNKNOWN; break;</span>
+        }
+<span class="fc" id="L771">        confidence.setConfidenceType(confidenceType);</span>
+<span class="fc bfc" id="L772" title="All 2 branches covered.">        if (confidenceProto.hasAppearedAtHeight()) {</span>
+<span class="pc bpc" id="L773" title="1 of 2 branches missed.">            if (confidence.getConfidenceType() != ConfidenceType.BUILDING) {</span>
+<span class="nc" id="L774">                log.warn(&quot;Have appearedAtHeight but not BUILDING for tx {}&quot;, tx.getHashAsString());</span>
+<span class="nc" id="L775">                return;</span>
+            }
+<span class="fc" id="L777">            confidence.setAppearedAtChainHeight(confidenceProto.getAppearedAtHeight());</span>
+        }
+<span class="fc bfc" id="L779" title="All 2 branches covered.">        if (confidenceProto.hasDepth()) {</span>
+<span class="pc bpc" id="L780" title="1 of 2 branches missed.">            if (confidence.getConfidenceType() != ConfidenceType.BUILDING) {</span>
+<span class="nc" id="L781">                log.warn(&quot;Have depth but not BUILDING for tx {}&quot;, tx.getHashAsString());</span>
+<span class="nc" id="L782">                return;</span>
+            }
+<span class="fc" id="L784">            confidence.setDepthInBlocks(confidenceProto.getDepth());</span>
+        }
+<span class="fc bfc" id="L786" title="All 2 branches covered.">        if (confidenceProto.hasOverridingTransaction()) {</span>
+<span class="pc bpc" id="L787" title="1 of 2 branches missed.">            if (confidence.getConfidenceType() != ConfidenceType.DEAD) {</span>
+<span class="nc" id="L788">                log.warn(&quot;Have overridingTransaction but not OVERRIDDEN for tx {}&quot;, tx.getHashAsString());</span>
+<span class="nc" id="L789">                return;</span>
+            }
+<span class="fc" id="L791">            Transaction overridingTransaction =</span>
+<span class="fc" id="L792">                txMap.get(confidenceProto.getOverridingTransaction());</span>
+<span class="pc bpc" id="L793" title="1 of 2 branches missed.">            if (overridingTransaction == null) {</span>
+<span class="fc" id="L794">                log.warn(&quot;Have overridingTransaction that is not in wallet for tx {}&quot;, tx.getHashAsString());</span>
+<span class="fc" id="L795">                return;</span>
+            }
+<span class="nc" id="L797">            confidence.setOverridingTransaction(overridingTransaction);</span>
+        }
+<span class="fc bfc" id="L799" title="All 2 branches covered.">        for (Protos.PeerAddress proto : confidenceProto.getBroadcastByList()) {</span>
+            InetAddress ip;
+            try {
+<span class="fc" id="L802">                ip = InetAddress.getByAddress(proto.getIpAddress().toByteArray());</span>
+<span class="nc" id="L803">            } catch (UnknownHostException e) {</span>
+<span class="nc" id="L804">                throw new UnreadableWalletException(&quot;Peer IP address does not have the right length&quot;, e);</span>
+<span class="fc" id="L805">            }</span>
+<span class="fc" id="L806">            int port = proto.getPort();</span>
+<span class="fc" id="L807">            int protocolVersion = params.getProtocolVersionNum(NetworkParameters.ProtocolVersion.CURRENT);</span>
+<span class="fc" id="L808">            BigInteger services = BigInteger.valueOf(proto.getServices());</span>
+<span class="fc" id="L809">            PeerAddress address = new PeerAddress(params, ip, port, protocolVersion, services);</span>
+<span class="fc" id="L810">            confidence.markBroadcastBy(address);</span>
+<span class="fc" id="L811">        }</span>
+<span class="fc bfc" id="L812" title="All 2 branches covered.">        if (confidenceProto.hasLastBroadcastedAt())</span>
+<span class="fc" id="L813">            confidence.setLastBroadcastedAt(new Date(confidenceProto.getLastBroadcastedAt()));</span>
+<span class="pc bfc" id="L814" title="All 3 branches covered.">        switch (confidenceProto.getSource()) {</span>
+<span class="fc" id="L815">            case SOURCE_SELF: confidence.setSource(TransactionConfidence.Source.SELF); break;</span>
+<span class="fc" id="L816">            case SOURCE_NETWORK: confidence.setSource(TransactionConfidence.Source.NETWORK); break;</span>
+            case SOURCE_UNKNOWN:
+                // Fall through.
+<span class="fc" id="L819">            default: confidence.setSource(TransactionConfidence.Source.UNKNOWN); break;</span>
+        }
+<span class="fc" id="L821">    }</span>
+
+    /**
+     * Cheap test to see if input stream is a wallet. This checks for a magic value at the beginning of the stream.
+     *
+     * @param is
+     *            input stream to test
+     * @return true if input stream is a wallet
+     */
+    public static boolean isWallet(InputStream is) {
+        try {
+<span class="fc" id="L832">            final CodedInputStream cis = CodedInputStream.newInstance(is);</span>
+<span class="fc" id="L833">            final int tag = cis.readTag();</span>
+<span class="fc" id="L834">            final int field = WireFormat.getTagFieldNumber(tag);</span>
+<span class="pc bpc" id="L835" title="1 of 2 branches missed.">            if (field != 1) // network_identifier</span>
+<span class="nc" id="L836">                return false;</span>
+<span class="fc" id="L837">            final String network = cis.readString();</span>
+<span class="pc bpc" id="L838" title="1 of 2 branches missed.">            return NetworkParameters.fromID(network) != null;</span>
+<span class="nc" id="L839">        } catch (IOException x) {</span>
+<span class="nc" id="L840">            return false;</span>
+        }
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

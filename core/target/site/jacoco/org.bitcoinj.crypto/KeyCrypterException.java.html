@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>KeyCrypterException.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.crypto</a> &gt; <span class="el_source">KeyCrypterException.java</span></div><h1>KeyCrypterException.java</h1><pre class="source lang-java linenums">/*
+ * Copyright by the original author or authors.
+ * 
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.crypto;
+
+/**
+ * &lt;p&gt;Exception to provide the following:&lt;/p&gt;
+ * &lt;ul&gt;
+ * &lt;li&gt;Provision of encryption / decryption exception&lt;/li&gt;
+ * &lt;/ul&gt;
+ * &lt;p&gt;This base exception acts as a general failure mode not attributable to a specific cause (other than
+ * that reported in the exception message). Since this is in English, it may not be worth reporting directly
+ * to the user other than as part of a &quot;general failure to parse&quot; response.&lt;/p&gt;
+ */
+public class KeyCrypterException extends RuntimeException {
+    private static final long serialVersionUID = -4441989608332681377L;
+
+    public KeyCrypterException(String s) {
+<span class="fc" id="L32">        super(s);</span>
+<span class="fc" id="L33">    }</span>
+
+    public KeyCrypterException(String s, Throwable throwable) {
+<span class="fc" id="L36">        super(s, throwable);</span>
+<span class="fc" id="L37">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

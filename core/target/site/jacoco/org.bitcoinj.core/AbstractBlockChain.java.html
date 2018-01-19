@@ -1,0 +1,1081 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>AbstractBlockChain.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">AbstractBlockChain.java</span></div><h1>AbstractBlockChain.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2012 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import com.google.common.base.*;
+import com.google.common.collect.*;
+import com.google.common.util.concurrent.*;
+import org.bitcoinj.core.listeners.*;
+import org.bitcoinj.script.ScriptException;
+import org.bitcoinj.store.*;
+import org.bitcoinj.utils.*;
+import org.bitcoinj.wallet.Wallet;
+import org.slf4j.*;
+
+import javax.annotation.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.*;
+
+import static com.google.common.base.Preconditions.*;
+
+/**
+ * &lt;p&gt;An AbstractBlockChain holds a series of {@link Block} objects, links them together, and knows how to verify that
+ * the chain follows the rules of the {@link NetworkParameters} for this chain.&lt;/p&gt;
+ *
+ * &lt;p&gt;It can be connected to a {@link Wallet}, and also {@link TransactionReceivedInBlockListener}s that can receive transactions and
+ * notifications of re-organizations.&lt;/p&gt;
+ *
+ * &lt;p&gt;An AbstractBlockChain implementation must be connected to a {@link BlockStore} implementation. The chain object
+ * by itself doesn't store any data, that's delegated to the store. Which store you use is a decision best made by
+ * reading the getting started guide, but briefly, fully validating block chains need fully validating stores. In
+ * the lightweight SPV mode, a {@link org.bitcoinj.store.SPVBlockStore} is the right choice.&lt;/p&gt;
+ *
+ * &lt;p&gt;This class implements an abstract class which makes it simple to create a BlockChain that does/doesn't do full
+ * verification.  It verifies headers and is implements most of what is required to implement SPV mode, but
+ * also provides callback hooks which can be used to do full verification.&lt;/p&gt;
+ *
+ * &lt;p&gt;There are two subclasses of AbstractBlockChain that are useful: {@link BlockChain}, which is the simplest
+ * class and implements &lt;i&gt;simplified payment verification&lt;/i&gt;. This is a lightweight and efficient mode that does
+ * not verify the contents of blocks, just their headers. A {@link FullPrunedBlockChain} paired with a
+ * {@link org.bitcoinj.store.H2FullPrunedBlockStore} implements full verification, which is equivalent to
+ * Bitcoin Core. To learn more about the alternative security models, please consult the articles on the
+ * website.&lt;/p&gt;
+ *
+ * &lt;b&gt;Theory&lt;/b&gt;
+ *
+ * &lt;p&gt;The 'chain' is actually a tree although in normal operation it operates mostly as a list of {@link Block}s.
+ * When multiple new head blocks are found simultaneously, there are multiple stories of the economy competing to become
+ * the one true consensus. This can happen naturally when two miners solve a block within a few seconds of each other,
+ * or it can happen when the chain is under attack.&lt;/p&gt;
+ *
+ * &lt;p&gt;A reference to the head block of the best known chain is stored. If you can reach the genesis block by repeatedly
+ * walking through the prevBlock pointers, then we say this is a full chain. If you cannot reach the genesis block
+ * we say it is an orphan chain. Orphan chains can occur when blocks are solved and received during the initial block
+ * chain download, or if we connect to a peer that doesn't send us blocks in order.&lt;/p&gt;
+ *
+ * &lt;p&gt;A reorganize occurs when the blocks that make up the best known chain changes. Note that simply adding a
+ * new block to the top of the best chain isn't as reorganize, but that a reorganize is always triggered by adding
+ * a new block that connects to some other (non best head) block. By &quot;best&quot; we mean the chain representing the largest
+ * amount of work done.&lt;/p&gt;
+ *
+ * &lt;p&gt;Every so often the block chain passes a difficulty transition point. At that time, all the blocks in the last
+ * 2016 blocks are examined and a new difficulty target is calculated from them.&lt;/p&gt;
+ */
+public abstract class AbstractBlockChain {
+<span class="fc" id="L81">    private static final Logger log = LoggerFactory.getLogger(AbstractBlockChain.class);</span>
+<span class="fc" id="L82">    protected final ReentrantLock lock = Threading.lock(&quot;blockchain&quot;);</span>
+
+    /** Keeps a map of block hashes to StoredBlocks. */
+    private final BlockStore blockStore;
+
+    /**
+     * Tracks the top of the best known chain.&lt;p&gt;
+     *
+     * Following this one down to the genesis block produces the story of the economy from the creation of Bitcoin
+     * until the present day. The chain head can change if a new set of blocks is received that results in a chain of
+     * greater work than the one obtained by following this one down. In that case a reorganize is triggered,
+     * potentially invalidating transactions in our wallet.
+     */
+    protected StoredBlock chainHead;
+
+    // TODO: Scrap this and use a proper read/write for all of the block chain objects.
+    // The chainHead field is read/written synchronized with this object rather than BlockChain. However writing is
+    // also guaranteed to happen whilst BlockChain is synchronized (see setChainHead). The goal of this is to let
+    // clients quickly access the chain head even whilst the block chain is downloading and thus the BlockChain is
+    // locked most of the time.
+<span class="fc" id="L102">    private final Object chainHeadLock = new Object();</span>
+
+    protected final NetworkParameters params;
+    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;NewBestBlockListener&gt;&gt; newBestBlockListeners;
+    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;ReorganizeListener&gt;&gt; reorganizeListeners;
+    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;TransactionReceivedInBlockListener&gt;&gt; transactionReceivedListeners;
+
+    // Holds a block header and, optionally, a list of tx hashes or block's transactions
+    class OrphanBlock {
+        final Block block;
+        final List&lt;Sha256Hash&gt; filteredTxHashes;
+        final Map&lt;Sha256Hash, Transaction&gt; filteredTxn;
+<span class="fc" id="L114">        OrphanBlock(Block block, @Nullable List&lt;Sha256Hash&gt; filteredTxHashes, @Nullable Map&lt;Sha256Hash, Transaction&gt; filteredTxn) {</span>
+<span class="pc bpc" id="L115" title="3 of 4 branches missed.">            final boolean filtered = filteredTxHashes != null &amp;&amp; filteredTxn != null;</span>
+<span class="pc bpc" id="L116" title="5 of 8 branches missed.">            Preconditions.checkArgument((block.transactions == null &amp;&amp; filtered)</span>
+                                        || (block.transactions != null &amp;&amp; !filtered));
+<span class="fc" id="L118">            this.block = block;</span>
+<span class="fc" id="L119">            this.filteredTxHashes = filteredTxHashes;</span>
+<span class="fc" id="L120">            this.filteredTxn = filteredTxn;</span>
+<span class="fc" id="L121">        }</span>
+    }
+    // Holds blocks that we have received but can't plug into the chain yet, eg because they were created whilst we
+    // were downloading the block chain.
+<span class="fc" id="L125">    private final LinkedHashMap&lt;Sha256Hash, OrphanBlock&gt; orphanBlocks = new LinkedHashMap&lt;&gt;();</span>
+
+    /** False positive estimation uses a double exponential moving average. */
+    public static final double FP_ESTIMATOR_ALPHA = 0.0001;
+    /** False positive estimation uses a double exponential moving average. */
+    public static final double FP_ESTIMATOR_BETA = 0.01;
+
+    private double falsePositiveRate;
+    private double falsePositiveTrend;
+    private double previousFalsePositiveRate;
+
+    private final VersionTally versionTally;
+
+    /** See {@link #AbstractBlockChain(Context, List, BlockStore)} */
+    public AbstractBlockChain(NetworkParameters params, List&lt;? extends Wallet&gt; transactionReceivedListeners,
+                              BlockStore blockStore) throws BlockStoreException {
+<span class="nc" id="L141">        this(Context.getOrCreate(params), transactionReceivedListeners, blockStore);</span>
+<span class="nc" id="L142">    }</span>
+
+    /**
+     * Constructs a BlockChain connected to the given list of listeners (eg, wallets) and a store.
+     */
+    public AbstractBlockChain(Context context, List&lt;? extends Wallet&gt; wallets,
+<span class="fc" id="L148">                              BlockStore blockStore) throws BlockStoreException {</span>
+<span class="fc" id="L149">        this.blockStore = blockStore;</span>
+<span class="fc" id="L150">        chainHead = blockStore.getChainHead();</span>
+<span class="fc" id="L151">        log.info(&quot;chain head is at height {}:\n{}&quot;, chainHead.getHeight(), chainHead.getHeader());</span>
+<span class="fc" id="L152">        this.params = context.getParams();</span>
+
+<span class="fc" id="L154">        this.newBestBlockListeners = new CopyOnWriteArrayList&lt;&gt;();</span>
+<span class="fc" id="L155">        this.reorganizeListeners = new CopyOnWriteArrayList&lt;&gt;();</span>
+<span class="fc" id="L156">        this.transactionReceivedListeners = new CopyOnWriteArrayList&lt;&gt;();</span>
+<span class="pc bpc" id="L157" title="1 of 2 branches missed.">        for (NewBestBlockListener l : wallets) addNewBestBlockListener(Threading.SAME_THREAD, l);</span>
+<span class="pc bpc" id="L158" title="1 of 2 branches missed.">        for (ReorganizeListener l : wallets) addReorganizeListener(Threading.SAME_THREAD, l);</span>
+<span class="pc bpc" id="L159" title="1 of 2 branches missed.">        for (TransactionReceivedInBlockListener l : wallets) addTransactionReceivedListener(Threading.SAME_THREAD, l);</span>
+
+<span class="fc" id="L161">        this.versionTally = new VersionTally(context.getParams());</span>
+<span class="fc" id="L162">        this.versionTally.initialize(blockStore, chainHead);</span>
+<span class="fc" id="L163">    }</span>
+
+    /**
+     * Add a wallet to the BlockChain. Note that the wallet will be unaffected by any blocks received while it
+     * was not part of this BlockChain. This method is useful if the wallet has just been created, and its keys
+     * have never been in use, or if the wallet has been loaded along with the BlockChain. Note that adding multiple
+     * wallets is not well tested!
+     */
+    public final void addWallet(Wallet wallet) {
+<span class="fc" id="L172">        addNewBestBlockListener(Threading.SAME_THREAD, wallet);</span>
+<span class="fc" id="L173">        addReorganizeListener(Threading.SAME_THREAD, wallet);</span>
+<span class="fc" id="L174">        addTransactionReceivedListener(Threading.SAME_THREAD, wallet);</span>
+<span class="fc" id="L175">        int walletHeight = wallet.getLastBlockSeenHeight();</span>
+<span class="fc" id="L176">        int chainHeight = getBestChainHeight();</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">        if (walletHeight != chainHeight) {</span>
+<span class="fc" id="L178">            log.warn(&quot;Wallet/chain height mismatch: {} vs {}&quot;, walletHeight, chainHeight);</span>
+<span class="fc" id="L179">            log.warn(&quot;Hashes: {} vs {}&quot;, wallet.getLastBlockSeenHash(), getChainHead().getHeader().getHash());</span>
+
+            // This special case happens when the VM crashes because of a transaction received. It causes the updated
+            // block store to persist, but not the wallet. In order to fix the issue, we roll back the block store to
+            // the wallet height to make it look like as if the block has never been received.
+<span class="pc bpc" id="L184" title="1 of 4 branches missed.">            if (walletHeight &lt; chainHeight &amp;&amp; walletHeight &gt; 0) {</span>
+                try {
+<span class="fc" id="L186">                    rollbackBlockStore(walletHeight);</span>
+<span class="fc" id="L187">                    log.info(&quot;Rolled back block store to height {}.&quot;, walletHeight);</span>
+<span class="nc" id="L188">                } catch (BlockStoreException x) {</span>
+<span class="nc" id="L189">                    log.warn(&quot;Rollback of block store failed, continuing with mismatched heights. This can happen due to a replay.&quot;);</span>
+<span class="fc" id="L190">                }</span>
+            }
+        }
+<span class="fc" id="L193">    }</span>
+
+    /** Removes a wallet from the chain. */
+    public void removeWallet(Wallet wallet) {
+<span class="fc" id="L197">        removeNewBestBlockListener(wallet);</span>
+<span class="fc" id="L198">        removeReorganizeListener(wallet);</span>
+<span class="fc" id="L199">        removeTransactionReceivedListener(wallet);</span>
+<span class="fc" id="L200">    }</span>
+
+    /** Replaced with more specific listener methods: use them instead. */
+    @Deprecated @SuppressWarnings(&quot;deprecation&quot;)
+    public void addListener(BlockChainListener listener) {
+<span class="nc" id="L205">        addListener(listener, Threading.USER_THREAD);</span>
+<span class="nc" id="L206">    }</span>
+
+    /** Replaced with more specific listener methods: use them instead. */
+    @Deprecated
+    public void addListener(BlockChainListener listener, Executor executor) {
+<span class="nc" id="L211">        addReorganizeListener(executor, listener);</span>
+<span class="nc" id="L212">        addNewBestBlockListener(executor, listener);</span>
+<span class="nc" id="L213">        addTransactionReceivedListener(executor, listener);</span>
+<span class="nc" id="L214">    }</span>
+
+    @Deprecated
+    public void removeListener(BlockChainListener listener) {
+<span class="nc" id="L218">        removeReorganizeListener(listener);</span>
+<span class="nc" id="L219">        removeNewBestBlockListener(listener);</span>
+<span class="nc" id="L220">        removeTransactionReceivedListener(listener);</span>
+<span class="nc" id="L221">    }</span>
+
+    /**
+     * Adds a {@link NewBestBlockListener} listener to the chain.
+     */
+    public void addNewBestBlockListener(NewBestBlockListener listener) {
+<span class="nc" id="L227">        addNewBestBlockListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L228">    }</span>
+
+    /**
+     * Adds a {@link NewBestBlockListener} listener to the chain.
+     */
+    public final void addNewBestBlockListener(Executor executor, NewBestBlockListener listener) {
+<span class="fc" id="L234">        newBestBlockListeners.add(new ListenerRegistration&lt;&gt;(listener, executor));</span>
+<span class="fc" id="L235">    }</span>
+
+    /**
+     * Adds a generic {@link ReorganizeListener} listener to the chain.
+     */
+    public void addReorganizeListener(ReorganizeListener listener) {
+<span class="nc" id="L241">        addReorganizeListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L242">    }</span>
+
+    /**
+     * Adds a generic {@link ReorganizeListener} listener to the chain.
+     */
+    public final void addReorganizeListener(Executor executor, ReorganizeListener listener) {
+<span class="fc" id="L248">        reorganizeListeners.add(new ListenerRegistration&lt;&gt;(listener, executor));</span>
+<span class="fc" id="L249">    }</span>
+
+    /**
+     * Adds a generic {@link TransactionReceivedInBlockListener} listener to the chain.
+     */
+    public void addTransactionReceivedListener(TransactionReceivedInBlockListener listener) {
+<span class="nc" id="L255">        addTransactionReceivedListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L256">    }</span>
+
+    /**
+     * Adds a generic {@link TransactionReceivedInBlockListener} listener to the chain.
+     */
+    public final void addTransactionReceivedListener(Executor executor, TransactionReceivedInBlockListener listener) {
+<span class="fc" id="L262">        transactionReceivedListeners.add(new ListenerRegistration&lt;&gt;(listener, executor));</span>
+<span class="fc" id="L263">    }</span>
+
+    /**
+     * Removes the given {@link NewBestBlockListener} from the chain.
+     */
+    public void removeNewBestBlockListener(NewBestBlockListener listener) {
+<span class="fc" id="L269">        ListenerRegistration.removeFromList(listener, newBestBlockListeners);</span>
+<span class="fc" id="L270">    }</span>
+
+    /**
+     * Removes the given {@link ReorganizeListener} from the chain.
+     */
+    public void removeReorganizeListener(ReorganizeListener listener) {
+<span class="fc" id="L276">        ListenerRegistration.removeFromList(listener, reorganizeListeners);</span>
+<span class="fc" id="L277">    }</span>
+
+    /**
+     * Removes the given {@link TransactionReceivedInBlockListener} from the chain.
+     */
+    public void removeTransactionReceivedListener(TransactionReceivedInBlockListener listener) {
+<span class="fc" id="L283">        ListenerRegistration.removeFromList(listener, transactionReceivedListeners);</span>
+<span class="fc" id="L284">    }</span>
+    
+    /**
+     * Returns the {@link BlockStore} the chain was constructed with. You can use this to iterate over the chain.
+     */
+    public BlockStore getBlockStore() {
+<span class="fc" id="L290">        return blockStore;</span>
+    }
+    
+    /**
+     * Adds/updates the given {@link Block} with the block store.
+     * This version is used when the transactions have not been verified.
+     * @param storedPrev The {@link StoredBlock} which immediately precedes block.
+     * @param block The {@link Block} to add/update.
+     * @return the newly created {@link StoredBlock}
+     */
+    protected abstract StoredBlock addToBlockStore(StoredBlock storedPrev, Block block)
+            throws BlockStoreException, VerificationException;
+    
+    /**
+     * Adds/updates the given {@link StoredBlock} with the block store.
+     * This version is used when the transactions have already been verified to properly spend txOutputChanges.
+     * @param storedPrev The {@link StoredBlock} which immediately precedes block.
+     * @param header The {@link StoredBlock} to add/update.
+     * @param txOutputChanges The total sum of all changes made by this block to the set of open transaction outputs
+     *                        (from a call to connectTransactions), if in fully verifying mode (null otherwise).
+     * @return the newly created {@link StoredBlock}
+     */
+    protected abstract StoredBlock addToBlockStore(StoredBlock storedPrev, Block header,
+                                                   @Nullable TransactionOutputChanges txOutputChanges)
+            throws BlockStoreException, VerificationException;
+
+    /**
+     * Rollback the block store to a given height. This is currently only supported by {@link BlockChain} instances.
+     * 
+     * @throws BlockStoreException
+     *             if the operation fails or is unsupported.
+     */
+    protected abstract void rollbackBlockStore(int height) throws BlockStoreException;
+
+    /**
+     * Called before setting chain head in memory.
+     * Should write the new head to block store and then commit any database transactions
+     * that were started by disconnectTransactions/connectTransactions.
+     */
+    protected abstract void doSetChainHead(StoredBlock chainHead) throws BlockStoreException;
+    
+    /**
+     * Called if we (possibly) previously called disconnectTransaction/connectTransactions,
+     * but will not be calling preSetChainHead as a block failed verification.
+     * Can be used to abort database transactions that were started by
+     * disconnectTransactions/connectTransactions.
+     */
+    protected abstract void notSettingChainHead() throws BlockStoreException;
+    
+    /**
+     * For a standard BlockChain, this should return blockStore.get(hash),
+     * for a FullPrunedBlockChain blockStore.getOnceUndoableStoredBlock(hash)
+     */
+    protected abstract StoredBlock getStoredBlockInCurrentScope(Sha256Hash hash) throws BlockStoreException;
+
+    /**
+     * Processes a received block and tries to add it to the chain. If there's something wrong with the block an
+     * exception is thrown. If the block is OK but cannot be connected to the chain at this time, returns false.
+     * If the block can be connected to the chain, returns true.
+     * Accessing block's transactions in another thread while this method runs may result in undefined behavior.
+     */
+    public boolean add(Block block) throws VerificationException, PrunedException {
+        try {
+<span class="fc" id="L353">            return add(block, true, null, null);</span>
+<span class="nc" id="L354">        } catch (BlockStoreException e) {</span>
+            // TODO: Figure out a better way to propagate this exception to the user.
+<span class="nc" id="L356">            throw new RuntimeException(e);</span>
+<span class="fc" id="L357">        } catch (VerificationException e) {</span>
+            try {
+<span class="fc" id="L359">                notSettingChainHead();</span>
+<span class="nc" id="L360">            } catch (BlockStoreException e1) {</span>
+<span class="nc" id="L361">                throw new RuntimeException(e1);</span>
+<span class="fc" id="L362">            }</span>
+<span class="fc" id="L363">            throw new VerificationException(&quot;Could not verify block:\n&quot; +</span>
+<span class="fc" id="L364">                    block.toString(), e);</span>
+        }
+    }
+    
+    /**
+     * Processes a received block and tries to add it to the chain. If there's something wrong with the block an
+     * exception is thrown. If the block is OK but cannot be connected to the chain at this time, returns false.
+     * If the block can be connected to the chain, returns true.
+     */
+    public boolean add(FilteredBlock block) throws VerificationException, PrunedException {
+        try {
+            // The block has a list of hashes of transactions that matched the Bloom filter, and a list of associated
+            // Transaction objects. There may be fewer Transaction objects than hashes, this is expected. It can happen
+            // in the case where we were already around to witness the initial broadcast, so we downloaded the
+            // transaction and sent it to the wallet before this point (the wallet may have thrown it away if it was
+            // a false positive, as expected in any Bloom filtering scheme). The filteredTxn list here will usually
+            // only be full of data when we are catching up to the head of the chain and thus haven't witnessed any
+            // of the transactions.
+<span class="fc" id="L382">            return add(block.getBlockHeader(), true, block.getTransactionHashes(), block.getAssociatedTransactions());</span>
+<span class="nc" id="L383">        } catch (BlockStoreException e) {</span>
+            // TODO: Figure out a better way to propagate this exception to the user.
+<span class="nc" id="L385">            throw new RuntimeException(e);</span>
+<span class="nc" id="L386">        } catch (VerificationException e) {</span>
+            try {
+<span class="nc" id="L388">                notSettingChainHead();</span>
+<span class="nc" id="L389">            } catch (BlockStoreException e1) {</span>
+<span class="nc" id="L390">                throw new RuntimeException(e1);</span>
+<span class="nc" id="L391">            }</span>
+<span class="nc" id="L392">            throw new VerificationException(&quot;Could not verify block &quot; + block.getHash().toString() + &quot;\n&quot; +</span>
+<span class="nc" id="L393">                    block.toString(), e);</span>
+        }
+    }
+    
+    /**
+     * Whether or not we are maintaining a set of unspent outputs and are verifying all transactions.
+     * Also indicates that all calls to add() should provide a block containing transactions
+     */
+    protected abstract boolean shouldVerifyTransactions();
+    
+    /**
+     * Connect each transaction in block.transactions, verifying them as we go and removing spent outputs
+     * If an error is encountered in a transaction, no changes should be made to the underlying BlockStore.
+     * and a VerificationException should be thrown.
+     * Only called if(shouldVerifyTransactions())
+     * @throws VerificationException if an attempt was made to spend an already-spent output, or if a transaction incorrectly solved an output script.
+     * @throws BlockStoreException if the block store had an underlying error.
+     * @return The full set of all changes made to the set of open transaction outputs.
+     */
+    protected abstract TransactionOutputChanges connectTransactions(int height, Block block) throws VerificationException, BlockStoreException;
+
+    /**
+     * Load newBlock from BlockStore and connect its transactions, returning changes to the set of unspent transactions.
+     * If an error is encountered in a transaction, no changes should be made to the underlying BlockStore.
+     * Only called if(shouldVerifyTransactions())
+     * @throws PrunedException if newBlock does not exist as a {@link StoredUndoableBlock} in the block store.
+     * @throws VerificationException if an attempt was made to spend an already-spent output, or if a transaction incorrectly solved an output script.
+     * @throws BlockStoreException if the block store had an underlying error or newBlock does not exist in the block store at all.
+     * @return The full set of all changes made to the set of open transaction outputs.
+     */
+    protected abstract TransactionOutputChanges connectTransactions(StoredBlock newBlock) throws VerificationException, BlockStoreException, PrunedException;    
+    
+    // filteredTxHashList contains all transactions, filteredTxn just a subset
+    private boolean add(Block block, boolean tryConnecting,
+                        @Nullable List&lt;Sha256Hash&gt; filteredTxHashList, @Nullable Map&lt;Sha256Hash, Transaction&gt; filteredTxn)
+            throws BlockStoreException, VerificationException, PrunedException {
+        // TODO: Use read/write locks to ensure that during chain download properties are still low latency.
+<span class="fc" id="L430">        lock.lock();</span>
+        try {
+            // Quick check for duplicates to avoid an expensive check further down (in findSplit). This can happen a lot
+            // when connecting orphan transactions due to the dumb brute force algorithm we use.
+<span class="fc bfc" id="L434" title="All 2 branches covered.">            if (block.equals(getChainHead().getHeader())) {</span>
+<span class="fc" id="L435">                return true;</span>
+            }
+<span class="fc bfc" id="L437" title="All 4 branches covered.">            if (tryConnecting &amp;&amp; orphanBlocks.containsKey(block.getHash())) {</span>
+<span class="fc" id="L438">                return false;</span>
+            }
+
+            // If we want to verify transactions (ie we are running with full blocks), verify that block has transactions
+<span class="pc bpc" id="L442" title="1 of 4 branches missed.">            if (shouldVerifyTransactions() &amp;&amp; block.transactions == null)</span>
+<span class="nc" id="L443">                throw new VerificationException(&quot;Got a block header while running in full-block mode&quot;);</span>
+
+            // Check for already-seen block, but only for full pruned mode, where the DB is
+            // more likely able to handle these queries quickly.
+<span class="fc bfc" id="L447" title="All 4 branches covered.">            if (shouldVerifyTransactions() &amp;&amp; blockStore.get(block.getHash()) != null) {</span>
+<span class="fc" id="L448">                return true;</span>
+            }
+
+            final StoredBlock storedPrev;
+            final int height;
+            final EnumSet&lt;Block.VerifyFlag&gt; flags;
+
+            // Prove the block is internally valid: hash is lower than target, etc. This only checks the block contents
+            // if there is a tx sending or receiving coins using an address in one of our wallets. And those transactions
+            // are only lightly verified: presence in a valid connecting block is taken as proof of validity. See the
+            // article here for more details: https://bitcoinj.github.io/security-model
+            try {
+<span class="fc" id="L460">                block.verifyHeader();</span>
+<span class="fc" id="L461">                storedPrev = getStoredBlockInCurrentScope(block.getPrevBlockHash());</span>
+<span class="fc bfc" id="L462" title="All 2 branches covered.">                if (storedPrev != null) {</span>
+<span class="fc" id="L463">                    height = storedPrev.getHeight() + 1;</span>
+                } else {
+<span class="fc" id="L465">                    height = Block.BLOCK_HEIGHT_UNKNOWN;</span>
+                }
+<span class="fc" id="L467">                flags = params.getBlockVerificationFlags(block, versionTally, height);</span>
+<span class="fc bfc" id="L468" title="All 2 branches covered.">                if (shouldVerifyTransactions())</span>
+<span class="fc" id="L469">                    block.verifyTransactions(height, flags);</span>
+<span class="fc" id="L470">            } catch (VerificationException e) {</span>
+<span class="fc" id="L471">                log.error(&quot;Failed to verify block: &quot;, e);</span>
+<span class="fc" id="L472">                log.error(block.getHashAsString());</span>
+<span class="fc" id="L473">                throw e;</span>
+<span class="fc" id="L474">            }</span>
+
+            // Try linking it to a place in the currently known blocks.
+
+<span class="fc bfc" id="L478" title="All 2 branches covered.">            if (storedPrev == null) {</span>
+                // We can't find the previous block. Probably we are still in the process of downloading the chain and a
+                // block was solved whilst we were doing it. We put it to one side and try to connect it later when we
+                // have more blocks.
+<span class="fc" id="L482">                checkState(tryConnecting, &quot;bug in tryConnectingOrphans&quot;);</span>
+<span class="fc" id="L483">                log.warn(&quot;Block does not connect: {} prev {}&quot;, block.getHashAsString(), block.getPrevBlockHash());</span>
+<span class="fc" id="L484">                orphanBlocks.put(block.getHash(), new OrphanBlock(block, filteredTxHashList, filteredTxn));</span>
+<span class="fc" id="L485">                return false;</span>
+            } else {
+<span class="fc" id="L487">                checkState(lock.isHeldByCurrentThread());</span>
+                // It connects to somewhere on the chain. Not necessarily the top of the best known chain.
+<span class="fc" id="L489">                params.checkDifficultyTransitions(storedPrev, block, blockStore);</span>
+<span class="fc" id="L490">                connectBlock(block, storedPrev, shouldVerifyTransactions(), filteredTxHashList, filteredTxn);</span>
+            }
+
+<span class="fc bfc" id="L493" title="All 2 branches covered.">            if (tryConnecting)</span>
+<span class="fc" id="L494">                tryConnectingOrphans();</span>
+
+<span class="fc" id="L496">            return true;</span>
+        } finally {
+<span class="fc" id="L498">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Returns the hashes of the currently stored orphan blocks and then deletes them from this objects storage.
+     * Used by Peer when a filter exhaustion event has occurred and thus any orphan blocks that have been downloaded
+     * might be inaccurate/incomplete.
+     */
+    public Set&lt;Sha256Hash&gt; drainOrphanBlocks() {
+<span class="fc" id="L508">        lock.lock();</span>
+        try {
+<span class="fc" id="L510">            Set&lt;Sha256Hash&gt; hashes = new HashSet&lt;&gt;(orphanBlocks.keySet());</span>
+<span class="fc" id="L511">            orphanBlocks.clear();</span>
+<span class="fc" id="L512">            return hashes;</span>
+        } finally {
+<span class="pc" id="L514">            lock.unlock();</span>
+        }
+    }
+
+    // expensiveChecks enables checks that require looking at blocks further back in the chain
+    // than the previous one when connecting (eg median timestamp check)
+    // It could be exposed, but for now we just set it to shouldVerifyTransactions()
+    private void connectBlock(final Block block, StoredBlock storedPrev, boolean expensiveChecks,
+                              @Nullable final List&lt;Sha256Hash&gt; filteredTxHashList,
+                              @Nullable final Map&lt;Sha256Hash, Transaction&gt; filteredTxn) throws BlockStoreException, VerificationException, PrunedException {
+<span class="fc" id="L524">        checkState(lock.isHeldByCurrentThread());</span>
+<span class="pc bpc" id="L525" title="1 of 4 branches missed.">        boolean filtered = filteredTxHashList != null &amp;&amp; filteredTxn != null;</span>
+        // Check that we aren't connecting a block that fails a checkpoint check
+<span class="pc bpc" id="L527" title="1 of 2 branches missed.">        if (!params.passesCheckpoint(storedPrev.getHeight() + 1, block.getHash()))</span>
+<span class="nc" id="L528">            throw new VerificationException(&quot;Block failed checkpoint lockin at &quot; + (storedPrev.getHeight() + 1));</span>
+<span class="fc bfc" id="L529" title="All 2 branches covered.">        if (shouldVerifyTransactions()) {</span>
+<span class="fc" id="L530">            checkNotNull(block.transactions);</span>
+<span class="fc bfc" id="L531" title="All 2 branches covered.">            for (Transaction tx : block.transactions)</span>
+<span class="fc bfc" id="L532" title="All 2 branches covered.">                if (!tx.isFinal(storedPrev.getHeight() + 1, block.getTimeSeconds()))</span>
+<span class="fc" id="L533">                   throw new VerificationException(&quot;Block contains non-final transaction&quot;);</span>
+        }
+        
+<span class="fc" id="L536">        StoredBlock head = getChainHead();</span>
+<span class="fc bfc" id="L537" title="All 2 branches covered.">        if (storedPrev.equals(head)) {</span>
+<span class="pc bpc" id="L538" title="1 of 4 branches missed.">            if (filtered &amp;&amp; filteredTxn.size() &gt; 0)  {</span>
+<span class="fc" id="L539">                log.debug(&quot;Block {} connects to top of best chain with {} transaction(s) of which we were sent {}&quot;,</span>
+<span class="fc" id="L540">                        block.getHashAsString(), filteredTxHashList.size(), filteredTxn.size());</span>
+<span class="fc bfc" id="L541" title="All 2 branches covered.">                for (Sha256Hash hash : filteredTxHashList) log.debug(&quot;  matched tx {}&quot;, hash);</span>
+            }
+<span class="pc bpc" id="L543" title="1 of 4 branches missed.">            if (expensiveChecks &amp;&amp; block.getTimeSeconds() &lt;= getMedianTimestampOfRecentBlocks(head, blockStore))</span>
+<span class="nc" id="L544">                throw new VerificationException(&quot;Block's timestamp is too early&quot;);</span>
+
+            // BIP 66 &amp; 65: Enforce block version 3/4 once they are a supermajority of blocks
+            // NOTE: This requires 1,000 blocks since the last checkpoint (on main
+            // net, less on test) in order to be applied. It is also limited to
+            // stopping addition of new v2/3 blocks to the tip of the chain.
+<span class="fc bfc" id="L550" title="All 2 branches covered.">            if (block.getVersion() == Block.BLOCK_VERSION_BIP34</span>
+<span class="fc bfc" id="L551" title="All 2 branches covered.">                || block.getVersion() == Block.BLOCK_VERSION_BIP66) {</span>
+<span class="fc" id="L552">                final Integer count = versionTally.getCountAtOrAbove(block.getVersion() + 1);</span>
+<span class="fc bfc" id="L553" title="All 2 branches covered.">                if (count != null</span>
+<span class="fc bfc" id="L554" title="All 2 branches covered.">                    &amp;&amp; count &gt;= params.getMajorityRejectBlockOutdated()) {</span>
+<span class="fc" id="L555">                    throw new VerificationException.BlockVersionOutOfDate(block.getVersion());</span>
+                }
+            }
+
+            // This block connects to the best known block, it is a normal continuation of the system.
+<span class="fc" id="L560">            TransactionOutputChanges txOutChanges = null;</span>
+<span class="fc bfc" id="L561" title="All 2 branches covered.">            if (shouldVerifyTransactions())</span>
+<span class="fc" id="L562">                txOutChanges = connectTransactions(storedPrev.getHeight() + 1, block);</span>
+<span class="fc bfc" id="L563" title="All 2 branches covered.">            StoredBlock newStoredBlock = addToBlockStore(storedPrev,</span>
+<span class="fc" id="L564">                    block.transactions == null ? block : block.cloneAsHeader(), txOutChanges);</span>
+<span class="fc" id="L565">            versionTally.add(block.getVersion());</span>
+<span class="fc" id="L566">            setChainHead(newStoredBlock);</span>
+<span class="fc" id="L567">            log.debug(&quot;Chain is now {} blocks high, running listeners&quot;, newStoredBlock.getHeight());</span>
+<span class="fc" id="L568">            informListenersForNewBlock(block, NewBlockType.BEST_CHAIN, filteredTxHashList, filteredTxn, newStoredBlock);</span>
+<span class="fc" id="L569">        } else {</span>
+            // This block connects to somewhere other than the top of the best known chain. We treat these differently.
+            //
+            // Note that we send the transactions to the wallet FIRST, even if we're about to re-organize this block
+            // to become the new best chain head. This simplifies handling of the re-org in the Wallet class.
+<span class="fc" id="L574">            StoredBlock newBlock = storedPrev.build(block);</span>
+<span class="fc" id="L575">            boolean haveNewBestChain = newBlock.moreWorkThan(head);</span>
+<span class="fc bfc" id="L576" title="All 2 branches covered.">            if (haveNewBestChain) {</span>
+<span class="fc" id="L577">                log.info(&quot;Block is causing a re-organize&quot;);</span>
+            } else {
+<span class="fc" id="L579">                StoredBlock splitPoint = findSplit(newBlock, head, blockStore);</span>
+<span class="pc bpc" id="L580" title="1 of 4 branches missed.">                if (splitPoint != null &amp;&amp; splitPoint.equals(newBlock)) {</span>
+                    // newStoredBlock is a part of the same chain, there's no fork. This happens when we receive a block
+                    // that we already saw and linked into the chain previously, which isn't the chain head.
+                    // Re-processing it is confusing for the wallet so just skip.
+<span class="fc" id="L584">                    log.warn(&quot;Saw duplicated block in main chain at height {}: {}&quot;,</span>
+<span class="fc" id="L585">                            newBlock.getHeight(), newBlock.getHeader().getHash());</span>
+<span class="fc" id="L586">                    return;</span>
+                }
+<span class="pc bpc" id="L588" title="1 of 2 branches missed.">                if (splitPoint == null) {</span>
+                    // This should absolutely never happen
+                    // (lets not write the full block to disk to keep any bugs which allow this to happen
+                    //  from writing unreasonable amounts of data to disk)
+<span class="nc" id="L592">                    throw new VerificationException(&quot;Block forks the chain but splitPoint is null&quot;);</span>
+                } else {
+                    // We aren't actually spending any transactions (yet) because we are on a fork
+<span class="fc" id="L595">                    addToBlockStore(storedPrev, block);</span>
+<span class="fc" id="L596">                    int splitPointHeight = splitPoint.getHeight();</span>
+<span class="fc" id="L597">                    String splitPointHash = splitPoint.getHeader().getHashAsString();</span>
+<span class="fc" id="L598">                    log.info(&quot;Block forks the chain at height {}/block {}, but it did not cause a reorganize:\n{}&quot;,</span>
+<span class="fc" id="L599">                            splitPointHeight, splitPointHash, newBlock.getHeader().getHashAsString());</span>
+                }
+            }
+            
+            // We may not have any transactions if we received only a header, which can happen during fast catchup.
+            // If we do, send them to the wallet but state that they are on a side chain so it knows not to try and
+            // spend them until they become activated.
+<span class="pc bpc" id="L606" title="3 of 4 branches missed.">            if (block.transactions != null || filtered) {</span>
+<span class="fc" id="L607">                informListenersForNewBlock(block, NewBlockType.SIDE_CHAIN, filteredTxHashList, filteredTxn, newBlock);</span>
+            }
+            
+<span class="fc bfc" id="L610" title="All 2 branches covered.">            if (haveNewBestChain)</span>
+<span class="fc" id="L611">                handleNewBestChain(storedPrev, newBlock, block, expensiveChecks);</span>
+        }
+<span class="fc" id="L613">    }</span>
+
+    private void informListenersForNewBlock(final Block block, final NewBlockType newBlockType,
+                                            @Nullable final List&lt;Sha256Hash&gt; filteredTxHashList,
+                                            @Nullable final Map&lt;Sha256Hash, Transaction&gt; filteredTxn,
+                                            final StoredBlock newStoredBlock) throws VerificationException {
+        // Notify the listeners of the new block, so the depth and workDone of stored transactions can be updated
+        // (in the case of the listener being a wallet). Wallets need to know how deep each transaction is so
+        // coinbases aren't used before maturity.
+<span class="fc" id="L622">        boolean first = true;</span>
+<span class="fc" id="L623">        Set&lt;Sha256Hash&gt; falsePositives = Sets.newHashSet();</span>
+<span class="fc bfc" id="L624" title="All 2 branches covered.">        if (filteredTxHashList != null) falsePositives.addAll(filteredTxHashList);</span>
+
+<span class="fc bfc" id="L626" title="All 2 branches covered.">        for (final ListenerRegistration&lt;TransactionReceivedInBlockListener&gt; registration : transactionReceivedListeners) {</span>
+<span class="pc bpc" id="L627" title="1 of 2 branches missed.">            if (registration.executor == Threading.SAME_THREAD) {</span>
+<span class="fc" id="L628">                informListenerForNewTransactions(block, newBlockType, filteredTxHashList, filteredTxn,</span>
+                        newStoredBlock, first, registration.listener, falsePositives);
+            } else {
+                // Listener wants to be run on some other thread, so marshal it across here.
+<span class="nc bnc" id="L632" title="All 2 branches missed.">                final boolean notFirst = !first;</span>
+<span class="nc" id="L633">                registration.executor.execute(new Runnable() {</span>
+                    @Override
+                    public void run() {
+                        try {
+                            // We can't do false-positive handling when executing on another thread
+<span class="nc" id="L638">                            Set&lt;Sha256Hash&gt; ignoredFalsePositives = Sets.newHashSet();</span>
+<span class="nc" id="L639">                            informListenerForNewTransactions(block, newBlockType, filteredTxHashList, filteredTxn,</span>
+                                    newStoredBlock, notFirst, registration.listener, ignoredFalsePositives);
+<span class="nc" id="L641">                        } catch (VerificationException e) {</span>
+<span class="nc" id="L642">                            log.error(&quot;Block chain listener threw exception: &quot;, e);</span>
+                            // Don't attempt to relay this back to the original peer thread if this was an async
+                            // listener invocation.
+                            // TODO: Make exception reporting a global feature and use it here.
+<span class="nc" id="L646">                        }</span>
+<span class="nc" id="L647">                    }</span>
+                });
+            }
+<span class="fc" id="L650">            first = false;</span>
+<span class="fc" id="L651">        }</span>
+
+<span class="fc bfc" id="L653" title="All 2 branches covered.">        for (final ListenerRegistration&lt;NewBestBlockListener&gt; registration : newBestBlockListeners) {</span>
+<span class="pc bpc" id="L654" title="1 of 2 branches missed.">            if (registration.executor == Threading.SAME_THREAD) {</span>
+<span class="fc bfc" id="L655" title="All 2 branches covered.">                if (newBlockType == NewBlockType.BEST_CHAIN)</span>
+<span class="fc" id="L656">                    registration.listener.notifyNewBestBlock(newStoredBlock);</span>
+            } else {
+                // Listener wants to be run on some other thread, so marshal it across here.
+<span class="nc" id="L659">                registration.executor.execute(new Runnable() {</span>
+                    @Override
+                    public void run() {
+                        try {
+<span class="nc bnc" id="L663" title="All 2 branches missed.">                            if (newBlockType == NewBlockType.BEST_CHAIN)</span>
+<span class="nc" id="L664">                                registration.listener.notifyNewBestBlock(newStoredBlock);</span>
+<span class="nc" id="L665">                        } catch (VerificationException e) {</span>
+<span class="nc" id="L666">                            log.error(&quot;Block chain listener threw exception: &quot;, e);</span>
+                            // Don't attempt to relay this back to the original peer thread if this was an async
+                            // listener invocation.
+                            // TODO: Make exception reporting a global feature and use it here.
+<span class="nc" id="L670">                        }</span>
+<span class="nc" id="L671">                    }</span>
+                });
+            }
+<span class="fc" id="L674">            first = false;</span>
+<span class="fc" id="L675">        }</span>
+
+<span class="fc" id="L677">        trackFalsePositives(falsePositives.size());</span>
+<span class="fc" id="L678">    }</span>
+
+    private static void informListenerForNewTransactions(Block block, NewBlockType newBlockType,
+                                                         @Nullable List&lt;Sha256Hash&gt; filteredTxHashList,
+                                                         @Nullable Map&lt;Sha256Hash, Transaction&gt; filteredTxn,
+                                                         StoredBlock newStoredBlock, boolean first,
+                                                         TransactionReceivedInBlockListener listener,
+                                                         Set&lt;Sha256Hash&gt; falsePositives) throws VerificationException {
+<span class="fc bfc" id="L686" title="All 2 branches covered.">        if (block.transactions != null) {</span>
+            // If this is not the first wallet, ask for the transactions to be duplicated before being given
+            // to the wallet when relevant. This ensures that if we have two connected wallets and a tx that
+            // is relevant to both of them, they don't end up accidentally sharing the same object (which can
+            // result in temporary in-memory corruption during re-orgs). See bug 257. We only duplicate in
+            // the case of multiple wallets to avoid an unnecessary efficiency hit in the common case.
+<span class="fc bfc" id="L692" title="All 2 branches covered.">            sendTransactionsToListener(newStoredBlock, newBlockType, listener, 0, block.transactions,</span>
+                    !first, falsePositives);
+<span class="fc bfc" id="L694" title="All 2 branches covered.">        } else if (filteredTxHashList != null) {</span>
+<span class="fc" id="L695">            checkNotNull(filteredTxn);</span>
+            // We must send transactions to listeners in the order they appeared in the block - thus we iterate over the
+            // set of hashes and call sendTransactionsToListener with individual txn when they have not already been
+            // seen in loose broadcasts - otherwise notifyTransactionIsInBlock on the hash.
+<span class="fc" id="L699">            int relativityOffset = 0;</span>
+<span class="fc bfc" id="L700" title="All 2 branches covered.">            for (Sha256Hash hash : filteredTxHashList) {</span>
+<span class="fc" id="L701">                Transaction tx = filteredTxn.get(hash);</span>
+<span class="pc bpc" id="L702" title="1 of 2 branches missed.">                if (tx != null) {</span>
+<span class="fc" id="L703">                    sendTransactionsToListener(newStoredBlock, newBlockType, listener, relativityOffset,</span>
+<span class="pc bpc" id="L704" title="1 of 2 branches missed.">                            Collections.singletonList(tx), !first, falsePositives);</span>
+                } else {
+<span class="nc bnc" id="L706" title="All 2 branches missed.">                    if (listener.notifyTransactionIsInBlock(hash, newStoredBlock, newBlockType, relativityOffset)) {</span>
+<span class="nc" id="L707">                        falsePositives.remove(hash);</span>
+                    }
+                }
+<span class="fc" id="L710">                relativityOffset++;</span>
+<span class="fc" id="L711">            }</span>
+        }
+<span class="fc" id="L713">    }</span>
+
+    /**
+     * Gets the median timestamp of the last 11 blocks
+     */
+    private static long getMedianTimestampOfRecentBlocks(StoredBlock storedBlock,
+                                                         BlockStore store) throws BlockStoreException {
+<span class="fc" id="L720">        long[] timestamps = new long[11];</span>
+<span class="fc" id="L721">        int unused = 9;</span>
+<span class="fc" id="L722">        timestamps[10] = storedBlock.getHeader().getTimeSeconds();</span>
+<span class="fc bfc" id="L723" title="All 4 branches covered.">        while (unused &gt;= 0 &amp;&amp; (storedBlock = storedBlock.getPrev(store)) != null)</span>
+<span class="fc" id="L724">            timestamps[unused--] = storedBlock.getHeader().getTimeSeconds();</span>
+        
+<span class="fc" id="L726">        Arrays.sort(timestamps, unused+1, 11);</span>
+<span class="fc" id="L727">        return timestamps[unused + (11-unused)/2];</span>
+    }
+    
+    /**
+     * Disconnect each transaction in the block (after reading it from the block store)
+     * Only called if(shouldVerifyTransactions())
+     * @throws PrunedException if block does not exist as a {@link StoredUndoableBlock} in the block store.
+     * @throws BlockStoreException if the block store had an underlying error or block does not exist in the block store at all.
+     */
+    protected abstract void disconnectTransactions(StoredBlock block) throws PrunedException, BlockStoreException;
+
+    /**
+     * Called as part of connecting a block when the new block results in a different chain having higher total work.
+     * 
+     * if (shouldVerifyTransactions)
+     *     Either newChainHead needs to be in the block store as a FullStoredBlock, or (block != null &amp;&amp; block.transactions != null)
+     */
+    private void handleNewBestChain(StoredBlock storedPrev, StoredBlock newChainHead, Block block, boolean expensiveChecks)
+            throws BlockStoreException, VerificationException, PrunedException {
+<span class="fc" id="L746">        checkState(lock.isHeldByCurrentThread());</span>
+        // This chain has overtaken the one we currently believe is best. Reorganize is required.
+        //
+        // Firstly, calculate the block at which the chain diverged. We only need to examine the
+        // chain from beyond this block to find differences.
+<span class="fc" id="L751">        StoredBlock head = getChainHead();</span>
+<span class="fc" id="L752">        final StoredBlock splitPoint = findSplit(newChainHead, head, blockStore);</span>
+<span class="fc" id="L753">        log.info(&quot;Re-organize after split at height {}&quot;, splitPoint.getHeight());</span>
+<span class="fc" id="L754">        log.info(&quot;Old chain head: {}&quot;, head.getHeader().getHashAsString());</span>
+<span class="fc" id="L755">        log.info(&quot;New chain head: {}&quot;, newChainHead.getHeader().getHashAsString());</span>
+<span class="fc" id="L756">        log.info(&quot;Split at block: {}&quot;, splitPoint.getHeader().getHashAsString());</span>
+        // Then build a list of all blocks in the old part of the chain and the new part.
+<span class="fc" id="L758">        final LinkedList&lt;StoredBlock&gt; oldBlocks = getPartialChain(head, splitPoint, blockStore);</span>
+<span class="fc" id="L759">        final LinkedList&lt;StoredBlock&gt; newBlocks = getPartialChain(newChainHead, splitPoint, blockStore);</span>
+        // Disconnect each transaction in the previous main chain that is no longer in the new main chain
+<span class="fc" id="L761">        StoredBlock storedNewHead = splitPoint;</span>
+<span class="fc bfc" id="L762" title="All 2 branches covered.">        if (shouldVerifyTransactions()) {</span>
+<span class="fc bfc" id="L763" title="All 2 branches covered.">            for (StoredBlock oldBlock : oldBlocks) {</span>
+                try {
+<span class="fc" id="L765">                    disconnectTransactions(oldBlock);</span>
+<span class="nc" id="L766">                } catch (PrunedException e) {</span>
+                    // We threw away the data we need to re-org this deep! We need to go back to a peer with full
+                    // block contents and ask them for the relevant data then rebuild the indexs. Or we could just
+                    // give up and ask the human operator to help get us unstuck (eg, rescan from the genesis block).
+                    // TODO: Retry adding this block when we get a block with hash e.getHash()
+<span class="nc" id="L771">                    throw e;</span>
+<span class="fc" id="L772">                }</span>
+<span class="fc" id="L773">            }</span>
+            StoredBlock cursor;
+            // Walk in ascending chronological order.
+<span class="fc bfc" id="L776" title="All 2 branches covered.">            for (Iterator&lt;StoredBlock&gt; it = newBlocks.descendingIterator(); it.hasNext();) {</span>
+<span class="fc" id="L777">                cursor = it.next();</span>
+<span class="fc" id="L778">                Block cursorBlock = cursor.getHeader();</span>
+<span class="pc bpc" id="L779" title="1 of 4 branches missed.">                if (expensiveChecks &amp;&amp; cursorBlock.getTimeSeconds() &lt;= getMedianTimestampOfRecentBlocks(cursor.getPrev(blockStore), blockStore))</span>
+<span class="fc" id="L780">                    throw new VerificationException(&quot;Block's timestamp is too early during reorg&quot;);</span>
+                TransactionOutputChanges txOutChanges;
+<span class="pc bpc" id="L782" title="1 of 4 branches missed.">                if (cursor != newChainHead || block == null)</span>
+<span class="fc" id="L783">                    txOutChanges = connectTransactions(cursor);</span>
+                else
+<span class="fc" id="L785">                    txOutChanges = connectTransactions(newChainHead.getHeight(), block);</span>
+<span class="fc" id="L786">                storedNewHead = addToBlockStore(storedNewHead, cursorBlock.cloneAsHeader(), txOutChanges);</span>
+<span class="fc" id="L787">            }</span>
+        } else {
+            // (Finally) write block to block store
+<span class="fc" id="L790">            storedNewHead = addToBlockStore(storedPrev, newChainHead.getHeader());</span>
+        }
+        // Now inform the listeners. This is necessary so the set of currently active transactions (that we can spend)
+        // can be updated to take into account the re-organize. We might also have received new coins we didn't have
+        // before and our previous spends might have been undone.
+<span class="fc bfc" id="L795" title="All 2 branches covered.">        for (final ListenerRegistration&lt;ReorganizeListener&gt; registration : reorganizeListeners) {</span>
+<span class="pc bpc" id="L796" title="1 of 2 branches missed.">            if (registration.executor == Threading.SAME_THREAD) {</span>
+                // Short circuit the executor so we can propagate any exceptions.
+                // TODO: Do we really need to do this or should it be irrelevant?
+<span class="fc" id="L799">                registration.listener.reorganize(splitPoint, oldBlocks, newBlocks);</span>
+            } else {
+<span class="nc" id="L801">                registration.executor.execute(new Runnable() {</span>
+                    @Override
+                    public void run() {
+                        try {
+<span class="nc" id="L805">                            registration.listener.reorganize(splitPoint, oldBlocks, newBlocks);</span>
+<span class="nc" id="L806">                        } catch (VerificationException e) {</span>
+<span class="nc" id="L807">                            log.error(&quot;Block chain listener threw exception during reorg&quot;, e);</span>
+<span class="nc" id="L808">                        }</span>
+<span class="nc" id="L809">                    }</span>
+                });
+            }
+<span class="fc" id="L812">        }</span>
+        // Update the pointer to the best known block.
+<span class="fc" id="L814">        setChainHead(storedNewHead);</span>
+<span class="fc" id="L815">    }</span>
+
+    /**
+     * Returns the set of contiguous blocks between 'higher' and 'lower'. Higher is included, lower is not.
+     */
+    private static LinkedList&lt;StoredBlock&gt; getPartialChain(StoredBlock higher, StoredBlock lower, BlockStore store) throws BlockStoreException {
+<span class="pc bpc" id="L821" title="1 of 2 branches missed.">        checkArgument(higher.getHeight() &gt; lower.getHeight(), &quot;higher and lower are reversed&quot;);</span>
+<span class="fc" id="L822">        LinkedList&lt;StoredBlock&gt; results = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L823">        StoredBlock cursor = higher;</span>
+        while (true) {
+<span class="fc" id="L825">            results.add(cursor);</span>
+<span class="fc" id="L826">            cursor = checkNotNull(cursor.getPrev(store), &quot;Ran off the end of the chain&quot;);</span>
+<span class="fc bfc" id="L827" title="All 2 branches covered.">            if (cursor.equals(lower)) break;</span>
+        }
+<span class="fc" id="L829">        return results;</span>
+    }
+
+    /**
+     * Locates the point in the chain at which newStoredBlock and chainHead diverge. Returns null if no split point was
+     * found (ie they are not part of the same chain). Returns newChainHead or chainHead if they don't actually diverge
+     * but are part of the same chain.
+     */
+    private static StoredBlock findSplit(StoredBlock newChainHead, StoredBlock oldChainHead,
+                                         BlockStore store) throws BlockStoreException {
+<span class="fc" id="L839">        StoredBlock currentChainCursor = oldChainHead;</span>
+<span class="fc" id="L840">        StoredBlock newChainCursor = newChainHead;</span>
+        // Loop until we find the block both chains have in common. Example:
+        //
+        //    A -&gt; B -&gt; C -&gt; D
+        //         \--&gt; E -&gt; F -&gt; G
+        //
+        // findSplit will return block B. oldChainHead = D and newChainHead = G.
+<span class="fc bfc" id="L847" title="All 2 branches covered.">        while (!currentChainCursor.equals(newChainCursor)) {</span>
+<span class="fc bfc" id="L848" title="All 2 branches covered.">            if (currentChainCursor.getHeight() &gt; newChainCursor.getHeight()) {</span>
+<span class="fc" id="L849">                currentChainCursor = currentChainCursor.getPrev(store);</span>
+<span class="fc" id="L850">                checkNotNull(currentChainCursor, &quot;Attempt to follow an orphan chain&quot;);</span>
+            } else {
+<span class="fc" id="L852">                newChainCursor = newChainCursor.getPrev(store);</span>
+<span class="fc" id="L853">                checkNotNull(newChainCursor, &quot;Attempt to follow an orphan chain&quot;);</span>
+            }
+        }
+<span class="fc" id="L856">        return currentChainCursor;</span>
+    }
+
+    /**
+     * @return the height of the best known chain, convenience for &lt;tt&gt;getChainHead().getHeight()&lt;/tt&gt;.
+     */
+    public final int getBestChainHeight() {
+<span class="fc" id="L863">        return getChainHead().getHeight();</span>
+    }
+
+<span class="pc" id="L866">    public enum NewBlockType {</span>
+<span class="fc" id="L867">        BEST_CHAIN,</span>
+<span class="fc" id="L868">        SIDE_CHAIN</span>
+    }
+
+    private static void sendTransactionsToListener(StoredBlock block, NewBlockType blockType,
+                                                   TransactionReceivedInBlockListener listener,
+                                                   int relativityOffset,
+                                                   List&lt;Transaction&gt; transactions,
+                                                   boolean clone,
+                                                   Set&lt;Sha256Hash&gt; falsePositives) throws VerificationException {
+<span class="fc bfc" id="L877" title="All 2 branches covered.">        for (Transaction tx : transactions) {</span>
+            try {
+<span class="fc" id="L879">                falsePositives.remove(tx.getHash());</span>
+<span class="fc bfc" id="L880" title="All 2 branches covered.">                if (clone)</span>
+<span class="fc" id="L881">                    tx = tx.params.getDefaultSerializer().makeTransaction(tx.bitcoinSerialize());</span>
+<span class="fc" id="L882">                listener.receiveFromBlock(tx, block, blockType, relativityOffset++);</span>
+<span class="nc" id="L883">            } catch (ScriptException e) {</span>
+                // We don't want scripts we don't understand to break the block chain so just note that this tx was
+                // not scanned here and continue.
+<span class="nc" id="L886">                log.warn(&quot;Failed to parse a script: &quot; + e.toString());</span>
+<span class="nc" id="L887">            } catch (ProtocolException e) {</span>
+                // Failed to duplicate tx, should never happen.
+<span class="nc" id="L889">                throw new RuntimeException(e);</span>
+<span class="pc" id="L890">            }</span>
+<span class="fc" id="L891">        }</span>
+<span class="fc" id="L892">    }</span>
+
+    protected void setChainHead(StoredBlock chainHead) throws BlockStoreException {
+<span class="fc" id="L895">        doSetChainHead(chainHead);</span>
+<span class="fc" id="L896">        synchronized (chainHeadLock) {</span>
+<span class="fc" id="L897">            this.chainHead = chainHead;</span>
+<span class="pc" id="L898">        }</span>
+<span class="fc" id="L899">    }</span>
+
+    /**
+     * For each block in orphanBlocks, see if we can now fit it on top of the chain and if so, do so.
+     */
+    private void tryConnectingOrphans() throws VerificationException, BlockStoreException, PrunedException {
+<span class="fc" id="L905">        checkState(lock.isHeldByCurrentThread());</span>
+        // For each block in our orphan list, try and fit it onto the head of the chain. If we succeed remove it
+        // from the list and keep going. If we changed the head of the list at the end of the round try again until
+        // we can't fit anything else on the top.
+        //
+        // This algorithm is kind of crappy, we should do a topo-sort then just connect them in order, but for small
+        // numbers of orphan blocks it does OK.
+        int blocksConnectedThisRound;
+        do {
+<span class="fc" id="L914">            blocksConnectedThisRound = 0;</span>
+<span class="fc" id="L915">            Iterator&lt;OrphanBlock&gt; iter = orphanBlocks.values().iterator();</span>
+<span class="fc bfc" id="L916" title="All 2 branches covered.">            while (iter.hasNext()) {</span>
+<span class="fc" id="L917">                OrphanBlock orphanBlock = iter.next();</span>
+                // Look up the blocks previous.
+<span class="fc" id="L919">                StoredBlock prev = getStoredBlockInCurrentScope(orphanBlock.block.getPrevBlockHash());</span>
+<span class="fc bfc" id="L920" title="All 2 branches covered.">                if (prev == null) {</span>
+                    // This is still an unconnected/orphan block.
+<span class="fc" id="L922">                    log.debug(&quot;Orphan block {} is not connectable right now&quot;, orphanBlock.block.getHash());</span>
+<span class="fc" id="L923">                    continue;</span>
+                }
+                // Otherwise we can connect it now.
+                // False here ensures we don't recurse infinitely downwards when connecting huge chains.
+<span class="fc" id="L927">                log.info(&quot;Connected orphan {}&quot;, orphanBlock.block.getHash());</span>
+<span class="fc" id="L928">                add(orphanBlock.block, false, orphanBlock.filteredTxHashes, orphanBlock.filteredTxn);</span>
+<span class="fc" id="L929">                iter.remove();</span>
+<span class="fc" id="L930">                blocksConnectedThisRound++;</span>
+<span class="fc" id="L931">            }</span>
+<span class="fc bfc" id="L932" title="All 2 branches covered.">            if (blocksConnectedThisRound &gt; 0) {</span>
+<span class="fc" id="L933">                log.info(&quot;Connected {} orphan blocks.&quot;, blocksConnectedThisRound);</span>
+            }
+<span class="fc bfc" id="L935" title="All 2 branches covered.">        } while (blocksConnectedThisRound &gt; 0);</span>
+<span class="fc" id="L936">    }</span>
+
+    /**
+     * Returns the block at the head of the current best chain. This is the block which represents the greatest
+     * amount of cumulative work done.
+     */
+    public StoredBlock getChainHead() {
+<span class="fc" id="L943">        synchronized (chainHeadLock) {</span>
+<span class="fc" id="L944">            return chainHead;</span>
+<span class="nc" id="L945">        }</span>
+    }
+
+    /**
+     * An orphan block is one that does not connect to the chain anywhere (ie we can't find its parent, therefore
+     * it's an orphan). Typically this occurs when we are downloading the chain and didn't reach the head yet, and/or
+     * if a block is solved whilst we are downloading. It's possible that we see a small amount of orphan blocks which
+     * chain together, this method tries walking backwards through the known orphan blocks to find the bottom-most.
+     *
+     * @return from or one of froms parents, or null if &quot;from&quot; does not identify an orphan block
+     */
+    @Nullable
+    public Block getOrphanRoot(Sha256Hash from) {
+<span class="fc" id="L958">        lock.lock();</span>
+        try {
+<span class="fc" id="L960">            OrphanBlock cursor = orphanBlocks.get(from);</span>
+<span class="pc bpc" id="L961" title="1 of 2 branches missed.">            if (cursor == null)</span>
+<span class="nc" id="L962">                return null;</span>
+            OrphanBlock tmp;
+<span class="fc bfc" id="L964" title="All 2 branches covered.">            while ((tmp = orphanBlocks.get(cursor.block.getPrevBlockHash())) != null) {</span>
+<span class="fc" id="L965">                cursor = tmp;</span>
+            }
+<span class="fc" id="L967">            return cursor.block;</span>
+        } finally {
+<span class="pc" id="L969">            lock.unlock();</span>
+        }
+    }
+
+    /** Returns true if the given block is currently in the orphan blocks list. */
+    public boolean isOrphan(Sha256Hash block) {
+<span class="fc" id="L975">        lock.lock();</span>
+        try {
+<span class="fc" id="L977">            return orphanBlocks.containsKey(block);</span>
+        } finally {
+<span class="pc" id="L979">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Returns an estimate of when the given block will be reached, assuming a perfect 10 minute average for each
+     * block. This is useful for turning transaction lock times into human readable times. Note that a height in
+     * the past will still be estimated, even though the time of solving is actually known (we won't scan backwards
+     * through the chain to obtain the right answer).
+     */
+    public Date estimateBlockTime(int height) {
+<span class="fc" id="L990">        synchronized (chainHeadLock) {</span>
+<span class="fc" id="L991">            long offset = height - chainHead.getHeight();</span>
+<span class="fc" id="L992">            long headTime = chainHead.getHeader().getTimeSeconds();</span>
+<span class="fc" id="L993">            long estimated = (headTime * 1000) + (1000L * 60L * 10L * offset);</span>
+<span class="fc" id="L994">            return new Date(estimated);</span>
+<span class="nc" id="L995">        }</span>
+    }
+
+    /**
+     * Returns a future that completes when the block chain has reached the given height. Yields the
+     * {@link StoredBlock} of the block that reaches that height first. The future completes on a peer thread.
+     */
+    public ListenableFuture&lt;StoredBlock&gt; getHeightFuture(final int height) {
+<span class="fc" id="L1003">        final SettableFuture&lt;StoredBlock&gt; result = SettableFuture.create();</span>
+<span class="fc" id="L1004">        addNewBestBlockListener(Threading.SAME_THREAD, new NewBestBlockListener() {</span>
+            @Override
+            public void notifyNewBestBlock(StoredBlock block) throws VerificationException {
+<span class="fc bfc" id="L1007" title="All 2 branches covered.">                if (block.getHeight() &gt;= height) {</span>
+<span class="fc" id="L1008">                    removeNewBestBlockListener(this);</span>
+<span class="fc" id="L1009">                    result.set(block);</span>
+                }
+<span class="fc" id="L1011">            }</span>
+        });
+<span class="fc" id="L1013">        return result;</span>
+    }
+
+
+
+    /**
+     * The false positive rate is the average over all blockchain transactions of:
+     *
+     * - 1.0 if the transaction was false-positive (was irrelevant to all listeners)
+     * - 0.0 if the transaction was relevant or filtered out
+     */
+    public double getFalsePositiveRate() {
+<span class="fc" id="L1025">        return falsePositiveRate;</span>
+    }
+
+    /*
+     * We completed handling of a filtered block. Update false-positive estimate based
+     * on the total number of transactions in the original block.
+     *
+     * count includes filtered transactions, transactions that were passed in and were relevant
+     * and transactions that were false positives (i.e. includes all transactions in the block).
+     */
+    protected void trackFilteredTransactions(int count) {
+        // Track non-false-positives in batch.  Each non-false-positive counts as
+        // 0.0 towards the estimate.
+        //
+        // This is slightly off because we are applying false positive tracking before non-FP tracking,
+        // which counts FP as if they came at the beginning of the block.  Assuming uniform FP
+        // spread in a block, this will somewhat underestimate the FP rate (5% for 1000 tx block).
+<span class="fc" id="L1042">        double alphaDecay = Math.pow(1 - FP_ESTIMATOR_ALPHA, count);</span>
+
+        // new_rate = alpha_decay * new_rate
+<span class="fc" id="L1045">        falsePositiveRate = alphaDecay * falsePositiveRate;</span>
+
+<span class="fc" id="L1047">        double betaDecay = Math.pow(1 - FP_ESTIMATOR_BETA, count);</span>
+
+        // trend = beta * (new_rate - old_rate) + beta_decay * trend
+<span class="fc" id="L1050">        falsePositiveTrend =</span>
+                FP_ESTIMATOR_BETA * count * (falsePositiveRate - previousFalsePositiveRate) +
+                betaDecay * falsePositiveTrend;
+
+        // new_rate += alpha_decay * trend
+<span class="fc" id="L1055">        falsePositiveRate += alphaDecay * falsePositiveTrend;</span>
+
+        // Stash new_rate in old_rate
+<span class="fc" id="L1058">        previousFalsePositiveRate = falsePositiveRate;</span>
+<span class="fc" id="L1059">    }</span>
+
+    /* Irrelevant transactions were received.  Update false-positive estimate. */
+    void trackFalsePositives(int count) {
+        // Track false positives in batch by adding alpha to the false positive estimate once per count.
+        // Each false positive counts as 1.0 towards the estimate.
+<span class="fc" id="L1065">        falsePositiveRate += FP_ESTIMATOR_ALPHA * count;</span>
+<span class="fc bfc" id="L1066" title="All 2 branches covered.">        if (count &gt; 0)</span>
+<span class="fc" id="L1067">            log.debug(&quot;{} false positives, current rate = {} trend = {}&quot;, count, falsePositiveRate, falsePositiveTrend);</span>
+<span class="fc" id="L1068">    }</span>
+
+    /** Resets estimates of false positives. Used when the filter is sent to the peer. */
+    public void resetFalsePositiveEstimate() {
+<span class="fc" id="L1072">        falsePositiveRate = 0;</span>
+<span class="fc" id="L1073">        falsePositiveTrend = 0;</span>
+<span class="fc" id="L1074">        previousFalsePositiveRate = 0;</span>
+<span class="fc" id="L1075">    }</span>
+
+    protected VersionTally getVersionTally() {
+<span class="fc" id="L1078">        return versionTally;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

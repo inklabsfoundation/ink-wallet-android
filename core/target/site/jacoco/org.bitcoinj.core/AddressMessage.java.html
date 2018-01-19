@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>AddressMessage.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">AddressMessage.java</span></div><h1>AddressMessage.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+/**
+ * &lt;p&gt;Represents an &quot;addr&quot; message on the P2P network, which contains broadcast IP addresses of other peers. This is
+ * one of the ways peers can find each other without using the DNS or IRC discovery mechanisms. However storing and
+ * using addr messages is not presently implemented.&lt;/p&gt;
+ * 
+ * &lt;p&gt;Instances of this class are not safe for use by multiple threads.&lt;/p&gt;
+ */
+public class AddressMessage extends Message {
+
+    private static final long MAX_ADDRESSES = 1024;
+    private List&lt;PeerAddress&gt; addresses;
+
+    /**
+     * Contruct a new 'addr' message.
+     * @param params NetworkParameters object.
+     * @param offset The location of the first payload byte within the array.
+     * @param parseRetain Whether to retain the backing byte array for quick reserialization.  
+     * If true and the backing byte array is invalidated due to modification of a field then 
+     * the cached bytes may be repopulated and retained if the message is serialized again in the future.
+     * @param length The length of message if known.  Usually this is provided when deserializing of the wire
+     * as the length will be provided as part of the header.  If unknown then set to Message.UNKNOWN_LENGTH
+     * @throws ProtocolException
+     */
+    AddressMessage(NetworkParameters params, byte[] payload, int offset, MessageSerializer setSerializer, int length) throws ProtocolException {
+<span class="nc" id="L50">        super(params, payload, offset, setSerializer, length);</span>
+<span class="nc" id="L51">    }</span>
+
+    /**
+     * Contruct a new 'addr' message.
+     * @param params NetworkParameters object.
+     * @param serializer the serializer to use for this block.
+     * @param length The length of message if known.  Usually this is provided when deserializing of the wire
+     * as the length will be provided as part of the header.  If unknown then set to Message.UNKNOWN_LENGTH
+     * @throws ProtocolException
+     */
+    AddressMessage(NetworkParameters params, byte[] payload, MessageSerializer serializer, int length) throws ProtocolException {
+<span class="fc" id="L62">        super(params, payload, 0, serializer, length);</span>
+<span class="fc" id="L63">    }</span>
+
+    AddressMessage(NetworkParameters params, byte[] payload, int offset) throws ProtocolException {
+<span class="nc" id="L66">        super(params, payload, offset, params.getDefaultSerializer(), UNKNOWN_LENGTH);</span>
+<span class="nc" id="L67">    }</span>
+
+    AddressMessage(NetworkParameters params, byte[] payload) throws ProtocolException {
+<span class="nc" id="L70">        super(params, payload, 0, params.getDefaultSerializer(), UNKNOWN_LENGTH);</span>
+<span class="nc" id="L71">    }</span>
+
+    @Override
+    protected void parse() throws ProtocolException {
+<span class="fc" id="L75">        long numAddresses = readVarInt();</span>
+        // Guard against ultra large messages that will crash us.
+<span class="pc bpc" id="L77" title="1 of 2 branches missed.">        if (numAddresses &gt; MAX_ADDRESSES)</span>
+<span class="nc" id="L78">            throw new ProtocolException(&quot;Address message too large.&quot;);</span>
+<span class="fc" id="L79">        addresses = new ArrayList&lt;&gt;((int) numAddresses);</span>
+<span class="fc bfc" id="L80" title="All 2 branches covered.">        for (int i = 0; i &lt; numAddresses; i++) {</span>
+<span class="fc" id="L81">            PeerAddress addr = new PeerAddress(params, payload, cursor, protocolVersion, this, serializer);</span>
+<span class="fc" id="L82">            addresses.add(addr);</span>
+<span class="fc" id="L83">            cursor += addr.getMessageSize();</span>
+        }
+<span class="fc" id="L85">        length = new VarInt(addresses.size()).getSizeInBytes();</span>
+        // The 4 byte difference is the uint32 timestamp that was introduced in version 31402
+<span class="pc bpc" id="L87" title="1 of 2 branches missed.">        length += addresses.size() * (protocolVersion &gt; 31402 ? PeerAddress.MESSAGE_SIZE : PeerAddress.MESSAGE_SIZE - 4);</span>
+<span class="fc" id="L88">    }</span>
+
+    @Override
+    protected void bitcoinSerializeToStream(OutputStream stream) throws IOException {
+<span class="pc bpc" id="L92" title="1 of 2 branches missed.">        if (addresses == null)</span>
+<span class="nc" id="L93">            return;</span>
+<span class="fc" id="L94">        stream.write(new VarInt(addresses.size()).encode());</span>
+<span class="fc bfc" id="L95" title="All 2 branches covered.">        for (PeerAddress addr : addresses) {</span>
+<span class="fc" id="L96">            addr.bitcoinSerialize(stream);</span>
+<span class="fc" id="L97">        }</span>
+<span class="fc" id="L98">    }</span>
+
+    /**
+     * @return An unmodifiableList view of the backing List of addresses.  Addresses contained within the list may be safely modified.
+     */
+    public List&lt;PeerAddress&gt; getAddresses() {
+<span class="fc" id="L104">        return Collections.unmodifiableList(addresses);</span>
+    }
+
+    public void addAddress(PeerAddress address) {
+<span class="fc" id="L108">        unCache();</span>
+<span class="fc" id="L109">        address.setParent(this);</span>
+<span class="fc" id="L110">        addresses.add(address);</span>
+<span class="pc bpc" id="L111" title="1 of 2 branches missed.">        if (length == UNKNOWN_LENGTH)</span>
+<span class="nc" id="L112">            getMessageSize();</span>
+        else
+<span class="fc" id="L114">            length += address.getMessageSize();</span>
+<span class="fc" id="L115">    }</span>
+
+    public void removeAddress(int index) {
+<span class="fc" id="L118">        unCache();</span>
+<span class="fc" id="L119">        PeerAddress address = addresses.remove(index);</span>
+<span class="fc" id="L120">        address.setParent(null);</span>
+<span class="pc bpc" id="L121" title="1 of 2 branches missed.">        if (length == UNKNOWN_LENGTH)</span>
+<span class="nc" id="L122">            getMessageSize();</span>
+        else
+<span class="fc" id="L124">            length -= address.getMessageSize();</span>
+<span class="fc" id="L125">    }</span>
+
+    @Override
+    public String toString() {
+<span class="nc" id="L129">        return &quot;addr: &quot; + Utils.SPACE_JOINER.join(addresses);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

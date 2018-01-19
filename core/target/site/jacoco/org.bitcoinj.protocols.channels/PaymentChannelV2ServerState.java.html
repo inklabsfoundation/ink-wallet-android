@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>PaymentChannelV2ServerState.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.protocols.channels</a> &gt; <span class="el_source">PaymentChannelV2ServerState.java</span></div><h1>PaymentChannelV2ServerState.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.protocols.channels;
+
+import com.google.common.collect.Multimap;
+import com.google.common.collect.MultimapBuilder;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
+import org.bitcoinj.core.*;
+import org.bitcoinj.crypto.TransactionSignature;
+import org.bitcoinj.script.Script;
+import org.bitcoinj.script.ScriptBuilder;
+import org.bitcoinj.wallet.SendRequest;
+import org.bitcoinj.wallet.Wallet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.spongycastle.crypto.params.KeyParameter;
+
+import javax.annotation.Nullable;
+import java.math.BigInteger;
+import java.util.Arrays;
+import java.util.Locale;
+
+/**
+ * Version 2 of the payment channel state machine - uses CLTV opcode transactions
+ * instead of multisig transactions.
+ */
+public class PaymentChannelV2ServerState extends PaymentChannelServerState {
+<span class="fc" id="L45">    private static final Logger log = LoggerFactory.getLogger(PaymentChannelV1ServerState.class);</span>
+
+    // The total value locked into the CLTV output and the value to us in the last signature the client provided
+    private Coin feePaidForPayment;
+
+    // The client key for the multi-sig contract
+    // We currently also use the serverKey for payouts, but this is not required
+    protected ECKey clientKey;
+
+    PaymentChannelV2ServerState(StoredServerChannel storedServerChannel, Wallet wallet, TransactionBroadcaster broadcaster) throws VerificationException {
+<span class="fc" id="L55">        super(storedServerChannel, wallet, broadcaster);</span>
+<span class="fc" id="L56">        synchronized (storedServerChannel) {</span>
+<span class="fc" id="L57">            this.clientKey = storedServerChannel.clientKey;</span>
+<span class="fc" id="L58">            stateMachine.transition(State.READY);</span>
+<span class="pc" id="L59">        }</span>
+<span class="fc" id="L60">    }</span>
+
+    public PaymentChannelV2ServerState(TransactionBroadcaster broadcaster, Wallet wallet, ECKey serverKey, long minExpireTime) {
+<span class="fc" id="L63">        super(broadcaster, wallet, serverKey, minExpireTime);</span>
+<span class="fc" id="L64">        stateMachine.transition(State.WAITING_FOR_MULTISIG_CONTRACT);</span>
+<span class="fc" id="L65">    }</span>
+
+    @Override
+    public Multimap&lt;State, State&gt; getStateTransitions() {
+<span class="fc" id="L69">        Multimap&lt;State, State&gt; result = MultimapBuilder.enumKeys(State.class).arrayListValues().build();</span>
+<span class="fc" id="L70">        result.put(State.UNINITIALISED, State.READY);</span>
+<span class="fc" id="L71">        result.put(State.UNINITIALISED, State.WAITING_FOR_MULTISIG_CONTRACT);</span>
+<span class="fc" id="L72">        result.put(State.WAITING_FOR_MULTISIG_CONTRACT, State.WAITING_FOR_MULTISIG_ACCEPTANCE);</span>
+<span class="fc" id="L73">        result.put(State.WAITING_FOR_MULTISIG_ACCEPTANCE, State.READY);</span>
+<span class="fc" id="L74">        result.put(State.READY, State.CLOSING);</span>
+<span class="fc" id="L75">        result.put(State.CLOSING, State.CLOSED);</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">        for (State state : State.values()) {</span>
+<span class="fc" id="L77">            result.put(state, State.ERROR);</span>
+        }
+<span class="fc" id="L79">        return result;</span>
+    }
+
+    @Override
+    public int getMajorVersion() {
+<span class="fc" id="L84">        return 2;</span>
+    }
+
+    @Override
+    public TransactionOutput getClientOutput() {
+<span class="fc" id="L89">        return null;</span>
+    }
+
+    public void provideClientKey(byte[] clientKey) {
+<span class="fc" id="L93">        this.clientKey = ECKey.fromPublicOnly(clientKey);</span>
+<span class="fc" id="L94">    }</span>
+
+    @Override
+    public synchronized Coin getFeePaid() {
+<span class="fc" id="L98">        stateMachine.checkState(State.CLOSED, State.CLOSING);</span>
+<span class="fc" id="L99">        return feePaidForPayment;</span>
+    }
+
+    @Override
+    protected Script getSignedScript() {
+<span class="fc" id="L104">        return createP2SHRedeemScript();</span>
+    }
+
+    @Override
+    protected void verifyContract(final Transaction contract) {
+<span class="fc" id="L109">        super.verifyContract(contract);</span>
+        // Check contract matches P2SH hash
+<span class="fc" id="L111">        byte[] expected = getContractScript().getPubKeyHash();</span>
+<span class="fc" id="L112">        byte[] actual = Utils.sha256hash160(createP2SHRedeemScript().getProgram());</span>
+<span class="fc bfc" id="L113" title="All 2 branches covered.">        if (!Arrays.equals(actual, expected)) {</span>
+<span class="fc" id="L114">            throw new VerificationException(</span>
+                    &quot;P2SH hash didn't match required contract - contract should be a CLTV micropayment channel to client and server in that order.&quot;);
+        }
+<span class="fc" id="L117">    }</span>
+
+    /**
+     * Creates a P2SH script outputting to the client and server pubkeys
+     * @return a P2SH script.
+     */
+    @Override
+    protected Script createOutputScript() {
+<span class="fc" id="L125">        return ScriptBuilder.createP2SHOutputScript(createP2SHRedeemScript());</span>
+    }
+
+    private Script createP2SHRedeemScript() {
+<span class="fc" id="L129">        return ScriptBuilder.createCLTVPaymentChannelOutput(BigInteger.valueOf(getExpiryTime()), clientKey, serverKey);</span>
+    }
+
+    protected ECKey getClientKey() {
+<span class="fc" id="L133">        return clientKey;</span>
+    }
+
+    // Signs the first input of the transaction which must spend the multisig contract.
+    private void signP2SHInput(Transaction tx, Transaction.SigHash hashType,
+                               boolean anyoneCanPay, @Nullable KeyParameter userKey) {
+<span class="fc" id="L139">        TransactionSignature signature = tx.calculateSignature(0, serverKey, userKey, createP2SHRedeemScript(), hashType, anyoneCanPay);</span>
+<span class="fc" id="L140">        byte[] mySig = signature.encodeToBitcoin();</span>
+<span class="fc" id="L141">        Script scriptSig = ScriptBuilder.createCLTVPaymentChannelP2SHInput(bestValueSignature, mySig, createP2SHRedeemScript());</span>
+<span class="fc" id="L142">        tx.getInput(0).setScriptSig(scriptSig);</span>
+<span class="fc" id="L143">    }</span>
+
+<span class="fc" id="L145">    final SettableFuture&lt;Transaction&gt; closedFuture = SettableFuture.create();</span>
+
+    @Override
+    public synchronized ListenableFuture&lt;Transaction&gt; close(@Nullable KeyParameter userKey) throws InsufficientMoneyException {
+<span class="fc bfc" id="L149" title="All 2 branches covered.">        if (storedServerChannel != null) {</span>
+<span class="fc" id="L150">            StoredServerChannel temp = storedServerChannel;</span>
+<span class="fc" id="L151">            storedServerChannel = null;</span>
+<span class="fc" id="L152">            StoredPaymentChannelServerStates channels = (StoredPaymentChannelServerStates)</span>
+<span class="fc" id="L153">                    wallet.getExtensions().get(StoredPaymentChannelServerStates.EXTENSION_ID);</span>
+<span class="fc" id="L154">            channels.closeChannel(temp); // May call this method again for us (if it wasn't the original caller)</span>
+<span class="fc bfc" id="L155" title="All 2 branches covered.">            if (getState().compareTo(State.CLOSING) &gt;= 0)</span>
+<span class="fc" id="L156">                return closedFuture;</span>
+        }
+
+<span class="pc bpc" id="L159" title="1 of 2 branches missed.">        if (getState().ordinal() &lt; State.READY.ordinal()) {</span>
+<span class="nc" id="L160">            log.error(&quot;Attempt to settle channel in state &quot; + getState());</span>
+<span class="nc" id="L161">            stateMachine.transition(State.CLOSED);</span>
+<span class="nc" id="L162">            closedFuture.set(null);</span>
+<span class="nc" id="L163">            return closedFuture;</span>
+        }
+<span class="fc bfc" id="L165" title="All 2 branches covered.">        if (getState() != State.READY) {</span>
+            // TODO: What is this codepath for?
+<span class="fc" id="L167">            log.warn(&quot;Failed attempt to settle a channel in state &quot; + getState());</span>
+<span class="fc" id="L168">            return closedFuture;</span>
+        }
+<span class="fc" id="L170">        Transaction tx = null;</span>
+        try {
+<span class="fc" id="L172">            SendRequest req = makeUnsignedChannelContract(bestValueToMe);</span>
+<span class="fc" id="L173">            tx = req.tx;</span>
+            // Provide a throwaway signature so that completeTx won't complain out about unsigned inputs it doesn't
+            // know how to sign. Note that this signature does actually have to be valid, so we can't use a dummy
+            // signature to save time, because otherwise completeTx will try to re-sign it to make it valid and then
+            // die. We could probably add features to the SendRequest API to make this a bit more efficient.
+<span class="fc" id="L178">            signP2SHInput(tx, Transaction.SigHash.NONE, true, userKey);</span>
+            // Let wallet handle adding additional inputs/fee as necessary.
+<span class="fc" id="L180">            req.shuffleOutputs = false;</span>
+<span class="fc" id="L181">            req.missingSigsMode = Wallet.MissingSigsMode.USE_DUMMY_SIG;</span>
+<span class="fc" id="L182">            wallet.completeTx(req);  // TODO: Fix things so shuffling is usable.</span>
+<span class="fc" id="L183">            feePaidForPayment = req.tx.getFee();</span>
+<span class="fc" id="L184">            log.info(&quot;Calculated fee is {}&quot;, feePaidForPayment);</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">            if (feePaidForPayment.compareTo(bestValueToMe) &gt; 0) {</span>
+<span class="fc" id="L186">                final String msg = String.format(Locale.US, &quot;Had to pay more in fees (%s) than the channel was worth (%s)&quot;,</span>
+                        feePaidForPayment, bestValueToMe);
+<span class="fc" id="L188">                throw new InsufficientMoneyException(feePaidForPayment.subtract(bestValueToMe), msg);</span>
+            }
+            // Now really sign the multisig input.
+<span class="fc" id="L191">            signP2SHInput(tx, Transaction.SigHash.ALL, false, userKey);</span>
+            // Some checks that shouldn't be necessary but it can't hurt to check.
+<span class="fc" id="L193">            tx.verify();  // Sanity check syntax.</span>
+<span class="fc bfc" id="L194" title="All 2 branches covered.">            for (TransactionInput input : tx.getInputs())</span>
+<span class="fc" id="L195">                input.verify();  // Run scripts and ensure it is valid.</span>
+<span class="fc" id="L196">        } catch (InsufficientMoneyException e) {</span>
+<span class="fc" id="L197">            throw e;  // Don't fall through.</span>
+<span class="nc" id="L198">        } catch (Exception e) {</span>
+<span class="nc bnc" id="L199" title="All 2 branches missed.">            log.error(&quot;Could not verify self-built tx\nMULTISIG {}\nCLOSE {}&quot;, contract, tx != null ? tx : &quot;&quot;);</span>
+<span class="nc" id="L200">            throw new RuntimeException(e);  // Should never happen.</span>
+<span class="fc" id="L201">        }</span>
+<span class="fc" id="L202">        stateMachine.transition(State.CLOSING);</span>
+<span class="fc" id="L203">        log.info(&quot;Closing channel, broadcasting tx {}&quot;, tx);</span>
+        // The act of broadcasting the transaction will add it to the wallet.
+<span class="fc" id="L205">        ListenableFuture&lt;Transaction&gt; future = broadcaster.broadcastTransaction(tx).future();</span>
+<span class="fc" id="L206">        Futures.addCallback(future, new FutureCallback&lt;Transaction&gt;() {</span>
+            @Override public void onSuccess(Transaction transaction) {
+<span class="fc" id="L208">                log.info(&quot;TX {} propagated, channel successfully closed.&quot;, transaction.getHash());</span>
+<span class="fc" id="L209">                stateMachine.transition(State.CLOSED);</span>
+<span class="fc" id="L210">                closedFuture.set(transaction);</span>
+<span class="fc" id="L211">            }</span>
+
+            @Override public void onFailure(Throwable throwable) {
+<span class="fc" id="L214">                log.error(&quot;Failed to settle channel, could not broadcast: {}&quot;, throwable);</span>
+<span class="fc" id="L215">                stateMachine.transition(State.ERROR);</span>
+<span class="fc" id="L216">                closedFuture.setException(throwable);</span>
+<span class="fc" id="L217">            }</span>
+        });
+<span class="fc" id="L219">        return closedFuture;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

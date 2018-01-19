@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>X509Utils.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.crypto</a> &gt; <span class="el_source">X509Utils.java</span></div><h1>X509Utils.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2014 The bitcoinj authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.crypto;
+
+import com.google.common.base.Joiner;
+import org.spongycastle.asn1.ASN1ObjectIdentifier;
+import org.spongycastle.asn1.ASN1String;
+import org.spongycastle.asn1.x500.AttributeTypeAndValue;
+import org.spongycastle.asn1.x500.RDN;
+import org.spongycastle.asn1.x500.X500Name;
+import org.spongycastle.asn1.x500.style.RFC4519Style;
+
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.cert.CertificateParsingException;
+import java.security.cert.X509Certificate;
+import java.util.Collection;
+import java.util.List;
+
+/**
+ * X509Utils provides tools for working with X.509 certificates and keystores, as used in the BIP 70 payment protocol.
+ * For more details on this, see {@link org.bitcoinj.protocols.payments.PaymentSession}, the article &quot;Working with
+ * the payment protocol&quot; on the bitcoinj website, or the Bitcoin developer guide.
+ */
+<span class="nc" id="L44">public class X509Utils {</span>
+    /**
+     * Returns either a string that &quot;sums up&quot; the certificate for humans, in a similar manner to what you might see
+     * in a web browser, or null if one cannot be extracted. This will typically be the common name (CN) field, but
+     * can also be the org (O) field, org+location+country if withLocation is set, or the email
+     * address for S/MIME certificates.
+     */
+    @Nullable
+    public static String getDisplayNameFromCertificate(@Nonnull X509Certificate certificate, boolean withLocation) throws CertificateParsingException {
+<span class="fc" id="L53">        X500Name name = new X500Name(certificate.getSubjectX500Principal().getName());</span>
+<span class="fc" id="L54">        String commonName = null, org = null, location = null, country = null;</span>
+<span class="fc bfc" id="L55" title="All 2 branches covered.">        for (RDN rdn : name.getRDNs()) {</span>
+<span class="fc" id="L56">            AttributeTypeAndValue pair = rdn.getFirst();</span>
+<span class="fc" id="L57">            String val = ((ASN1String) pair.getValue()).getString();</span>
+<span class="fc" id="L58">            ASN1ObjectIdentifier type = pair.getType();</span>
+<span class="fc bfc" id="L59" title="All 2 branches covered.">            if (type.equals(RFC4519Style.cn))</span>
+<span class="fc" id="L60">                commonName = val;</span>
+<span class="fc bfc" id="L61" title="All 2 branches covered.">            else if (type.equals(RFC4519Style.o))</span>
+<span class="fc" id="L62">                org = val;</span>
+<span class="fc bfc" id="L63" title="All 2 branches covered.">            else if (type.equals(RFC4519Style.l))</span>
+<span class="fc" id="L64">                location = val;</span>
+<span class="fc bfc" id="L65" title="All 2 branches covered.">            else if (type.equals(RFC4519Style.c))</span>
+<span class="fc" id="L66">                country = val;</span>
+        }
+<span class="fc" id="L68">        final Collection&lt;List&lt;?&gt;&gt; subjectAlternativeNames = certificate.getSubjectAlternativeNames();</span>
+<span class="fc" id="L69">        String altName = null;</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">        if (subjectAlternativeNames != null)</span>
+<span class="fc bfc" id="L71" title="All 2 branches covered.">            for (final List&lt;?&gt; subjectAlternativeName : subjectAlternativeNames)</span>
+<span class="fc bfc" id="L72" title="All 2 branches covered.">                if ((Integer) subjectAlternativeName.get(0) == 1) // rfc822name</span>
+<span class="fc" id="L73">                    altName = (String) subjectAlternativeName.get(1);</span>
+
+<span class="fc bfc" id="L75" title="All 2 branches covered.">        if (org != null) {</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">            return withLocation ? Joiner.on(&quot;, &quot;).skipNulls().join(org, location, country) : org;</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">        } else if (commonName != null) {</span>
+<span class="fc" id="L78">            return commonName;</span>
+        } else {
+<span class="fc" id="L80">            return altName;</span>
+        }
+    }
+
+    /** Returns a key store loaded from the given stream. Just a convenience around the Java APIs. */
+    public static KeyStore loadKeyStore(String keystoreType, @Nullable String keystorePassword, InputStream is)
+            throws KeyStoreException {
+        try {
+<span class="fc" id="L88">            KeyStore keystore = KeyStore.getInstance(keystoreType);</span>
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">            keystore.load(is, keystorePassword != null ? keystorePassword.toCharArray() : null);</span>
+<span class="fc" id="L90">            return keystore;</span>
+<span class="nc" id="L91">        } catch (IOException x) {</span>
+<span class="nc" id="L92">            throw new KeyStoreException(x);</span>
+<span class="nc" id="L93">        } catch (GeneralSecurityException x) {</span>
+<span class="nc" id="L94">            throw new KeyStoreException(x);</span>
+        } finally {
+<span class="nc" id="L96">            try {</span>
+<span class="pc" id="L97">                is.close();</span>
+<span class="nc" id="L98">            } catch (IOException x) {</span>
+                // Ignored.
+<span class="pc" id="L100">            }</span>
+        }
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

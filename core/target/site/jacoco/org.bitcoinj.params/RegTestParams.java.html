@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>RegTestParams.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.params</a> &gt; <span class="el_source">RegTestParams.java</span></div><h1>RegTestParams.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.params;
+
+import org.bitcoinj.core.Block;
+
+import java.math.BigInteger;
+
+import static com.google.common.base.Preconditions.checkState;
+
+/**
+ * Network parameters for the regression test mode of bitcoind in which all blocks are trivially solvable.
+ */
+public class RegTestParams extends TestNet2Params {
+<span class="fc" id="L29">    private static final BigInteger MAX_TARGET = new BigInteger(&quot;7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff&quot;, 16);</span>
+
+    public RegTestParams() {
+<span class="fc" id="L32">        super();</span>
+        // Difficulty adjustments are disabled for regtest. 
+        // By setting the block interval for difficulty adjustments to Integer.MAX_VALUE we make sure difficulty never changes.    
+<span class="fc" id="L35">        interval = Integer.MAX_VALUE;</span>
+<span class="fc" id="L36">        maxTarget = MAX_TARGET;</span>
+<span class="fc" id="L37">        subsidyDecreaseBlockCount = 150;</span>
+<span class="fc" id="L38">        port = 18444;</span>
+<span class="fc" id="L39">        id = ID_REGTEST;</span>
+
+<span class="fc" id="L41">        majorityEnforceBlockUpgrade = MainNetParams.MAINNET_MAJORITY_ENFORCE_BLOCK_UPGRADE;</span>
+<span class="fc" id="L42">        majorityRejectBlockOutdated = MainNetParams.MAINNET_MAJORITY_REJECT_BLOCK_OUTDATED;</span>
+<span class="fc" id="L43">        majorityWindow = MainNetParams.MAINNET_MAJORITY_WINDOW;</span>
+<span class="fc" id="L44">    }</span>
+
+    @Override
+    public boolean allowEmptyPeerChain() {
+<span class="nc" id="L48">        return true;</span>
+    }
+
+    private static Block genesis;
+
+    @Override
+    public Block getGenesisBlock() {
+<span class="nc" id="L55">        synchronized (RegTestParams.class) {</span>
+<span class="nc bnc" id="L56" title="All 2 branches missed.">            if (genesis == null) {</span>
+<span class="nc" id="L57">                genesis = super.getGenesisBlock();</span>
+<span class="nc" id="L58">                genesis.setNonce(2);</span>
+<span class="nc" id="L59">                genesis.setDifficultyTarget(0x207fFFFFL);</span>
+<span class="nc" id="L60">                genesis.setTime(1296688602L);</span>
+<span class="nc" id="L61">                checkState(genesis.getHashAsString().toLowerCase().equals(&quot;0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206&quot;));</span>
+            }
+<span class="nc" id="L63">            return genesis;</span>
+<span class="nc" id="L64">        }</span>
+    }
+
+    private static RegTestParams instance;
+    public static synchronized RegTestParams get() {
+<span class="fc bfc" id="L69" title="All 2 branches covered.">        if (instance == null) {</span>
+<span class="fc" id="L70">            instance = new RegTestParams();</span>
+        }
+<span class="fc" id="L72">        return instance;</span>
+    }
+
+    @Override
+    public String getPaymentProtocolId() {
+<span class="nc" id="L77">        return PAYMENT_PROTOCOL_ID_REGTEST;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

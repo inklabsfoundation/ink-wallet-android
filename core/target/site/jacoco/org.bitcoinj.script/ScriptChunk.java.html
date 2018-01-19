@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>ScriptChunk.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.script</a> &gt; <span class="el_source">ScriptChunk.java</span></div><h1>ScriptChunk.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.script;
+
+import org.bitcoinj.core.Utils;
+import com.google.common.base.Objects;
+
+import javax.annotation.Nullable;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Arrays;
+
+import static com.google.common.base.Preconditions.checkState;
+import static org.bitcoinj.script.ScriptOpCodes.*;
+
+/**
+ * A script element that is either a data push (signature, pubkey, etc) or a non-push (logic, numeric, etc) operation.
+ */
+public class ScriptChunk {
+    /** Operation to be executed. Opcodes are defined in {@link ScriptOpCodes}. */
+    public final int opcode;
+    /**
+     * For push operations, this is the vector to be pushed on the stack. For {@link ScriptOpCodes#OP_0}, the vector is
+     * empty. Null for non-push operations.
+     */
+    @Nullable
+    public final byte[] data;
+    private int startLocationInProgram;
+
+    public ScriptChunk(int opcode, byte[] data) {
+<span class="fc" id="L46">        this(opcode, data, -1);</span>
+<span class="fc" id="L47">    }</span>
+
+<span class="fc" id="L49">    public ScriptChunk(int opcode, byte[] data, int startLocationInProgram) {</span>
+<span class="fc" id="L50">        this.opcode = opcode;</span>
+<span class="fc" id="L51">        this.data = data;</span>
+<span class="fc" id="L52">        this.startLocationInProgram = startLocationInProgram;</span>
+<span class="fc" id="L53">    }</span>
+
+    public boolean equalsOpCode(int opcode) {
+<span class="fc bfc" id="L56" title="All 2 branches covered.">        return opcode == this.opcode;</span>
+    }
+
+    /**
+     * If this chunk is a single byte of non-pushdata content (could be OP_RESERVED or some invalid Opcode)
+     */
+    public boolean isOpCode() {
+<span class="fc bfc" id="L63" title="All 2 branches covered.">        return opcode &gt; OP_PUSHDATA4;</span>
+    }
+
+    /**
+     * Returns true if this chunk is pushdata content, including the single-byte pushdatas.
+     */
+    public boolean isPushData() {
+<span class="fc bfc" id="L70" title="All 2 branches covered.">        return opcode &lt;= OP_16;</span>
+    }
+
+    public int getStartLocationInProgram() {
+<span class="pc bpc" id="L74" title="1 of 2 branches missed.">        checkState(startLocationInProgram &gt;= 0);</span>
+<span class="fc" id="L75">        return startLocationInProgram;</span>
+    }
+
+    /** If this chunk is an OP_N opcode returns the equivalent integer value. */
+    public int decodeOpN() {
+<span class="nc" id="L80">        checkState(isOpCode());</span>
+<span class="nc" id="L81">        return Script.decodeFromOpN(opcode);</span>
+    }
+
+    /**
+     * Called on a pushdata chunk, returns true if it uses the smallest possible way (according to BIP62) to push the data.
+     */
+    public boolean isShortestPossiblePushData() {
+<span class="fc" id="L88">        checkState(isPushData());</span>
+<span class="fc bfc" id="L89" title="All 2 branches covered.">        if (data == null)</span>
+<span class="fc" id="L90">            return true;   // OP_N</span>
+<span class="fc bfc" id="L91" title="All 2 branches covered.">        if (data.length == 0)</span>
+<span class="fc bfc" id="L92" title="All 2 branches covered.">            return opcode == OP_0;</span>
+<span class="fc bfc" id="L93" title="All 2 branches covered.">        if (data.length == 1) {</span>
+<span class="fc" id="L94">            byte b = data[0];</span>
+<span class="fc bfc" id="L95" title="All 4 branches covered.">            if (b &gt;= 0x01 &amp;&amp; b &lt;= 0x10)</span>
+<span class="fc bfc" id="L96" title="All 2 branches covered.">                return opcode == OP_1 + b - 1;</span>
+<span class="fc bfc" id="L97" title="All 2 branches covered.">            if ((b &amp; 0xFF) == 0x81)</span>
+<span class="pc bpc" id="L98" title="1 of 2 branches missed.">                return opcode == OP_1NEGATE;</span>
+        }
+<span class="fc bfc" id="L100" title="All 2 branches covered.">        if (data.length &lt; OP_PUSHDATA1)</span>
+<span class="fc bfc" id="L101" title="All 2 branches covered.">            return opcode == data.length;</span>
+<span class="fc bfc" id="L102" title="All 2 branches covered.">        if (data.length &lt; 256)</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">            return opcode == OP_PUSHDATA1;</span>
+<span class="pc bpc" id="L104" title="1 of 2 branches missed.">        if (data.length &lt; 65536)</span>
+<span class="fc bfc" id="L105" title="All 2 branches covered.">            return opcode == OP_PUSHDATA2;</span>
+
+        // can never be used, but implemented for completeness
+<span class="nc bnc" id="L108" title="All 2 branches missed.">        return opcode == OP_PUSHDATA4;</span>
+    }
+
+    public void write(OutputStream stream) throws IOException {
+<span class="fc bfc" id="L112" title="All 2 branches covered.">        if (isOpCode()) {</span>
+<span class="pc bpc" id="L113" title="1 of 2 branches missed.">            checkState(data == null);</span>
+<span class="fc" id="L114">            stream.write(opcode);</span>
+<span class="fc bfc" id="L115" title="All 2 branches covered.">        } else if (data != null) {</span>
+<span class="fc bfc" id="L116" title="All 2 branches covered.">            if (opcode &lt; OP_PUSHDATA1) {</span>
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">                checkState(data.length == opcode);</span>
+<span class="fc" id="L118">                stream.write(opcode);</span>
+<span class="pc bpc" id="L119" title="1 of 2 branches missed.">            } else if (opcode == OP_PUSHDATA1) {</span>
+<span class="pc bpc" id="L120" title="1 of 2 branches missed.">                checkState(data.length &lt;= 0xFF);</span>
+<span class="fc" id="L121">                stream.write(OP_PUSHDATA1);</span>
+<span class="fc" id="L122">                stream.write(data.length);</span>
+<span class="nc bnc" id="L123" title="All 2 branches missed.">            } else if (opcode == OP_PUSHDATA2) {</span>
+<span class="nc bnc" id="L124" title="All 2 branches missed.">                checkState(data.length &lt;= 0xFFFF);</span>
+<span class="nc" id="L125">                stream.write(OP_PUSHDATA2);</span>
+<span class="nc" id="L126">                stream.write(0xFF &amp; data.length);</span>
+<span class="nc" id="L127">                stream.write(0xFF &amp; (data.length &gt;&gt; 8));</span>
+<span class="nc bnc" id="L128" title="All 2 branches missed.">            } else if (opcode == OP_PUSHDATA4) {</span>
+<span class="nc bnc" id="L129" title="All 2 branches missed.">                checkState(data.length &lt;= Script.MAX_SCRIPT_ELEMENT_SIZE);</span>
+<span class="nc" id="L130">                stream.write(OP_PUSHDATA4);</span>
+<span class="nc" id="L131">                Utils.uint32ToByteStreamLE(data.length, stream);</span>
+            } else {
+<span class="nc" id="L133">                throw new RuntimeException(&quot;Unimplemented&quot;);</span>
+            }
+<span class="fc" id="L135">            stream.write(data);</span>
+        } else {
+<span class="fc" id="L137">            stream.write(opcode); // smallNum</span>
+        }
+<span class="fc" id="L139">    }</span>
+
+    @Override
+    public String toString() {
+<span class="fc" id="L143">        StringBuilder buf = new StringBuilder();</span>
+<span class="fc bfc" id="L144" title="All 2 branches covered.">        if (isOpCode()) {</span>
+<span class="fc" id="L145">            buf.append(getOpCodeName(opcode));</span>
+<span class="fc bfc" id="L146" title="All 2 branches covered.">        } else if (data != null) {</span>
+            // Data chunk
+<span class="fc" id="L148">            buf.append(getPushDataName(opcode)).append(&quot;[&quot;).append(Utils.HEX.encode(data)).append(&quot;]&quot;);</span>
+        } else {
+            // Small num
+<span class="fc" id="L151">            buf.append(Script.decodeFromOpN(opcode));</span>
+        }
+<span class="fc" id="L153">        return buf.toString();</span>
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="pc bpc" id="L158" title="1 of 2 branches missed.">        if (this == o) return true;</span>
+<span class="pc bpc" id="L159" title="2 of 4 branches missed.">        if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L160">        ScriptChunk other = (ScriptChunk) o;</span>
+<span class="fc bfc" id="L161" title="All 4 branches covered.">        return opcode == other.opcode &amp;&amp; startLocationInProgram == other.startLocationInProgram</span>
+<span class="pc bpc" id="L162" title="1 of 2 branches missed.">            &amp;&amp; Arrays.equals(data, other.data);</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L167">        return Objects.hashCode(opcode, startLocationInProgram, Arrays.hashCode(data));</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

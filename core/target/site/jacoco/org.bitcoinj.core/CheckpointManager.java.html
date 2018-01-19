@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>CheckpointManager.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">CheckpointManager.java</span></div><h1>CheckpointManager.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import org.bitcoinj.store.BlockStore;
+import org.bitcoinj.store.BlockStoreException;
+import org.bitcoinj.store.FullPrunedBlockStore;
+import com.google.common.base.Charsets;
+import com.google.common.hash.HashCode;
+import com.google.common.hash.Hasher;
+import com.google.common.hash.Hashing;
+import com.google.common.io.BaseEncoding;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.*;
+import java.io.BufferedInputStream;
+import java.io.BufferedReader;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.TreeMap;
+
+import static com.google.common.base.Preconditions.*;
+
+/**
+ * &lt;p&gt;Vends hard-coded {@link StoredBlock}s for blocks throughout the chain. Checkpoints serve two purposes:&lt;/p&gt;
+ * &lt;ol&gt;
+ *    &lt;li&gt;They act as a safety mechanism against huge re-orgs that could rewrite large chunks of history, thus
+ *    constraining the block chain to be a consensus mechanism only for recent parts of the timeline.&lt;/li&gt;
+ *    &lt;li&gt;They allow synchronization to the head of the chain for new wallets/users much faster than syncing all
+ *    headers from the genesis block.&lt;/li&gt;
+ * &lt;/ol&gt;
+ *
+ * &lt;p&gt;Checkpoints are used by the SPV {@link BlockChain} to initialize fresh
+ * {@link org.bitcoinj.store.SPVBlockStore}s. They are not used by fully validating mode, which instead has a
+ * different concept of checkpoints that are used to hard-code the validity of blocks that violate BIP30 (duplicate
+ * coinbase transactions). Those &quot;checkpoints&quot; can be found in NetworkParameters.&lt;/p&gt;
+ *
+ * &lt;p&gt;The file format consists of the string &quot;CHECKPOINTS 1&quot;, followed by a uint32 containing the number of signatures
+ * to read. The value may not be larger than 256 (so it could have been a byte but isn't for historical reasons).
+ * If the number of signatures is larger than zero, each 65 byte ECDSA secp256k1 signature then follows. The signatures
+ * sign the hash of all bytes that follow the last signature.&lt;/p&gt;
+ *
+ * &lt;p&gt;After the signatures come an int32 containing the number of checkpoints in the file. Then each checkpoint follows
+ * one after the other. A checkpoint is 12 bytes for the total work done field, 4 bytes for the height, 80 bytes
+ * for the block header and then 1 zero byte at the end (i.e. number of transactions in the block: always zero).&lt;/p&gt;
+ */
+public class CheckpointManager {
+<span class="fc" id="L72">    private static final Logger log = LoggerFactory.getLogger(CheckpointManager.class);</span>
+
+    private static final String BINARY_MAGIC = &quot;CHECKPOINTS 1&quot;;
+    private static final String TEXTUAL_MAGIC = &quot;TXT CHECKPOINTS 1&quot;;
+    private static final int MAX_SIGNATURES = 256;
+
+    // Map of block header time to data.
+<span class="fc" id="L79">    protected final TreeMap&lt;Long, StoredBlock&gt; checkpoints = new TreeMap&lt;&gt;();</span>
+
+    protected final NetworkParameters params;
+    protected final Sha256Hash dataHash;
+
+<span class="fc" id="L84">    public static final BaseEncoding BASE64 = BaseEncoding.base64().omitPadding();</span>
+
+    /** Loads the default checkpoints bundled with bitcoinj */
+    public CheckpointManager(Context context) throws IOException {
+<span class="nc" id="L88">        this(context.getParams(), null);</span>
+<span class="nc" id="L89">    }</span>
+
+    /** Loads the checkpoints from the given stream */
+<span class="fc" id="L92">    public CheckpointManager(NetworkParameters params, @Nullable InputStream inputStream) throws IOException {</span>
+<span class="fc" id="L93">        this.params = checkNotNull(params);</span>
+<span class="pc bpc" id="L94" title="1 of 2 branches missed.">        if (inputStream == null)</span>
+<span class="fc" id="L95">            inputStream = openStream(params);</span>
+<span class="fc" id="L96">        checkNotNull(inputStream);</span>
+<span class="fc" id="L97">        inputStream = new BufferedInputStream(inputStream);</span>
+<span class="fc" id="L98">        inputStream.mark(1);</span>
+<span class="fc" id="L99">        int first = inputStream.read();</span>
+<span class="fc" id="L100">        inputStream.reset();</span>
+<span class="pc bpc" id="L101" title="1 of 2 branches missed.">        if (first == BINARY_MAGIC.charAt(0))</span>
+<span class="nc" id="L102">            dataHash = readBinary(inputStream);</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">        else if (first == TEXTUAL_MAGIC.charAt(0))</span>
+<span class="fc" id="L104">            dataHash = readTextual(inputStream);</span>
+        else
+<span class="fc" id="L106">            throw new IOException(&quot;Unsupported format.&quot;);</span>
+<span class="fc" id="L107">    }</span>
+
+    /** Returns a checkpoints stream pointing to inside the bitcoinj JAR */
+    public static InputStream openStream(NetworkParameters params) {
+<span class="fc" id="L111">        return CheckpointManager.class.getResourceAsStream(&quot;/&quot; + params.getId() + &quot;.checkpoints.txt&quot;);</span>
+    }
+
+    private Sha256Hash readBinary(InputStream inputStream) throws IOException {
+<span class="nc" id="L115">        DataInputStream dis = null;</span>
+        try {
+<span class="nc" id="L117">            MessageDigest digest = Sha256Hash.newDigest();</span>
+<span class="nc" id="L118">            DigestInputStream digestInputStream = new DigestInputStream(inputStream, digest);</span>
+<span class="nc" id="L119">            dis = new DataInputStream(digestInputStream);</span>
+<span class="nc" id="L120">            digestInputStream.on(false);</span>
+<span class="nc" id="L121">            byte[] header = new byte[BINARY_MAGIC.length()];</span>
+<span class="nc" id="L122">            dis.readFully(header);</span>
+<span class="nc bnc" id="L123" title="All 2 branches missed.">            if (!Arrays.equals(header, BINARY_MAGIC.getBytes(&quot;US-ASCII&quot;)))</span>
+<span class="nc" id="L124">                throw new IOException(&quot;Header bytes did not match expected version&quot;);</span>
+<span class="nc" id="L125">            int numSignatures = checkPositionIndex(dis.readInt(), MAX_SIGNATURES, &quot;Num signatures out of range&quot;);</span>
+<span class="nc bnc" id="L126" title="All 2 branches missed.">            for (int i = 0; i &lt; numSignatures; i++) {</span>
+<span class="nc" id="L127">                byte[] sig = new byte[65];</span>
+<span class="nc" id="L128">                dis.readFully(sig);</span>
+                // TODO: Do something with the signature here.
+            }
+<span class="nc" id="L131">            digestInputStream.on(true);</span>
+<span class="nc" id="L132">            int numCheckpoints = dis.readInt();</span>
+<span class="nc bnc" id="L133" title="All 2 branches missed.">            checkState(numCheckpoints &gt; 0);</span>
+<span class="nc" id="L134">            final int size = StoredBlock.COMPACT_SERIALIZED_SIZE;</span>
+<span class="nc" id="L135">            ByteBuffer buffer = ByteBuffer.allocate(size);</span>
+<span class="nc bnc" id="L136" title="All 2 branches missed.">            for (int i = 0; i &lt; numCheckpoints; i++) {</span>
+<span class="nc bnc" id="L137" title="All 2 branches missed.">                if (dis.read(buffer.array(), 0, size) &lt; size)</span>
+<span class="nc" id="L138">                    throw new IOException(&quot;Incomplete read whilst loading checkpoints.&quot;);</span>
+<span class="nc" id="L139">                StoredBlock block = StoredBlock.deserializeCompact(params, buffer);</span>
+<span class="nc" id="L140">                buffer.position(0);</span>
+<span class="nc" id="L141">                checkpoints.put(block.getHeader().getTimeSeconds(), block);</span>
+            }
+<span class="nc" id="L143">            Sha256Hash dataHash = Sha256Hash.wrap(digest.digest());</span>
+<span class="nc" id="L144">            log.info(&quot;Read {} checkpoints, hash is {}&quot;, checkpoints.size(), dataHash);</span>
+<span class="nc" id="L145">            return dataHash;</span>
+<span class="nc" id="L146">        } catch (ProtocolException e) {</span>
+<span class="nc" id="L147">            throw new IOException(e);</span>
+        } finally {
+<span class="nc bnc" id="L149" title="All 4 branches missed.">            if (dis != null) dis.close();</span>
+<span class="nc" id="L150">            inputStream.close();</span>
+        }
+    }
+
+    private Sha256Hash readTextual(InputStream inputStream) throws IOException {
+<span class="fc" id="L155">        Hasher hasher = Hashing.sha256().newHasher();</span>
+<span class="fc" id="L156">        BufferedReader reader = null;</span>
+        try {
+<span class="fc" id="L158">            reader = new BufferedReader(new InputStreamReader(inputStream, Charsets.US_ASCII));</span>
+<span class="fc" id="L159">            String magic = reader.readLine();</span>
+<span class="pc bpc" id="L160" title="1 of 2 branches missed.">            if (!TEXTUAL_MAGIC.equals(magic))</span>
+<span class="nc" id="L161">                throw new IOException(&quot;unexpected magic: &quot; + magic);</span>
+<span class="fc" id="L162">            int numSigs = Integer.parseInt(reader.readLine());</span>
+<span class="pc bpc" id="L163" title="1 of 2 branches missed.">            for (int i = 0; i &lt; numSigs; i++)</span>
+<span class="nc" id="L164">                reader.readLine(); // Skip sigs for now.</span>
+<span class="fc" id="L165">            int numCheckpoints = Integer.parseInt(reader.readLine());</span>
+<span class="fc bfc" id="L166" title="All 2 branches covered.">            checkState(numCheckpoints &gt; 0);</span>
+            // Hash numCheckpoints in a way compatible to the binary format.
+<span class="fc" id="L168">            hasher.putBytes(ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(numCheckpoints).array());</span>
+<span class="fc" id="L169">            final int size = StoredBlock.COMPACT_SERIALIZED_SIZE;</span>
+<span class="fc" id="L170">            ByteBuffer buffer = ByteBuffer.allocate(size);</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">            for (int i = 0; i &lt; numCheckpoints; i++) {</span>
+<span class="fc" id="L172">                byte[] bytes = BASE64.decode(reader.readLine());</span>
+<span class="fc" id="L173">                hasher.putBytes(bytes);</span>
+<span class="fc" id="L174">                buffer.position(0);</span>
+<span class="fc" id="L175">                buffer.put(bytes);</span>
+<span class="fc" id="L176">                buffer.position(0);</span>
+<span class="fc" id="L177">                StoredBlock block = StoredBlock.deserializeCompact(params, buffer);</span>
+<span class="fc" id="L178">                checkpoints.put(block.getHeader().getTimeSeconds(), block);</span>
+            }
+<span class="fc" id="L180">            HashCode hash = hasher.hash();</span>
+<span class="fc" id="L181">            log.info(&quot;Read {} checkpoints, hash is {}&quot;, checkpoints.size(), hash);</span>
+<span class="fc" id="L182">            return Sha256Hash.wrap(hash.asBytes());</span>
+        } finally {
+<span class="pc bpc" id="L184" title="2 of 4 branches missed.">            if (reader != null) reader.close();</span>
+        }
+    }
+
+    /**
+     * Returns a {@link StoredBlock} representing the last checkpoint before the given time, for example, normally
+     * you would want to know the checkpoint before the earliest wallet birthday.
+     */
+    public StoredBlock getCheckpointBefore(long time) {
+        try {
+<span class="nc bnc" id="L194" title="All 2 branches missed.">            checkArgument(time &gt; params.getGenesisBlock().getTimeSeconds());</span>
+            // This is thread safe because the map never changes after creation.
+<span class="nc" id="L196">            Map.Entry&lt;Long, StoredBlock&gt; entry = checkpoints.floorEntry(time);</span>
+<span class="nc bnc" id="L197" title="All 2 branches missed.">            if (entry != null) return entry.getValue();</span>
+<span class="nc" id="L198">            Block genesis = params.getGenesisBlock().cloneAsHeader();</span>
+<span class="nc" id="L199">            return new StoredBlock(genesis, genesis.getWork(), 0);</span>
+<span class="nc" id="L200">        } catch (VerificationException e) {</span>
+<span class="nc" id="L201">            throw new RuntimeException(e);  // Cannot happen.</span>
+        }
+    }
+
+    /** Returns the number of checkpoints that were loaded. */
+    public int numCheckpoints() {
+<span class="nc" id="L207">        return checkpoints.size();</span>
+    }
+
+    /** Returns a hash of the concatenated checkpoint data. */
+    public Sha256Hash getDataHash() {
+<span class="nc" id="L212">        return dataHash;</span>
+    }
+
+    /**
+     * &lt;p&gt;Convenience method that creates a CheckpointManager, loads the given data, gets the checkpoint for the given
+     * time, then inserts it into the store and sets that to be the chain head. Useful when you have just created
+     * a new store from scratch and want to use configure it all in one go.&lt;/p&gt;
+     *
+     * &lt;p&gt;Note that time is adjusted backwards by a week to account for possible clock drift in the block headers.&lt;/p&gt;
+     */
+    public static void checkpoint(NetworkParameters params, InputStream checkpoints, BlockStore store, long time)
+            throws IOException, BlockStoreException {
+<span class="nc" id="L224">        checkNotNull(params);</span>
+<span class="nc" id="L225">        checkNotNull(store);</span>
+<span class="nc bnc" id="L226" title="All 2 branches missed.">        checkArgument(!(store instanceof FullPrunedBlockStore), &quot;You cannot use checkpointing with a full store.&quot;);</span>
+
+<span class="nc" id="L228">        time -= 86400 * 7;</span>
+
+<span class="nc bnc" id="L230" title="All 2 branches missed.">        checkArgument(time &gt; 0);</span>
+<span class="nc" id="L231">        log.info(&quot;Attempting to initialize a new block store with a checkpoint for time {} ({})&quot;, time, Utils.dateTimeFormat(time * 1000));</span>
+
+<span class="nc" id="L233">        BufferedInputStream stream = new BufferedInputStream(checkpoints);</span>
+<span class="nc" id="L234">        CheckpointManager manager = new CheckpointManager(params, stream);</span>
+<span class="nc" id="L235">        StoredBlock checkpoint = manager.getCheckpointBefore(time);</span>
+<span class="nc" id="L236">        store.put(checkpoint);</span>
+<span class="nc" id="L237">        store.setChainHead(checkpoint);</span>
+<span class="nc" id="L238">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

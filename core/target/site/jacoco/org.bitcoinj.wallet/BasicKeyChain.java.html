@@ -1,0 +1,622 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>BasicKeyChain.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.wallet</a> &gt; <span class="el_source">BasicKeyChain.java</span></div><h1>BasicKeyChain.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.wallet;
+
+import org.bitcoinj.core.BloomFilter;
+import org.bitcoinj.core.ECKey;
+import org.bitcoinj.crypto.*;
+import org.bitcoinj.utils.ListenerRegistration;
+import org.bitcoinj.utils.Threading;
+import org.bitcoinj.wallet.listeners.KeyChainEventListener;
+
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
+import com.google.protobuf.ByteString;
+import org.spongycastle.crypto.params.KeyParameter;
+
+import javax.annotation.Nullable;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
+import java.util.concurrent.locks.ReentrantLock;
+
+import static com.google.common.base.Preconditions.*;
+
+/**
+ * A {@link KeyChain} that implements the simplest model possible: it can have keys imported into it, and just acts as
+ * a dumb bag of keys. It will, left to its own devices, always return the same key for usage by the wallet, although
+ * it will automatically add one to itself if it's empty or if encryption is requested.
+ */
+public class BasicKeyChain implements EncryptableKeyChain {
+<span class="fc" id="L45">    private final ReentrantLock lock = Threading.lock(&quot;BasicKeyChain&quot;);</span>
+
+    // Maps used to let us quickly look up a key given data we find in transcations or the block chain.
+    private final LinkedHashMap&lt;ByteString, ECKey&gt; hashToKeys;
+    private final LinkedHashMap&lt;ByteString, ECKey&gt; pubkeyToKeys;
+    @Nullable private final KeyCrypter keyCrypter;
+    private boolean isWatching;
+
+    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;KeyChainEventListener&gt;&gt; listeners;
+
+    public BasicKeyChain() {
+<span class="fc" id="L56">        this(null);</span>
+<span class="fc" id="L57">    }</span>
+
+<span class="fc" id="L59">    public BasicKeyChain(@Nullable KeyCrypter crypter) {</span>
+<span class="fc" id="L60">        this.keyCrypter = crypter;</span>
+<span class="fc" id="L61">        hashToKeys = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc" id="L62">        pubkeyToKeys = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc" id="L63">        listeners = new CopyOnWriteArrayList&lt;&gt;();</span>
+<span class="fc" id="L64">    }</span>
+
+    /** Returns the {@link KeyCrypter} in use or null if the key chain is not encrypted. */
+    @Override
+    @Nullable
+    public KeyCrypter getKeyCrypter() {
+<span class="fc" id="L70">        lock.lock();</span>
+        try {
+<span class="fc" id="L72">            return keyCrypter;</span>
+        } finally {
+<span class="pc" id="L74">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public ECKey getKey(@Nullable KeyPurpose ignored) {
+<span class="fc" id="L80">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L82" title="All 2 branches covered.">            if (hashToKeys.isEmpty()) {</span>
+<span class="pc bpc" id="L83" title="1 of 2 branches missed.">                checkState(keyCrypter == null);   // We will refuse to encrypt an empty key chain.</span>
+<span class="fc" id="L84">                final ECKey key = new ECKey();</span>
+<span class="fc" id="L85">                importKeyLocked(key);</span>
+<span class="fc" id="L86">                queueOnKeysAdded(ImmutableList.of(key));</span>
+            }
+<span class="fc" id="L88">            return hashToKeys.values().iterator().next();</span>
+        } finally {
+<span class="pc" id="L90">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public List&lt;ECKey&gt; getKeys(@Nullable KeyPurpose purpose, int numberOfKeys) {
+<span class="nc bnc" id="L96" title="All 2 branches missed.">        checkArgument(numberOfKeys &gt; 0);</span>
+<span class="nc" id="L97">        lock.lock();</span>
+        try {
+<span class="nc bnc" id="L99" title="All 2 branches missed.">            if (hashToKeys.size() &lt; numberOfKeys) {</span>
+<span class="nc bnc" id="L100" title="All 2 branches missed.">                checkState(keyCrypter == null);</span>
+
+<span class="nc" id="L102">                List&lt;ECKey&gt; keys = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L103" title="All 2 branches missed.">                for (int i = 0; i &lt; numberOfKeys - hashToKeys.size(); i++) {</span>
+<span class="nc" id="L104">                    keys.add(new ECKey());</span>
+                }
+
+<span class="nc" id="L107">                ImmutableList&lt;ECKey&gt; immutableKeys = ImmutableList.copyOf(keys);</span>
+<span class="nc" id="L108">                importKeysLocked(immutableKeys);</span>
+<span class="nc" id="L109">                queueOnKeysAdded(immutableKeys);</span>
+            }
+
+<span class="nc" id="L112">            List&lt;ECKey&gt; keysToReturn = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L113">            int count = 0;</span>
+<span class="nc bnc" id="L114" title="All 4 branches missed.">            while (hashToKeys.values().iterator().hasNext() &amp;&amp; numberOfKeys != count) {</span>
+<span class="nc" id="L115">                keysToReturn.add(hashToKeys.values().iterator().next());</span>
+<span class="nc" id="L116">                count++;</span>
+            }
+<span class="nc" id="L118">            return keysToReturn;</span>
+        } finally {
+<span class="nc" id="L120">            lock.unlock();</span>
+        }
+    }
+
+    /** Returns a copy of the list of keys that this chain is managing. */
+    public List&lt;ECKey&gt; getKeys() {
+<span class="fc" id="L126">        lock.lock();</span>
+        try {
+<span class="fc" id="L128">            return new ArrayList&lt;&gt;(hashToKeys.values());</span>
+        } finally {
+<span class="pc" id="L130">            lock.unlock();</span>
+        }
+    }
+
+    public int importKeys(ECKey... keys) {
+<span class="fc" id="L135">        return importKeys(ImmutableList.copyOf(keys));</span>
+    }
+
+    public int importKeys(List&lt;? extends ECKey&gt; keys) {
+<span class="fc" id="L139">        lock.lock();</span>
+        try {
+            // Check that if we're encrypted, the keys are all encrypted, and if we're not, that none are.
+            // We are NOT checking that the actual password matches here because we don't have access to the password at
+            // this point: if you screw up and import keys with mismatched passwords, you lose! So make sure the
+            // password is checked first.
+<span class="fc bfc" id="L145" title="All 2 branches covered.">            for (ECKey key : keys) {</span>
+<span class="fc" id="L146">                checkKeyEncryptionStateMatches(key);</span>
+<span class="fc" id="L147">            }</span>
+<span class="fc" id="L148">            List&lt;ECKey&gt; actuallyAdded = new ArrayList&lt;&gt;(keys.size());</span>
+<span class="fc bfc" id="L149" title="All 2 branches covered.">            for (final ECKey key : keys) {</span>
+<span class="fc bfc" id="L150" title="All 2 branches covered.">                if (hasKey(key)) continue;</span>
+<span class="fc" id="L151">                actuallyAdded.add(key);</span>
+<span class="fc" id="L152">                importKeyLocked(key);</span>
+<span class="fc" id="L153">            }</span>
+<span class="fc bfc" id="L154" title="All 2 branches covered.">            if (actuallyAdded.size() &gt; 0)</span>
+<span class="fc" id="L155">                queueOnKeysAdded(actuallyAdded);</span>
+<span class="fc" id="L156">            return actuallyAdded.size();</span>
+        } finally {
+<span class="fc" id="L158">            lock.unlock();</span>
+        }
+    }
+
+    private void checkKeyEncryptionStateMatches(ECKey key) {
+<span class="fc bfc" id="L163" title="All 4 branches covered.">        if (keyCrypter == null &amp;&amp; key.isEncrypted())</span>
+<span class="fc" id="L164">            throw new KeyCrypterException(&quot;Key is encrypted but chain is not&quot;);</span>
+<span class="fc bfc" id="L165" title="All 4 branches covered.">        else if (keyCrypter != null &amp;&amp; !key.isEncrypted())</span>
+<span class="fc" id="L166">            throw new KeyCrypterException(&quot;Key is not encrypted but chain is&quot;);</span>
+<span class="pc bpc" id="L167" title="1 of 6 branches missed.">        else if (keyCrypter != null &amp;&amp; key.getKeyCrypter() != null &amp;&amp; !key.getKeyCrypter().equals(keyCrypter))</span>
+<span class="fc" id="L168">            throw new KeyCrypterException(&quot;Key encrypted under different parameters to chain&quot;);</span>
+<span class="fc" id="L169">    }</span>
+
+    private void importKeyLocked(ECKey key) {
+<span class="fc bfc" id="L172" title="All 2 branches covered.">        if (hashToKeys.isEmpty()) {</span>
+<span class="fc" id="L173">            isWatching = key.isWatching();</span>
+        } else {
+<span class="pc bpc" id="L175" title="1 of 4 branches missed.">            if (key.isWatching() &amp;&amp; !isWatching)</span>
+<span class="nc" id="L176">                throw new IllegalArgumentException(&quot;Key is watching but chain is not&quot;);</span>
+<span class="pc bpc" id="L177" title="1 of 4 branches missed.">            if (!key.isWatching() &amp;&amp; isWatching)</span>
+<span class="nc" id="L178">                throw new IllegalArgumentException(&quot;Key is not watching but chain is&quot;);</span>
+        }
+<span class="fc" id="L180">        ECKey previousKey = pubkeyToKeys.put(ByteString.copyFrom(key.getPubKey()), key);</span>
+<span class="fc" id="L181">        hashToKeys.put(ByteString.copyFrom(key.getPubKeyHash()), key);</span>
+<span class="pc bpc" id="L182" title="1 of 2 branches missed.">        checkState(previousKey == null);</span>
+<span class="fc" id="L183">    }</span>
+
+    private void importKeysLocked(List&lt;ECKey&gt; keys) {
+<span class="nc bnc" id="L186" title="All 2 branches missed.">        for (ECKey key : keys) {</span>
+<span class="nc" id="L187">            importKeyLocked(key);</span>
+<span class="nc" id="L188">        }</span>
+<span class="nc" id="L189">    }</span>
+
+    /**
+     * Imports a key to the key chain. If key is present in the key chain, ignore it.
+     */
+    public void importKey(ECKey key) {
+<span class="fc" id="L195">        lock.lock();</span>
+        try {
+<span class="fc" id="L197">            checkKeyEncryptionStateMatches(key);</span>
+<span class="fc bfc" id="L198" title="All 2 branches covered.">            if (hasKey(key)) return;</span>
+<span class="fc" id="L199">            importKeyLocked(key);</span>
+<span class="fc" id="L200">            queueOnKeysAdded(ImmutableList.of(key));</span>
+        } finally {
+<span class="pc" id="L202">            lock.unlock();</span>
+<span class="fc" id="L203">        }</span>
+<span class="fc" id="L204">    }</span>
+
+    public ECKey findKeyFromPubHash(byte[] pubkeyHash) {
+<span class="fc" id="L207">        lock.lock();</span>
+        try {
+<span class="fc" id="L209">            return hashToKeys.get(ByteString.copyFrom(pubkeyHash));</span>
+        } finally {
+<span class="pc" id="L211">            lock.unlock();</span>
+        }
+    }
+
+    public ECKey findKeyFromPubKey(byte[] pubkey) {
+<span class="fc" id="L216">        lock.lock();</span>
+        try {
+<span class="fc" id="L218">            return pubkeyToKeys.get(ByteString.copyFrom(pubkey));</span>
+        } finally {
+<span class="pc" id="L220">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public boolean hasKey(ECKey key) {
+<span class="fc bfc" id="L226" title="All 2 branches covered.">        return findKeyFromPubKey(key.getPubKey()) != null;</span>
+    }
+
+    @Override
+    public int numKeys() {
+<span class="fc" id="L231">        return pubkeyToKeys.size();</span>
+    }
+
+    /** Whether this basic key chain is empty, full of regular (usable for signing) keys, or full of watching keys. */
+<span class="pc" id="L235">    public enum State {</span>
+<span class="fc" id="L236">        EMPTY,</span>
+<span class="fc" id="L237">        WATCHING,</span>
+<span class="fc" id="L238">        REGULAR</span>
+    }
+
+    /**
+     * Returns whether this chain consists of pubkey only (watching) keys, regular keys (usable for signing), or
+     * has no keys in it yet at all (thus we cannot tell).
+     */
+    public State isWatching() {
+<span class="fc" id="L246">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L248" title="All 2 branches covered.">            if (hashToKeys.isEmpty())</span>
+<span class="fc" id="L249">                return State.EMPTY;</span>
+<span class="fc bfc" id="L250" title="All 2 branches covered.">            return isWatching ? State.WATCHING : State.REGULAR;</span>
+        } finally {
+<span class="pc" id="L252">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Removes the given key from the keychain. Be very careful with this - losing a private key &lt;b&gt;destroys the
+     * money associated with it&lt;/b&gt;.
+     * @return Whether the key was removed or not.
+     */
+    public boolean removeKey(ECKey key) {
+<span class="fc" id="L262">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L264" title="All 2 branches covered.">            boolean a = hashToKeys.remove(ByteString.copyFrom(key.getPubKeyHash())) != null;</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">            boolean b = pubkeyToKeys.remove(ByteString.copyFrom(key.getPubKey())) != null;</span>
+<span class="pc bpc" id="L266" title="1 of 2 branches missed.">            checkState(a == b);   // Should be in both maps or neither.</span>
+<span class="fc" id="L267">            return a;</span>
+        } finally {
+<span class="pc" id="L269">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public long getEarliestKeyCreationTime() {
+<span class="fc" id="L275">        lock.lock();</span>
+        try {
+<span class="fc" id="L277">            long time = Long.MAX_VALUE;</span>
+<span class="fc bfc" id="L278" title="All 2 branches covered.">            for (ECKey key : hashToKeys.values())</span>
+<span class="fc" id="L279">                time = Math.min(key.getCreationTimeSeconds(), time);</span>
+<span class="fc" id="L280">            return time;</span>
+        } finally {
+<span class="pc" id="L282">            lock.unlock();</span>
+        }
+    }
+
+    public List&lt;ListenerRegistration&lt;KeyChainEventListener&gt;&gt; getListeners() {
+<span class="fc" id="L287">        return new ArrayList&lt;&gt;(listeners);</span>
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Serialization support
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    Map&lt;ECKey, Protos.Key.Builder&gt; serializeToEditableProtobufs() {
+<span class="fc" id="L297">        Map&lt;ECKey, Protos.Key.Builder&gt; result = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L298" title="All 2 branches covered.">        for (ECKey ecKey : hashToKeys.values()) {</span>
+<span class="fc" id="L299">            Protos.Key.Builder protoKey = serializeEncryptableItem(ecKey);</span>
+<span class="fc" id="L300">            protoKey.setPublicKey(ByteString.copyFrom(ecKey.getPubKey()));</span>
+<span class="fc" id="L301">            result.put(ecKey, protoKey);</span>
+<span class="fc" id="L302">        }</span>
+<span class="fc" id="L303">        return result;</span>
+    }
+
+    @Override
+    public List&lt;Protos.Key&gt; serializeToProtobuf() {
+<span class="fc" id="L308">        Collection&lt;Protos.Key.Builder&gt; builders = serializeToEditableProtobufs().values();</span>
+<span class="fc" id="L309">        List&lt;Protos.Key&gt; result = new ArrayList&lt;&gt;(builders.size());</span>
+<span class="fc bfc" id="L310" title="All 2 branches covered.">        for (Protos.Key.Builder builder : builders) result.add(builder.build());</span>
+<span class="fc" id="L311">        return result;</span>
+    }
+
+    /*package*/ static Protos.Key.Builder serializeEncryptableItem(EncryptableItem item) {
+<span class="fc" id="L315">        Protos.Key.Builder proto = Protos.Key.newBuilder();</span>
+<span class="fc" id="L316">        proto.setCreationTimestamp(item.getCreationTimeSeconds() * 1000);</span>
+<span class="fc bfc" id="L317" title="All 4 branches covered.">        if (item.isEncrypted() &amp;&amp; item.getEncryptedData() != null) {</span>
+            // The encrypted data can be missing for an &quot;encrypted&quot; key in the case of a deterministic wallet for
+            // which the leaf keys chain to an encrypted parent and rederive their private keys on the fly. In that
+            // case the caller in DeterministicKeyChain will take care of setting the type.
+<span class="fc" id="L321">            EncryptedData data = item.getEncryptedData();</span>
+<span class="fc" id="L322">            proto.getEncryptedDataBuilder()</span>
+<span class="fc" id="L323">                    .setEncryptedPrivateKey(ByteString.copyFrom(data.encryptedBytes))</span>
+<span class="fc" id="L324">                    .setInitialisationVector(ByteString.copyFrom(data.initialisationVector));</span>
+            // We don't allow mixing of encryption types at the moment.
+<span class="pc bpc" id="L326" title="1 of 2 branches missed.">            checkState(item.getEncryptionType() == Protos.Wallet.EncryptionType.ENCRYPTED_SCRYPT_AES);</span>
+<span class="fc" id="L327">            proto.setType(Protos.Key.Type.ENCRYPTED_SCRYPT_AES);</span>
+<span class="fc" id="L328">        } else {</span>
+<span class="fc" id="L329">            final byte[] secret = item.getSecretBytes();</span>
+            // The secret might be missing in the case of a watching wallet, or a key for which the private key
+            // is expected to be rederived on the fly from its parent.
+<span class="fc bfc" id="L332" title="All 2 branches covered.">            if (secret != null)</span>
+<span class="fc" id="L333">                proto.setSecretBytes(ByteString.copyFrom(secret));</span>
+<span class="fc" id="L334">            proto.setType(Protos.Key.Type.ORIGINAL);</span>
+        }
+<span class="fc" id="L336">        return proto;</span>
+    }
+
+    /**
+     * Returns a new BasicKeyChain that contains all basic, ORIGINAL type keys extracted from the list. Unrecognised
+     * key types are ignored.
+     */
+    public static BasicKeyChain fromProtobufUnencrypted(List&lt;Protos.Key&gt; keys) throws UnreadableWalletException {
+<span class="fc" id="L344">        BasicKeyChain chain = new BasicKeyChain();</span>
+<span class="fc" id="L345">        chain.deserializeFromProtobuf(keys);</span>
+<span class="fc" id="L346">        return chain;</span>
+    }
+
+    /**
+     * Returns a new BasicKeyChain that contains all basic, ORIGINAL type keys and also any encrypted keys extracted
+     * from the list. Unrecognised key types are ignored.
+     * @throws org.bitcoinj.wallet.UnreadableWalletException.BadPassword if the password doesn't seem to match
+     * @throws org.bitcoinj.wallet.UnreadableWalletException if the data structures are corrupted/inconsistent
+     */
+    public static BasicKeyChain fromProtobufEncrypted(List&lt;Protos.Key&gt; keys, KeyCrypter crypter) throws UnreadableWalletException {
+<span class="fc" id="L356">        BasicKeyChain chain = new BasicKeyChain(checkNotNull(crypter));</span>
+<span class="fc" id="L357">        chain.deserializeFromProtobuf(keys);</span>
+<span class="fc" id="L358">        return chain;</span>
+    }
+
+    private void deserializeFromProtobuf(List&lt;Protos.Key&gt; keys) throws UnreadableWalletException {
+<span class="fc" id="L362">        lock.lock();</span>
+        try {
+<span class="fc" id="L364">            checkState(hashToKeys.isEmpty(), &quot;Tried to deserialize into a non-empty chain&quot;);</span>
+<span class="fc bfc" id="L365" title="All 2 branches covered.">            for (Protos.Key key : keys) {</span>
+<span class="fc bfc" id="L366" title="All 4 branches covered.">                if (key.getType() != Protos.Key.Type.ORIGINAL &amp;&amp; key.getType() != Protos.Key.Type.ENCRYPTED_SCRYPT_AES)</span>
+<span class="fc" id="L367">                    continue;</span>
+<span class="fc bfc" id="L368" title="All 2 branches covered.">                boolean encrypted = key.getType() == Protos.Key.Type.ENCRYPTED_SCRYPT_AES;</span>
+<span class="fc bfc" id="L369" title="All 2 branches covered.">                byte[] priv = key.hasSecretBytes() ? key.getSecretBytes().toByteArray() : null;</span>
+<span class="pc bpc" id="L370" title="1 of 2 branches missed.">                if (!key.hasPublicKey())</span>
+<span class="nc" id="L371">                    throw new UnreadableWalletException(&quot;Public key missing&quot;);</span>
+<span class="fc" id="L372">                byte[] pub = key.getPublicKey().toByteArray();</span>
+                ECKey ecKey;
+<span class="fc bfc" id="L374" title="All 2 branches covered.">                if (encrypted) {</span>
+<span class="pc bpc" id="L375" title="1 of 2 branches missed.">                    checkState(keyCrypter != null, &quot;This wallet is encrypted but encrypt() was not called prior to deserialization&quot;);</span>
+<span class="pc bpc" id="L376" title="1 of 2 branches missed.">                    if (!key.hasEncryptedData())</span>
+<span class="nc" id="L377">                        throw new UnreadableWalletException(&quot;Encrypted private key data missing&quot;);</span>
+<span class="fc" id="L378">                    Protos.EncryptedData proto = key.getEncryptedData();</span>
+<span class="fc" id="L379">                    EncryptedData e = new EncryptedData(proto.getInitialisationVector().toByteArray(),</span>
+<span class="fc" id="L380">                            proto.getEncryptedPrivateKey().toByteArray());</span>
+<span class="fc" id="L381">                    ecKey = ECKey.fromEncrypted(e, keyCrypter, pub);</span>
+<span class="fc" id="L382">                } else {</span>
+<span class="fc bfc" id="L383" title="All 2 branches covered.">                    if (priv != null)</span>
+<span class="fc" id="L384">                        ecKey = ECKey.fromPrivateAndPrecalculatedPublic(priv, pub);</span>
+                    else
+<span class="fc" id="L386">                        ecKey = ECKey.fromPublicOnly(pub);</span>
+                }
+<span class="fc" id="L388">                ecKey.setCreationTimeSeconds(key.getCreationTimestamp() / 1000);</span>
+<span class="fc" id="L389">                importKeyLocked(ecKey);</span>
+<span class="fc" id="L390">            }</span>
+        } finally {
+<span class="pc" id="L392">            lock.unlock();</span>
+<span class="fc" id="L393">        }</span>
+<span class="fc" id="L394">    }</span>
+
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Event listener support
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    @Override
+    public void addEventListener(KeyChainEventListener listener) {
+<span class="nc" id="L405">        addEventListener(listener, Threading.USER_THREAD);</span>
+<span class="nc" id="L406">    }</span>
+
+    @Override
+    public void addEventListener(KeyChainEventListener listener, Executor executor) {
+<span class="fc" id="L410">        listeners.add(new ListenerRegistration&lt;&gt;(listener, executor));</span>
+<span class="fc" id="L411">    }</span>
+
+    @Override
+    public boolean removeEventListener(KeyChainEventListener listener) {
+<span class="fc" id="L415">        return ListenerRegistration.removeFromList(listener, listeners);</span>
+    }
+
+    private void queueOnKeysAdded(final List&lt;ECKey&gt; keys) {
+<span class="fc" id="L419">        checkState(lock.isHeldByCurrentThread());</span>
+<span class="fc bfc" id="L420" title="All 2 branches covered.">        for (final ListenerRegistration&lt;KeyChainEventListener&gt; registration : listeners) {</span>
+<span class="fc" id="L421">            registration.executor.execute(new Runnable() {</span>
+                @Override
+                public void run() {
+<span class="fc" id="L424">                    registration.listener.onKeysAdded(keys);</span>
+<span class="fc" id="L425">                }</span>
+            });
+<span class="fc" id="L427">        }</span>
+<span class="fc" id="L428">    }</span>
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Encryption support
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * Convenience wrapper around {@link #toEncrypted(org.bitcoinj.crypto.KeyCrypter,
+     * org.spongycastle.crypto.params.KeyParameter)} which uses the default Scrypt key derivation algorithm and
+     * parameters, derives a key from the given password and returns the created key.
+     */
+    @Override
+    public BasicKeyChain toEncrypted(CharSequence password) {
+<span class="fc" id="L443">        checkNotNull(password);</span>
+<span class="pc bpc" id="L444" title="1 of 2 branches missed.">        checkArgument(password.length() &gt; 0);</span>
+<span class="fc" id="L445">        KeyCrypter scrypt = new KeyCrypterScrypt();</span>
+<span class="fc" id="L446">        KeyParameter derivedKey = scrypt.deriveKey(password);</span>
+<span class="fc" id="L447">        return toEncrypted(scrypt, derivedKey);</span>
+    }
+
+    /**
+     * Encrypt the wallet using the KeyCrypter and the AES key. A good default KeyCrypter to use is
+     * {@link org.bitcoinj.crypto.KeyCrypterScrypt}.
+     *
+     * @param keyCrypter The KeyCrypter that specifies how to encrypt/ decrypt a key
+     * @param aesKey AES key to use (normally created using KeyCrypter#deriveKey and cached as it is time consuming
+     *               to create from a password)
+     * @throws KeyCrypterException Thrown if the wallet encryption fails. If so, the wallet state is unchanged.
+     */
+    @Override
+    public BasicKeyChain toEncrypted(KeyCrypter keyCrypter, KeyParameter aesKey) {
+<span class="fc" id="L461">        lock.lock();</span>
+        try {
+<span class="fc" id="L463">            checkNotNull(keyCrypter);</span>
+<span class="fc bfc" id="L464" title="All 2 branches covered.">            checkState(this.keyCrypter == null, &quot;Key chain is already encrypted&quot;);</span>
+<span class="fc" id="L465">            BasicKeyChain encrypted = new BasicKeyChain(keyCrypter);</span>
+<span class="fc bfc" id="L466" title="All 2 branches covered.">            for (ECKey key : hashToKeys.values()) {</span>
+<span class="fc" id="L467">                ECKey encryptedKey = key.encrypt(keyCrypter, aesKey);</span>
+                // Check that the encrypted key can be successfully decrypted.
+                // This is done as it is a critical failure if the private key cannot be decrypted successfully
+                // (all bitcoin controlled by that private key is lost forever).
+                // For a correctly constructed keyCrypter the encryption should always be reversible so it is just
+                // being as cautious as possible.
+<span class="pc bpc" id="L473" title="1 of 2 branches missed.">                if (!ECKey.encryptionIsReversible(key, encryptedKey, keyCrypter, aesKey))</span>
+<span class="nc" id="L474">                    throw new KeyCrypterException(&quot;The key &quot; + key.toString() + &quot; cannot be successfully decrypted after encryption so aborting wallet encryption.&quot;);</span>
+<span class="fc" id="L475">                encrypted.importKeyLocked(encryptedKey);</span>
+<span class="fc" id="L476">            }</span>
+<span class="fc" id="L477">            return encrypted;</span>
+        } finally {
+<span class="fc" id="L479">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public BasicKeyChain toDecrypted(CharSequence password) {
+<span class="fc" id="L485">        checkNotNull(keyCrypter, &quot;Wallet is already decrypted&quot;);</span>
+<span class="fc" id="L486">        KeyParameter aesKey = keyCrypter.deriveKey(password);</span>
+<span class="fc" id="L487">        return toDecrypted(aesKey);</span>
+    }
+
+    @Override
+    public BasicKeyChain toDecrypted(KeyParameter aesKey) {
+<span class="fc" id="L492">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L494" title="All 2 branches covered.">            checkState(keyCrypter != null, &quot;Wallet is already decrypted&quot;);</span>
+            // Do an up-front check.
+<span class="fc bfc" id="L496" title="All 4 branches covered.">            if (numKeys() &gt; 0 &amp;&amp; !checkAESKey(aesKey))</span>
+<span class="fc" id="L497">                throw new KeyCrypterException(&quot;Password/key was incorrect.&quot;);</span>
+<span class="fc" id="L498">            BasicKeyChain decrypted = new BasicKeyChain();</span>
+<span class="fc bfc" id="L499" title="All 2 branches covered.">            for (ECKey key : hashToKeys.values()) {</span>
+<span class="fc" id="L500">                decrypted.importKeyLocked(key.decrypt(aesKey));</span>
+<span class="fc" id="L501">            }</span>
+<span class="fc" id="L502">            return decrypted;</span>
+        } finally {
+<span class="fc" id="L504">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Returns whether the given password is correct for this key chain.
+     * @throws IllegalStateException if the chain is not encrypted at all.
+     */
+    @Override
+    public boolean checkPassword(CharSequence password) {
+<span class="fc" id="L514">        checkNotNull(password);</span>
+<span class="fc bfc" id="L515" title="All 2 branches covered.">        checkState(keyCrypter != null, &quot;Key chain not encrypted&quot;);</span>
+<span class="fc" id="L516">        return checkAESKey(keyCrypter.deriveKey(password));</span>
+    }
+
+    /**
+     * Check whether the AES key can decrypt the first encrypted key in the wallet.
+     *
+     * @return true if AES key supplied can decrypt the first encrypted private key in the wallet, false otherwise.
+     */
+    @Override
+    public boolean checkAESKey(KeyParameter aesKey) {
+<span class="fc" id="L526">        lock.lock();</span>
+        try {
+            // If no keys then cannot decrypt.
+<span class="pc bpc" id="L529" title="1 of 2 branches missed.">            if (hashToKeys.isEmpty()) return false;</span>
+<span class="pc bpc" id="L530" title="1 of 2 branches missed.">            checkState(keyCrypter != null, &quot;Key chain is not encrypted&quot;);</span>
+
+            // Find the first encrypted key in the wallet.
+<span class="fc" id="L533">            ECKey first = null;</span>
+<span class="pc bpc" id="L534" title="1 of 2 branches missed.">            for (ECKey key : hashToKeys.values()) {</span>
+<span class="pc bpc" id="L535" title="1 of 2 branches missed.">                if (key.isEncrypted()) {</span>
+<span class="fc" id="L536">                    first = key;</span>
+<span class="fc" id="L537">                    break;</span>
+                }
+<span class="nc" id="L539">            }</span>
+<span class="pc bpc" id="L540" title="1 of 2 branches missed.">            checkState(first != null, &quot;No encrypted keys in the wallet&quot;);</span>
+
+            try {
+<span class="fc" id="L543">                ECKey rebornKey = first.decrypt(aesKey);</span>
+<span class="fc" id="L544">                return Arrays.equals(first.getPubKey(), rebornKey.getPubKey());</span>
+<span class="fc" id="L545">            } catch (KeyCrypterException e) {</span>
+                // The AES key supplied is incorrect.
+<span class="fc" id="L547">                return false;</span>
+            }
+        } finally {
+<span class="pc" id="L550">            lock.unlock();</span>
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Bloom filtering support
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+    @Override
+    public BloomFilter getFilter(int size, double falsePositiveRate, long tweak) {
+<span class="fc" id="L563">        lock.lock();</span>
+        try {
+<span class="fc" id="L565">            BloomFilter filter = new BloomFilter(size, falsePositiveRate, tweak);</span>
+<span class="fc bfc" id="L566" title="All 2 branches covered.">            for (ECKey key : hashToKeys.values())</span>
+<span class="fc" id="L567">                filter.insert(key);</span>
+<span class="fc" id="L568">            return filter;</span>
+        } finally {
+<span class="pc" id="L570">            lock.unlock();</span>
+        }
+    }
+
+    @Override
+    public int numBloomFilterEntries() {
+<span class="fc" id="L576">        return numKeys() * 2;</span>
+    }
+
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Key rotation support
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    /** Returns the first ECKey created after the given UNIX time, or null if there is none. */
+    @Nullable
+    public ECKey findOldestKeyAfter(long timeSecs) {
+<span class="fc" id="L589">        lock.lock();</span>
+        try {
+<span class="fc" id="L591">            ECKey oldest = null;</span>
+<span class="fc bfc" id="L592" title="All 2 branches covered.">            for (ECKey key : hashToKeys.values()) {</span>
+<span class="fc" id="L593">                final long keyTime = key.getCreationTimeSeconds();</span>
+<span class="fc bfc" id="L594" title="All 2 branches covered.">                if (keyTime &gt; timeSecs) {</span>
+<span class="fc bfc" id="L595" title="All 4 branches covered.">                    if (oldest == null || oldest.getCreationTimeSeconds() &gt; keyTime)</span>
+<span class="fc" id="L596">                        oldest = key;</span>
+                }
+<span class="fc" id="L598">            }</span>
+<span class="fc" id="L599">            return oldest;</span>
+        } finally {
+<span class="pc" id="L601">            lock.unlock();</span>
+        }
+    }
+
+    /** Returns a list of all ECKeys created after the given UNIX time. */
+    public List&lt;ECKey&gt; findKeysBefore(long timeSecs) {
+<span class="fc" id="L607">        lock.lock();</span>
+        try {
+<span class="fc" id="L609">            List&lt;ECKey&gt; results = Lists.newLinkedList();</span>
+<span class="fc bfc" id="L610" title="All 2 branches covered.">            for (ECKey key : hashToKeys.values()) {</span>
+<span class="fc" id="L611">                final long keyTime = key.getCreationTimeSeconds();</span>
+<span class="fc bfc" id="L612" title="All 2 branches covered.">                if (keyTime &lt; timeSecs) {</span>
+<span class="fc" id="L613">                    results.add(key);</span>
+                }
+<span class="fc" id="L615">            }</span>
+<span class="fc" id="L616">            return results;</span>
+        } finally {
+<span class="pc" id="L618">            lock.unlock();</span>
+        }
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

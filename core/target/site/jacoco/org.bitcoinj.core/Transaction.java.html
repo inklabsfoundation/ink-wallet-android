@@ -1,0 +1,1458 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>Transaction.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">Transaction.java</span></div><h1>Transaction.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ * Copyright 2014 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import org.bitcoinj.core.TransactionConfidence.ConfidenceType;
+import org.bitcoinj.crypto.TransactionSignature;
+import org.bitcoinj.script.Script;
+import org.bitcoinj.script.ScriptBuilder;
+import org.bitcoinj.script.ScriptError;
+import org.bitcoinj.script.ScriptException;
+import org.bitcoinj.script.ScriptOpCodes;
+import org.bitcoinj.signers.TransactionSigner;
+import org.bitcoinj.utils.ExchangeRate;
+import org.bitcoinj.wallet.Wallet;
+import org.bitcoinj.wallet.WalletTransaction.Pool;
+
+import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.primitives.Ints;
+import com.google.common.primitives.Longs;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.spongycastle.crypto.params.KeyParameter;
+
+import javax.annotation.Nullable;
+import java.io.*;
+import java.util.*;
+
+import static org.bitcoinj.core.Utils.*;
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
+import java.math.BigInteger;
+
+/**
+ * &lt;p&gt;A transaction represents the movement of coins from some addresses to some other addresses. It can also represent
+ * the minting of new coins. A Transaction object corresponds to the equivalent in the Bitcoin C++ implementation.&lt;/p&gt;
+ *
+ * &lt;p&gt;Transactions are the fundamental atoms of Bitcoin and have many powerful features. Read
+ * &lt;a href=&quot;https://bitcoinj.github.io/working-with-transactions&quot;&gt;&quot;Working with transactions&quot;&lt;/a&gt; in the
+ * documentation to learn more about how to use this class.&lt;/p&gt;
+ *
+ * &lt;p&gt;All Bitcoin transactions are at risk of being reversed, though the risk is much less than with traditional payment
+ * systems. Transactions have &lt;i&gt;confidence levels&lt;/i&gt;, which help you decide whether to trust a transaction or not.
+ * Whether to trust a transaction is something that needs to be decided on a case by case basis - a rule that makes
+ * sense for selling MP3s might not make sense for selling cars, or accepting payments from a family member. If you
+ * are building a wallet, how to present confidence to your users is something to consider carefully.&lt;/p&gt;
+ * 
+ * &lt;p&gt;Instances of this class are not safe for use by multiple threads.&lt;/p&gt;
+ */
+public class Transaction extends ChildMessage {
+    /**
+     * A comparator that can be used to sort transactions by their updateTime field. The ordering goes from most recent
+     * into the past.
+     */
+<span class="fc" id="L70">    public static final Comparator&lt;Transaction&gt; SORT_TX_BY_UPDATE_TIME = new Comparator&lt;Transaction&gt;() {</span>
+        @Override
+        public int compare(final Transaction tx1, final Transaction tx2) {
+<span class="fc" id="L73">            final long time1 = tx1.getUpdateTime().getTime();</span>
+<span class="fc" id="L74">            final long time2 = tx2.getUpdateTime().getTime();</span>
+<span class="fc" id="L75">            final int updateTimeComparison = -(Longs.compare(time1, time2));</span>
+            //If time1==time2, compare by tx hash to make comparator consistent with equals
+<span class="fc bfc" id="L77" title="All 2 branches covered.">            return updateTimeComparison != 0 ? updateTimeComparison : tx1.getHash().compareTo(tx2.getHash());</span>
+        }
+    };
+    /** A comparator that can be used to sort transactions by their chain height. */
+<span class="fc" id="L81">    public static final Comparator&lt;Transaction&gt; SORT_TX_BY_HEIGHT = new Comparator&lt;Transaction&gt;() {</span>
+        @Override
+        public int compare(final Transaction tx1, final Transaction tx2) {
+<span class="fc" id="L84">            final TransactionConfidence confidence1 = tx1.getConfidence();</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">            final int height1 = confidence1.getConfidenceType() == ConfidenceType.BUILDING</span>
+<span class="fc" id="L86">                    ? confidence1.getAppearedAtChainHeight() : Block.BLOCK_HEIGHT_UNKNOWN;</span>
+<span class="fc" id="L87">            final TransactionConfidence confidence2 = tx2.getConfidence();</span>
+<span class="fc bfc" id="L88" title="All 2 branches covered.">            final int height2 = confidence2.getConfidenceType() == ConfidenceType.BUILDING</span>
+<span class="fc" id="L89">                    ? confidence2.getAppearedAtChainHeight() : Block.BLOCK_HEIGHT_UNKNOWN;</span>
+<span class="fc" id="L90">            final int heightComparison = -(Ints.compare(height1, height2));</span>
+            //If height1==height2, compare by tx hash to make comparator consistent with equals
+<span class="fc bfc" id="L92" title="All 2 branches covered.">            return heightComparison != 0 ? heightComparison : tx1.getHash().compareTo(tx2.getHash());</span>
+        }
+    };
+<span class="fc" id="L95">    private static final Logger log = LoggerFactory.getLogger(Transaction.class);</span>
+
+    /** Threshold for lockTime: below this value it is interpreted as block number, otherwise as timestamp. **/
+    public static final int LOCKTIME_THRESHOLD = 500000000; // Tue Nov  5 00:53:20 1985 UTC
+    /** Same but as a BigInteger for CHECKLOCKTIMEVERIFY */
+<span class="fc" id="L100">    public static final BigInteger LOCKTIME_THRESHOLD_BIG = BigInteger.valueOf(LOCKTIME_THRESHOLD);</span>
+
+    /** How many bytes a transaction can be before it won't be relayed anymore. Currently 100kb. */
+    public static final int MAX_STANDARD_TX_SIZE = 100000;
+
+    /**
+     * If feePerKb is lower than this, Bitcoin Core will treat it as if there were no fee.
+     */
+<span class="fc" id="L108">    public static final Coin REFERENCE_DEFAULT_MIN_TX_FEE = Coin.valueOf(5000); // 0.05 mBTC</span>
+
+    /**
+     * If using this feePerKb, transactions will get confirmed within the next couple of blocks.
+     * This should be adjusted from time to time. Last adjustment: February 2017.
+     */
+<span class="fc" id="L114">    public static final Coin DEFAULT_TX_FEE = Coin.valueOf(100000); // 1 mBTC</span>
+
+    /**
+     * Any standard (ie pay-to-address) output smaller than this value (in satoshis) will most likely be rejected by the network.
+     * This is calculated by assuming a standard output will be 34 bytes, and then using the formula used in
+     * {@link TransactionOutput#getMinNonDustValue(Coin)}.
+     */
+<span class="fc" id="L121">    public static final Coin MIN_NONDUST_OUTPUT = Coin.valueOf(2730); // satoshis</span>
+
+    // These are bitcoin serialized.
+    private long version;
+    private ArrayList&lt;TransactionInput&gt; inputs;
+    private ArrayList&lt;TransactionOutput&gt; outputs;
+
+    private long lockTime;
+
+    // This is either the time the transaction was broadcast as measured from the local clock, or the time from the
+    // block in which it was included. Note that this can be changed by re-orgs so the wallet may update this field.
+    // Old serialized transactions don't have this field, thus null is valid. It is used for returning an ordered
+    // list of transactions from a wallet, which is helpful for presenting to users.
+    private Date updatedAt;
+
+    // This is an in memory helper only. It contains the transaction hash (aka txid), used as a reference by transaction
+    // inputs via outpoints.
+    private Sha256Hash hash;
+
+    // Data about how confirmed this tx is. Serialized, may be null.
+    @Nullable private TransactionConfidence confidence;
+
+    // Records a map of which blocks the transaction has appeared in (keys) to an index within that block (values).
+    // The &quot;index&quot; is not a real index, instead the values are only meaningful relative to each other. For example,
+    // consider two transactions that appear in the same block, t1 and t2, where t2 spends an output of t1. Both
+    // will have the same block hash as a key in their appearsInHashes, but the counter would be 1 and 2 respectively
+    // regardless of where they actually appeared in the block.
+    //
+    // If this transaction is not stored in the wallet, appearsInHashes is null.
+    private Map&lt;Sha256Hash, Integer&gt; appearsInHashes;
+
+    // Transactions can be encoded in a way that will use more bytes than is optimal
+    // (due to VarInts having multiple encodings)
+    // MAX_BLOCK_SIZE must be compared to the optimal encoding, not the actual encoding, so when parsing, we keep track
+    // of the size of the ideal encoding in addition to the actual message size (which Message needs) so that Blocks
+    // can properly keep track of optimal encoded size
+    private int optimalEncodingMessageSize;
+
+    /**
+     * This enum describes the underlying reason the transaction was created. It's useful for rendering wallet GUIs
+     * more appropriately.
+     */
+<span class="pc" id="L163">    public enum Purpose {</span>
+        /** Used when the purpose of a transaction is genuinely unknown. */
+<span class="fc" id="L165">        UNKNOWN,</span>
+        /** Transaction created to satisfy a user payment request. */
+<span class="fc" id="L167">        USER_PAYMENT,</span>
+        /** Transaction automatically created and broadcast in order to reallocate money from old to new keys. */
+<span class="fc" id="L169">        KEY_ROTATION,</span>
+        /** Transaction that uses up pledges to an assurance contract */
+<span class="fc" id="L171">        ASSURANCE_CONTRACT_CLAIM,</span>
+        /** Transaction that makes a pledge to an assurance contract. */
+<span class="fc" id="L173">        ASSURANCE_CONTRACT_PLEDGE,</span>
+        /** Send-to-self transaction that exists just to create an output of the right size we can pledge. */
+<span class="fc" id="L175">        ASSURANCE_CONTRACT_STUB,</span>
+        /** Raise fee, e.g. child-pays-for-parent. */
+<span class="fc" id="L177">        RAISE_FEE,</span>
+        // In future: de/refragmentation, privacy boosting/mixing, etc.
+        // When adding a value, it also needs to be added to wallet.proto, WalletProtobufSerialize.makeTxProto()
+        // and WalletProtobufSerializer.readTransaction()!
+    }
+
+<span class="pc" id="L183">    private Purpose purpose = Purpose.UNKNOWN;</span>
+
+    /**
+     * This field can be used by applications to record the exchange rate that was valid when the transaction happened.
+     * It's optional.
+     */
+    @Nullable
+    private ExchangeRate exchangeRate;
+
+    /**
+     * This field can be used to record the memo of the payment request that initiated the transaction. It's optional.
+     */
+    @Nullable
+    private String memo;
+
+    public Transaction(NetworkParameters params) {
+<span class="fc" id="L199">        super(params);</span>
+<span class="fc" id="L200">        version = 1;</span>
+<span class="fc" id="L201">        inputs = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L202">        outputs = new ArrayList&lt;&gt;();</span>
+        // We don't initialize appearsIn deliberately as it's only useful for transactions stored in the wallet.
+<span class="fc" id="L204">        length = 8; // 8 for std fields</span>
+<span class="fc" id="L205">    }</span>
+
+    /**
+     * Creates a transaction from the given serialized bytes, eg, from a block or a tx network message.
+     */
+    public Transaction(NetworkParameters params, byte[] payloadBytes) throws ProtocolException {
+<span class="fc" id="L211">        super(params, payloadBytes, 0);</span>
+<span class="fc" id="L212">    }</span>
+
+    /**
+     * Creates a transaction by reading payload starting from offset bytes in. Length of a transaction is fixed.
+     */
+    public Transaction(NetworkParameters params, byte[] payload, int offset) throws ProtocolException {
+<span class="fc" id="L218">        super(params, payload, offset);</span>
+        // inputs/outputs will be created in parse()
+<span class="fc" id="L220">    }</span>
+
+    /**
+     * Creates a transaction by reading payload starting from offset bytes in. Length of a transaction is fixed.
+     * @param params NetworkParameters object.
+     * @param payload Bitcoin protocol formatted byte array containing message content.
+     * @param offset The location of the first payload byte within the array.
+     * @param parent The parent of the transaction.
+     * @param setSerializer The serializer to use for this transaction.
+     * @param length The length of message if known.  Usually this is provided when deserializing of the wire
+     * as the length will be provided as part of the header.  If unknown then set to Message.UNKNOWN_LENGTH
+     * @throws ProtocolException
+     */
+    public Transaction(NetworkParameters params, byte[] payload, int offset, @Nullable Message parent, MessageSerializer setSerializer, int length)
+            throws ProtocolException {
+<span class="fc" id="L235">        super(params, payload, offset, parent, setSerializer, length);</span>
+<span class="fc" id="L236">    }</span>
+
+    /**
+     * Creates a transaction by reading payload. Length of a transaction is fixed.
+     */
+    public Transaction(NetworkParameters params, byte[] payload, @Nullable Message parent, MessageSerializer setSerializer, int length)
+            throws ProtocolException {
+<span class="nc" id="L243">        super(params, payload, 0, parent, setSerializer, length);</span>
+<span class="nc" id="L244">    }</span>
+
+    /**
+     * Returns the transaction hash (aka txid) as you see them in block explorers. It is used as a reference by
+     * transaction inputs via outpoints.
+     */
+    @Override
+    public Sha256Hash getHash() {
+<span class="fc bfc" id="L252" title="All 2 branches covered.">        if (hash == null) {</span>
+<span class="fc" id="L253">            hash = Sha256Hash.wrapReversed(Sha256Hash.hashTwice(unsafeBitcoinSerialize()));</span>
+        }
+<span class="fc" id="L255">        return hash;</span>
+    }
+
+    /**
+     * Used by BitcoinSerializer.  The serializer has to calculate a hash for checksumming so to
+     * avoid wasting the considerable effort a set method is provided so the serializer can set it.
+     *
+     * No verification is performed on this hash.
+     */
+    void setHash(Sha256Hash hash) {
+<span class="fc" id="L265">        this.hash = hash;</span>
+<span class="fc" id="L266">    }</span>
+
+    /**
+     * Returns the transaction hash (aka txid) as you see them in block explorers, as a hex string.
+     */
+    public String getHashAsString() {
+<span class="fc" id="L272">        return getHash().toString();</span>
+    }
+
+    /**
+     * Gets the sum of the inputs, regardless of who owns them.
+     */
+    public Coin getInputSum() {
+<span class="fc" id="L279">        Coin inputTotal = Coin.ZERO;</span>
+
+<span class="fc bfc" id="L281" title="All 2 branches covered.">        for (TransactionInput input: inputs) {</span>
+<span class="fc" id="L282">            Coin inputValue = input.getValue();</span>
+<span class="fc bfc" id="L283" title="All 2 branches covered.">            if (inputValue != null) {</span>
+<span class="fc" id="L284">                inputTotal = inputTotal.add(inputValue);</span>
+            }
+<span class="fc" id="L286">        }</span>
+
+<span class="fc" id="L288">        return inputTotal;</span>
+    }
+
+    /**
+     * Calculates the sum of the outputs that are sending coins to a key in the wallet.
+     */
+    public Coin getValueSentToMe(TransactionBag transactionBag) {
+        // This is tested in WalletTest.
+<span class="fc" id="L296">        Coin v = Coin.ZERO;</span>
+<span class="fc bfc" id="L297" title="All 2 branches covered.">        for (TransactionOutput o : outputs) {</span>
+<span class="fc bfc" id="L298" title="All 2 branches covered.">            if (!o.isMineOrWatched(transactionBag)) continue;</span>
+<span class="fc" id="L299">            v = v.add(o.getValue());</span>
+<span class="fc" id="L300">        }</span>
+<span class="fc" id="L301">        return v;</span>
+    }
+
+    /**
+     * Returns a map of block [hashes] which contain the transaction mapped to relativity counters, or null if this
+     * transaction doesn't have that data because it's not stored in the wallet or because it has never appeared in a
+     * block.
+     */
+    @Nullable
+    public Map&lt;Sha256Hash, Integer&gt; getAppearsInHashes() {
+<span class="fc bfc" id="L311" title="All 2 branches covered.">        return appearsInHashes != null ? ImmutableMap.copyOf(appearsInHashes) : null;</span>
+    }
+
+    /**
+     * Convenience wrapper around getConfidence().getConfidenceType()
+     * @return true if this transaction hasn't been seen in any block yet.
+     */
+    public boolean isPending() {
+<span class="pc bpc" id="L319" title="1 of 2 branches missed.">        return getConfidence().getConfidenceType() == TransactionConfidence.ConfidenceType.PENDING;</span>
+    }
+
+    /**
+     * &lt;p&gt;Puts the given block in the internal set of blocks in which this transaction appears. This is
+     * used by the wallet to ensure transactions that appear on side chains are recorded properly even though the
+     * block stores do not save the transaction data at all.&lt;/p&gt;
+     *
+     * &lt;p&gt;If there is a re-org this will be called once for each block that was previously seen, to update which block
+     * is the best chain. The best chain block is guaranteed to be called last. So this must be idempotent.&lt;/p&gt;
+     *
+     * &lt;p&gt;Sets updatedAt to be the earliest valid block time where this tx was seen.&lt;/p&gt;
+     *
+     * @param block     The {@link StoredBlock} in which the transaction has appeared.
+     * @param bestChain whether to set the updatedAt timestamp from the block header (only if not already set)
+     * @param relativityOffset A number that disambiguates the order of transactions within a block.
+     */
+    public void setBlockAppearance(StoredBlock block, boolean bestChain, int relativityOffset) {
+<span class="fc" id="L337">        long blockTime = block.getHeader().getTimeSeconds() * 1000;</span>
+<span class="pc bpc" id="L338" title="1 of 8 branches missed.">        if (bestChain &amp;&amp; (updatedAt == null || updatedAt.getTime() == 0 || updatedAt.getTime() &gt; blockTime)) {</span>
+<span class="fc" id="L339">            updatedAt = new Date(blockTime);</span>
+        }
+
+<span class="fc" id="L342">        addBlockAppearance(block.getHeader().getHash(), relativityOffset);</span>
+
+<span class="fc bfc" id="L344" title="All 2 branches covered.">        if (bestChain) {</span>
+<span class="fc" id="L345">            TransactionConfidence transactionConfidence = getConfidence();</span>
+            // This sets type to BUILDING and depth to one.
+<span class="fc" id="L347">            transactionConfidence.setAppearedAtChainHeight(block.getHeight());</span>
+        }
+<span class="fc" id="L349">    }</span>
+
+    public void addBlockAppearance(final Sha256Hash blockHash, int relativityOffset) {
+<span class="fc bfc" id="L352" title="All 2 branches covered.">        if (appearsInHashes == null) {</span>
+            // TODO: This could be a lot more memory efficient as we'll typically only store one element.
+<span class="fc" id="L354">            appearsInHashes = new TreeMap&lt;&gt;();</span>
+        }
+<span class="fc" id="L356">        appearsInHashes.put(blockHash, relativityOffset);</span>
+<span class="fc" id="L357">    }</span>
+
+    /**
+     * Calculates the sum of the inputs that are spending coins with keys in the wallet. This requires the
+     * transactions sending coins to those keys to be in the wallet. This method will not attempt to download the
+     * blocks containing the input transactions if the key is in the wallet but the transactions are not.
+     *
+     * @return sum of the inputs that are spending coins with keys in the wallet
+     */
+    public Coin getValueSentFromMe(TransactionBag wallet) throws ScriptException {
+        // This is tested in WalletTest.
+<span class="fc" id="L368">        Coin v = Coin.ZERO;</span>
+<span class="fc bfc" id="L369" title="All 2 branches covered.">        for (TransactionInput input : inputs) {</span>
+            // This input is taking value from a transaction in our wallet. To discover the value,
+            // we must find the connected transaction.
+<span class="fc" id="L372">            TransactionOutput connected = input.getConnectedOutput(wallet.getTransactionPool(Pool.UNSPENT));</span>
+<span class="fc bfc" id="L373" title="All 2 branches covered.">            if (connected == null)</span>
+<span class="fc" id="L374">                connected = input.getConnectedOutput(wallet.getTransactionPool(Pool.SPENT));</span>
+<span class="fc bfc" id="L375" title="All 2 branches covered.">            if (connected == null)</span>
+<span class="fc" id="L376">                connected = input.getConnectedOutput(wallet.getTransactionPool(Pool.PENDING));</span>
+<span class="fc bfc" id="L377" title="All 2 branches covered.">            if (connected == null)</span>
+<span class="fc" id="L378">                continue;</span>
+            // The connected output may be the change to the sender of a previous input sent to this wallet. In this
+            // case we ignore it.
+<span class="fc bfc" id="L381" title="All 2 branches covered.">            if (!connected.isMineOrWatched(wallet))</span>
+<span class="fc" id="L382">                continue;</span>
+<span class="fc" id="L383">            v = v.add(connected.getValue());</span>
+<span class="fc" id="L384">        }</span>
+<span class="fc" id="L385">        return v;</span>
+    }
+
+    /**
+     * Gets the sum of the outputs of the transaction. If the outputs are less than the inputs, it does not count the fee.
+     * @return the sum of the outputs regardless of who owns them.
+     */
+    public Coin getOutputSum() {
+<span class="nc" id="L393">        Coin totalOut = Coin.ZERO;</span>
+
+<span class="nc bnc" id="L395" title="All 2 branches missed.">        for (TransactionOutput output: outputs) {</span>
+<span class="nc" id="L396">            totalOut = totalOut.add(output.getValue());</span>
+<span class="nc" id="L397">        }</span>
+
+<span class="nc" id="L399">        return totalOut;</span>
+    }
+
+    @Nullable private Coin cachedValue;
+    @Nullable private TransactionBag cachedForBag;
+
+    /**
+     * Returns the difference of {@link Transaction#getValueSentToMe(TransactionBag)} and {@link Transaction#getValueSentFromMe(TransactionBag)}.
+     */
+    public Coin getValue(TransactionBag wallet) throws ScriptException {
+        // FIXME: TEMP PERF HACK FOR ANDROID - this crap can go away once we have a real payments API.
+<span class="fc" id="L410">        boolean isAndroid = Utils.isAndroidRuntime();</span>
+<span class="pc bpc" id="L411" title="5 of 6 branches missed.">        if (isAndroid &amp;&amp; cachedValue != null &amp;&amp; cachedForBag == wallet)</span>
+<span class="nc" id="L412">            return cachedValue;</span>
+<span class="fc" id="L413">        Coin result = getValueSentToMe(wallet).subtract(getValueSentFromMe(wallet));</span>
+<span class="pc bpc" id="L414" title="1 of 2 branches missed.">        if (isAndroid) {</span>
+<span class="nc" id="L415">            cachedValue = result;</span>
+<span class="nc" id="L416">            cachedForBag = wallet;</span>
+        }
+<span class="fc" id="L418">        return result;</span>
+    }
+
+    /**
+     * The transaction fee is the difference of the value of all inputs and the value of all outputs. Currently, the fee
+     * can only be determined for transactions created by us.
+     *
+     * @return fee, or null if it cannot be determined
+     */
+    public Coin getFee() {
+<span class="fc" id="L428">        Coin fee = Coin.ZERO;</span>
+<span class="pc bpc" id="L429" title="1 of 4 branches missed.">        if (inputs.isEmpty() || outputs.isEmpty()) // Incomplete transaction</span>
+<span class="fc" id="L430">            return null;</span>
+<span class="fc bfc" id="L431" title="All 2 branches covered.">        for (TransactionInput input : inputs) {</span>
+<span class="fc bfc" id="L432" title="All 2 branches covered.">            if (input.getValue() == null)</span>
+<span class="fc" id="L433">                return null;</span>
+<span class="fc" id="L434">            fee = fee.add(input.getValue());</span>
+<span class="fc" id="L435">        }</span>
+<span class="fc bfc" id="L436" title="All 2 branches covered.">        for (TransactionOutput output : outputs) {</span>
+<span class="fc" id="L437">            fee = fee.subtract(output.getValue());</span>
+<span class="fc" id="L438">        }</span>
+<span class="fc" id="L439">        return fee;</span>
+    }
+
+    /**
+     * Returns true if any of the outputs is marked as spent.
+     */
+    public boolean isAnyOutputSpent() {
+<span class="fc bfc" id="L446" title="All 2 branches covered.">        for (TransactionOutput output : outputs) {</span>
+<span class="fc bfc" id="L447" title="All 2 branches covered.">            if (!output.isAvailableForSpending())</span>
+<span class="fc" id="L448">                return true;</span>
+<span class="fc" id="L449">        }</span>
+<span class="fc" id="L450">        return false;</span>
+    }
+
+    /**
+     * Returns false if this transaction has at least one output that is owned by the given wallet and unspent, true
+     * otherwise.
+     */
+    public boolean isEveryOwnedOutputSpent(TransactionBag transactionBag) {
+<span class="fc bfc" id="L458" title="All 2 branches covered.">        for (TransactionOutput output : outputs) {</span>
+<span class="fc bfc" id="L459" title="All 4 branches covered.">            if (output.isAvailableForSpending() &amp;&amp; output.isMineOrWatched(transactionBag))</span>
+<span class="fc" id="L460">                return false;</span>
+<span class="fc" id="L461">        }</span>
+<span class="fc" id="L462">        return true;</span>
+    }
+
+    /**
+     * Returns the earliest time at which the transaction was seen (broadcast or included into the chain),
+     * or the epoch if that information isn't available.
+     */
+    public Date getUpdateTime() {
+<span class="fc bfc" id="L470" title="All 2 branches covered.">        if (updatedAt == null) {</span>
+            // Older wallets did not store this field. Set to the epoch.
+<span class="fc" id="L472">            updatedAt = new Date(0);</span>
+        }
+<span class="fc" id="L474">        return updatedAt;</span>
+    }
+
+    public void setUpdateTime(Date updatedAt) {
+<span class="fc" id="L478">        this.updatedAt = updatedAt;</span>
+<span class="fc" id="L479">    }</span>
+
+    /**
+     * These constants are a part of a scriptSig signature on the inputs. They define the details of how a
+     * transaction can be redeemed, specifically, they control how the hash of the transaction is calculated.
+     */
+<span class="pc" id="L485">    public enum SigHash {</span>
+<span class="fc" id="L486">        ALL(1),</span>
+<span class="fc" id="L487">        NONE(2),</span>
+<span class="fc" id="L488">        SINGLE(3),</span>
+<span class="fc" id="L489">        ANYONECANPAY(0x80), // Caution: Using this type in isolation is non-standard. Treated similar to ANYONECANPAY_ALL.</span>
+<span class="fc" id="L490">        ANYONECANPAY_ALL(0x81),</span>
+<span class="fc" id="L491">        ANYONECANPAY_NONE(0x82),</span>
+<span class="fc" id="L492">        ANYONECANPAY_SINGLE(0x83),</span>
+<span class="fc" id="L493">        UNSET(0); // Caution: Using this type in isolation is non-standard. Treated similar to ALL.</span>
+
+        public final int value;
+
+        /**
+         * @param value
+         */
+<span class="fc" id="L500">        private SigHash(final int value) {</span>
+<span class="fc" id="L501">            this.value = value;</span>
+<span class="fc" id="L502">        }</span>
+
+        /**
+         * @return the value as a byte
+         */
+        public byte byteValue() {
+<span class="fc" id="L508">            return (byte) this.value;</span>
+        }
+    }
+
+    /**
+     * @deprecated Instead use SigHash.ANYONECANPAY.value or SigHash.ANYONECANPAY.byteValue() as appropriate.
+     */
+    public static final byte SIGHASH_ANYONECANPAY_VALUE = (byte) 0x80;
+
+    @Override
+    protected void unCache() {
+<span class="fc" id="L519">        super.unCache();</span>
+<span class="fc" id="L520">        hash = null;</span>
+<span class="fc" id="L521">    }</span>
+
+    protected static int calcLength(byte[] buf, int offset) {
+        VarInt varint;
+        // jump past version (uint32)
+<span class="nc" id="L526">        int cursor = offset + 4;</span>
+
+        int i;
+        long scriptLen;
+
+<span class="nc" id="L531">        varint = new VarInt(buf, cursor);</span>
+<span class="nc" id="L532">        long txInCount = varint.value;</span>
+<span class="nc" id="L533">        cursor += varint.getOriginalSizeInBytes();</span>
+
+<span class="nc bnc" id="L535" title="All 2 branches missed.">        for (i = 0; i &lt; txInCount; i++) {</span>
+            // 36 = length of previous_outpoint
+<span class="nc" id="L537">            cursor += 36;</span>
+<span class="nc" id="L538">            varint = new VarInt(buf, cursor);</span>
+<span class="nc" id="L539">            scriptLen = varint.value;</span>
+            // 4 = length of sequence field (unint32)
+<span class="nc" id="L541">            cursor += scriptLen + 4 + varint.getOriginalSizeInBytes();</span>
+        }
+
+<span class="nc" id="L544">        varint = new VarInt(buf, cursor);</span>
+<span class="nc" id="L545">        long txOutCount = varint.value;</span>
+<span class="nc" id="L546">        cursor += varint.getOriginalSizeInBytes();</span>
+
+<span class="nc bnc" id="L548" title="All 2 branches missed.">        for (i = 0; i &lt; txOutCount; i++) {</span>
+            // 8 = length of tx value field (uint64)
+<span class="nc" id="L550">            cursor += 8;</span>
+<span class="nc" id="L551">            varint = new VarInt(buf, cursor);</span>
+<span class="nc" id="L552">            scriptLen = varint.value;</span>
+<span class="nc" id="L553">            cursor += scriptLen + varint.getOriginalSizeInBytes();</span>
+        }
+        // 4 = length of lock_time field (uint32)
+<span class="nc" id="L556">        return cursor - offset + 4;</span>
+    }
+
+    @Override
+    protected void parse() throws ProtocolException {
+<span class="fc" id="L561">        cursor = offset;</span>
+
+<span class="fc" id="L563">        version = readUint32();</span>
+<span class="fc" id="L564">        optimalEncodingMessageSize = 4;</span>
+
+        // First come the inputs.
+<span class="fc" id="L567">        long numInputs = readVarInt();</span>
+<span class="fc" id="L568">        optimalEncodingMessageSize += VarInt.sizeOf(numInputs);</span>
+<span class="fc" id="L569">        inputs = new ArrayList&lt;&gt;((int) numInputs);</span>
+<span class="fc bfc" id="L570" title="All 2 branches covered.">        for (long i = 0; i &lt; numInputs; i++) {</span>
+<span class="fc" id="L571">            TransactionInput input = new TransactionInput(params, this, payload, cursor, serializer);</span>
+<span class="fc" id="L572">            inputs.add(input);</span>
+<span class="fc" id="L573">            long scriptLen = readVarInt(TransactionOutPoint.MESSAGE_LENGTH);</span>
+<span class="fc" id="L574">            optimalEncodingMessageSize += TransactionOutPoint.MESSAGE_LENGTH + VarInt.sizeOf(scriptLen) + scriptLen + 4;</span>
+<span class="fc" id="L575">            cursor += scriptLen + 4;</span>
+        }
+        // Now the outputs
+<span class="fc" id="L578">        long numOutputs = readVarInt();</span>
+<span class="fc" id="L579">        optimalEncodingMessageSize += VarInt.sizeOf(numOutputs);</span>
+<span class="fc" id="L580">        outputs = new ArrayList&lt;&gt;((int) numOutputs);</span>
+<span class="fc bfc" id="L581" title="All 2 branches covered.">        for (long i = 0; i &lt; numOutputs; i++) {</span>
+<span class="fc" id="L582">            TransactionOutput output = new TransactionOutput(params, this, payload, cursor, serializer);</span>
+<span class="fc" id="L583">            outputs.add(output);</span>
+<span class="fc" id="L584">            long scriptLen = readVarInt(8);</span>
+<span class="fc" id="L585">            optimalEncodingMessageSize += 8 + VarInt.sizeOf(scriptLen) + scriptLen;</span>
+<span class="fc" id="L586">            cursor += scriptLen;</span>
+        }
+<span class="fc" id="L588">        lockTime = readUint32();</span>
+<span class="fc" id="L589">        optimalEncodingMessageSize += 4;</span>
+<span class="fc" id="L590">        length = cursor - offset;</span>
+<span class="fc" id="L591">    }</span>
+
+    public int getOptimalEncodingMessageSize() {
+<span class="fc bfc" id="L594" title="All 2 branches covered.">        if (optimalEncodingMessageSize != 0)</span>
+<span class="fc" id="L595">            return optimalEncodingMessageSize;</span>
+<span class="fc" id="L596">        optimalEncodingMessageSize = getMessageSize();</span>
+<span class="fc" id="L597">        return optimalEncodingMessageSize;</span>
+    }
+
+    /**
+     * The priority (coin age) calculation doesn't use the regular message size, but rather one adjusted downwards
+     * for the number of inputs. The goal is to incentivise cleaning up the UTXO set with free transactions, if one
+     * can do so.
+     */
+    public int getMessageSizeForPriorityCalc() {
+<span class="fc" id="L606">        int size = getMessageSize();</span>
+<span class="fc bfc" id="L607" title="All 2 branches covered.">        for (TransactionInput input : inputs) {</span>
+            // 41: min size of an input
+            // 110: enough to cover a compressed pubkey p2sh redemption (somewhat arbitrary).
+<span class="fc" id="L610">            int benefit = 41 + Math.min(110, input.getScriptSig().getProgram().length);</span>
+<span class="pc bpc" id="L611" title="1 of 2 branches missed.">            if (size &gt; benefit)</span>
+<span class="fc" id="L612">                size -= benefit;</span>
+<span class="fc" id="L613">        }</span>
+<span class="fc" id="L614">        return size;</span>
+    }
+
+    /**
+     * A coinbase transaction is one that creates a new coin. They are the first transaction in each block and their
+     * value is determined by a formula that all implementations of Bitcoin share. In 2011 the value of a coinbase
+     * transaction is 50 coins, but in future it will be less. A coinbase transaction is defined not only by its
+     * position in a block but by the data in the inputs.
+     */
+    public boolean isCoinBase() {
+<span class="fc bfc" id="L624" title="All 4 branches covered.">        return inputs.size() == 1 &amp;&amp; inputs.get(0).isCoinBase();</span>
+    }
+
+    /**
+     * A transaction is mature if it is either a building coinbase tx that is as deep or deeper than the required coinbase depth, or a non-coinbase tx.
+     */
+    public boolean isMature() {
+<span class="fc bfc" id="L631" title="All 2 branches covered.">        if (!isCoinBase())</span>
+<span class="fc" id="L632">            return true;</span>
+
+<span class="fc bfc" id="L634" title="All 2 branches covered.">        if (getConfidence().getConfidenceType() != ConfidenceType.BUILDING)</span>
+<span class="fc" id="L635">            return false;</span>
+
+<span class="fc bfc" id="L637" title="All 2 branches covered.">        return getConfidence().getDepthInBlocks() &gt;= params.getSpendableCoinbaseDepth();</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="fc" id="L642">        return toString(null);</span>
+    }
+
+    /**
+     * A human readable version of the transaction useful for debugging. The format is not guaranteed to be stable.
+     * @param chain If provided, will be used to estimate lock times (if set). Can be null.
+     */
+    public String toString(@Nullable AbstractBlockChain chain) {
+<span class="fc" id="L650">        StringBuilder s = new StringBuilder();</span>
+<span class="fc" id="L651">        s.append(&quot;  &quot;).append(getHashAsString()).append('\n');</span>
+<span class="fc bfc" id="L652" title="All 2 branches covered.">        if (updatedAt != null)</span>
+<span class="fc" id="L653">            s.append(&quot;  updated: &quot;).append(Utils.dateTimeFormat(updatedAt)).append('\n');</span>
+<span class="pc bpc" id="L654" title="1 of 2 branches missed.">        if (version != 1)</span>
+<span class="nc" id="L655">            s.append(&quot;  version &quot;).append(version).append('\n');</span>
+<span class="fc bfc" id="L656" title="All 2 branches covered.">        if (isTimeLocked()) {</span>
+<span class="fc" id="L657">            s.append(&quot;  time locked until &quot;);</span>
+<span class="fc bfc" id="L658" title="All 2 branches covered.">            if (lockTime &lt; LOCKTIME_THRESHOLD) {</span>
+<span class="fc" id="L659">                s.append(&quot;block &quot;).append(lockTime);</span>
+<span class="pc bpc" id="L660" title="1 of 2 branches missed.">                if (chain != null) {</span>
+<span class="fc" id="L661">                    s.append(&quot; (estimated to be reached at &quot;)</span>
+<span class="fc" id="L662">                            .append(Utils.dateTimeFormat(chain.estimateBlockTime((int) lockTime))).append(')');</span>
+                }
+            } else {
+<span class="fc" id="L665">                s.append(Utils.dateTimeFormat(lockTime * 1000));</span>
+            }
+<span class="fc" id="L667">            s.append('\n');</span>
+        }
+<span class="pc bpc" id="L669" title="1 of 2 branches missed.">        if (hasRelativeLockTime()) {</span>
+<span class="nc" id="L670">            s.append(&quot;  has relative lock time\n&quot;);</span>
+        }
+<span class="fc bfc" id="L672" title="All 2 branches covered.">        if (isOptInFullRBF()) {</span>
+<span class="fc" id="L673">            s.append(&quot;  opts into full replace-by-fee\n&quot;);</span>
+        }
+<span class="fc bfc" id="L675" title="All 2 branches covered.">        if (isCoinBase()) {</span>
+            String script;
+            String script2;
+            try {
+<span class="fc" id="L679">                script = inputs.get(0).getScriptSig().toString();</span>
+<span class="fc" id="L680">                script2 = outputs.get(0).getScriptPubKey().toString();</span>
+<span class="fc" id="L681">            } catch (ScriptException e) {</span>
+<span class="fc" id="L682">                script = &quot;???&quot;;</span>
+<span class="fc" id="L683">                script2 = &quot;???&quot;;</span>
+<span class="fc" id="L684">            }</span>
+<span class="fc" id="L685">            s.append(&quot;     == COINBASE TXN (scriptSig &quot;).append(script)</span>
+<span class="fc" id="L686">                .append(&quot;)  (scriptPubKey &quot;).append(script2).append(&quot;)\n&quot;);</span>
+<span class="fc" id="L687">            return s.toString();</span>
+        }
+<span class="fc bfc" id="L689" title="All 2 branches covered.">        if (!inputs.isEmpty()) {</span>
+<span class="fc bfc" id="L690" title="All 2 branches covered.">            for (TransactionInput in : inputs) {</span>
+<span class="fc" id="L691">                s.append(&quot;     &quot;);</span>
+<span class="fc" id="L692">                s.append(&quot;in   &quot;);</span>
+
+                try {
+<span class="fc" id="L695">                    String scriptSigStr = in.getScriptSig().toString();</span>
+<span class="fc bfc" id="L696" title="All 2 branches covered.">                    s.append(!Strings.isNullOrEmpty(scriptSigStr) ? scriptSigStr : &quot;&lt;no scriptSig&gt;&quot;);</span>
+<span class="fc" id="L697">                    final Coin value = in.getValue();</span>
+<span class="fc bfc" id="L698" title="All 2 branches covered.">                    if (value != null)</span>
+<span class="fc" id="L699">                        s.append(&quot; &quot;).append(value.toFriendlyString());</span>
+<span class="fc" id="L700">                    s.append(&quot;\n          &quot;);</span>
+<span class="fc" id="L701">                    s.append(&quot;outpoint:&quot;);</span>
+<span class="fc" id="L702">                    final TransactionOutPoint outpoint = in.getOutpoint();</span>
+<span class="fc" id="L703">                    s.append(outpoint.toString());</span>
+<span class="fc" id="L704">                    final TransactionOutput connectedOutput = outpoint.getConnectedOutput();</span>
+<span class="fc bfc" id="L705" title="All 2 branches covered.">                    if (connectedOutput != null) {</span>
+<span class="fc" id="L706">                        Script scriptPubKey = connectedOutput.getScriptPubKey();</span>
+<span class="pc bpc" id="L707" title="1 of 4 branches missed.">                        if (scriptPubKey.isSentToAddress() || scriptPubKey.isPayToScriptHash()) {</span>
+<span class="fc" id="L708">                            s.append(&quot; hash160:&quot;);</span>
+<span class="fc" id="L709">                            s.append(Utils.HEX.encode(scriptPubKey.getPubKeyHash()));</span>
+                        }
+                    }
+<span class="fc bfc" id="L712" title="All 2 branches covered.">                    if (in.hasSequence()) {</span>
+<span class="fc" id="L713">                        s.append(&quot;\n          sequence:&quot;).append(Long.toHexString(in.getSequenceNumber()));</span>
+<span class="pc bpc" id="L714" title="1 of 2 branches missed.">                        if (in.isOptInFullRBF())</span>
+<span class="fc" id="L715">                            s.append(&quot;, opts into full RBF&quot;);</span>
+<span class="pc bpc" id="L716" title="3 of 4 branches missed.">                        if (version &gt;=2 &amp;&amp; in.hasRelativeLockTime())</span>
+<span class="nc" id="L717">                            s.append(&quot;, has RLT&quot;);</span>
+                    }
+<span class="fc" id="L719">                } catch (Exception e) {</span>
+<span class="fc" id="L720">                    s.append(&quot;[exception: &quot;).append(e.getMessage()).append(&quot;]&quot;);</span>
+<span class="fc" id="L721">                }</span>
+<span class="fc" id="L722">                s.append('\n');</span>
+<span class="fc" id="L723">            }</span>
+        } else {
+<span class="fc" id="L725">            s.append(&quot;     &quot;);</span>
+<span class="fc" id="L726">            s.append(&quot;INCOMPLETE: No inputs!\n&quot;);</span>
+        }
+<span class="fc bfc" id="L728" title="All 2 branches covered.">        for (TransactionOutput out : outputs) {</span>
+<span class="fc" id="L729">            s.append(&quot;     &quot;);</span>
+<span class="fc" id="L730">            s.append(&quot;out  &quot;);</span>
+            try {
+<span class="fc" id="L732">                String scriptPubKeyStr = out.getScriptPubKey().toString();</span>
+<span class="fc bfc" id="L733" title="All 2 branches covered.">                s.append(!Strings.isNullOrEmpty(scriptPubKeyStr) ? scriptPubKeyStr : &quot;&lt;no scriptPubKey&gt;&quot;);</span>
+<span class="fc" id="L734">                s.append(&quot; &quot;);</span>
+<span class="fc" id="L735">                s.append(out.getValue().toFriendlyString());</span>
+<span class="pc bpc" id="L736" title="1 of 2 branches missed.">                if (!out.isAvailableForSpending()) {</span>
+<span class="nc" id="L737">                    s.append(&quot; Spent&quot;);</span>
+                }
+<span class="fc" id="L739">                final TransactionInput spentBy = out.getSpentBy();</span>
+<span class="pc bpc" id="L740" title="1 of 2 branches missed.">                if (spentBy != null) {</span>
+<span class="nc" id="L741">                    s.append(&quot; by &quot;);</span>
+<span class="nc" id="L742">                    s.append(spentBy.getParentTransaction().getHashAsString());</span>
+                }
+<span class="fc" id="L744">            } catch (Exception e) {</span>
+<span class="fc" id="L745">                s.append(&quot;[exception: &quot;).append(e.getMessage()).append(&quot;]&quot;);</span>
+<span class="fc" id="L746">            }</span>
+<span class="fc" id="L747">            s.append('\n');</span>
+<span class="fc" id="L748">        }</span>
+<span class="fc" id="L749">        final Coin fee = getFee();</span>
+<span class="fc bfc" id="L750" title="All 2 branches covered.">        if (fee != null) {</span>
+<span class="fc" id="L751">            final int size = unsafeBitcoinSerialize().length;</span>
+<span class="fc" id="L752">            s.append(&quot;     fee  &quot;).append(fee.multiply(1000).divide(size).toFriendlyString()).append(&quot;/kB, &quot;)</span>
+<span class="fc" id="L753">                    .append(fee.toFriendlyString()).append(&quot; for &quot;).append(size).append(&quot; bytes\n&quot;);</span>
+        }
+<span class="pc bpc" id="L755" title="1 of 2 branches missed.">        if (purpose != null)</span>
+<span class="fc" id="L756">            s.append(&quot;     prps &quot;).append(purpose).append('\n');</span>
+<span class="fc" id="L757">        return s.toString();</span>
+    }
+
+    /**
+     * Removes all the inputs from this transaction.
+     * Note that this also invalidates the length attribute
+     */
+    public void clearInputs() {
+<span class="fc" id="L765">        unCache();</span>
+<span class="fc bfc" id="L766" title="All 2 branches covered.">        for (TransactionInput input : inputs) {</span>
+<span class="fc" id="L767">            input.setParent(null);</span>
+<span class="fc" id="L768">        }</span>
+<span class="fc" id="L769">        inputs.clear();</span>
+        // You wanted to reserialize, right?
+<span class="fc" id="L771">        this.length = this.unsafeBitcoinSerialize().length;</span>
+<span class="fc" id="L772">    }</span>
+
+    /**
+     * Adds an input to this transaction that imports value from the given output. Note that this input is &lt;i&gt;not&lt;/i&gt;
+     * complete and after every input is added with {@link #addInput(TransactionInput)} and every output is added with
+     * {@link #addOutput(TransactionOutput)}, a {@link TransactionSigner} must be used to finalize the transaction and finish the inputs
+     * off. Otherwise it won't be accepted by the network.
+     * @return the newly created input.
+     */
+    public TransactionInput addInput(TransactionOutput from) {
+<span class="fc" id="L782">        return addInput(new TransactionInput(params, this, from));</span>
+    }
+
+    /**
+     * Adds an input directly, with no checking that it's valid.
+     * @return the new input.
+     */
+    public TransactionInput addInput(TransactionInput input) {
+<span class="fc" id="L790">        unCache();</span>
+<span class="fc" id="L791">        input.setParent(this);</span>
+<span class="fc" id="L792">        inputs.add(input);</span>
+<span class="fc" id="L793">        adjustLength(inputs.size(), input.length);</span>
+<span class="fc" id="L794">        return input;</span>
+    }
+
+    /**
+     * Creates and adds an input to this transaction, with no checking that it's valid.
+     * @return the newly created input.
+     */
+    public TransactionInput addInput(Sha256Hash spendTxHash, long outputIndex, Script script) {
+<span class="fc" id="L802">        return addInput(new TransactionInput(params, this, script.getProgram(), new TransactionOutPoint(params, outputIndex, spendTxHash)));</span>
+    }
+
+    /**
+     * Adds a new and fully signed input for the given parameters. Note that this method is &lt;b&gt;not&lt;/b&gt; thread safe
+     * and requires external synchronization. Please refer to general documentation on Bitcoin scripting and contracts
+     * to understand the values of sigHash and anyoneCanPay: otherwise you can use the other form of this method
+     * that sets them to typical defaults.
+     *
+     * @throws ScriptException if the scriptPubKey is not a pay to address or pay to pubkey script.
+     */
+    public TransactionInput addSignedInput(TransactionOutPoint prevOut, Script scriptPubKey, ECKey sigKey,
+                                           SigHash sigHash, boolean anyoneCanPay) throws ScriptException {
+        // Verify the API user didn't try to do operations out of order.
+<span class="pc bpc" id="L816" title="1 of 2 branches missed.">        checkState(!outputs.isEmpty(), &quot;Attempting to sign tx without outputs.&quot;);</span>
+<span class="fc" id="L817">        TransactionInput input = new TransactionInput(params, this, new byte[]{}, prevOut);</span>
+<span class="fc" id="L818">        addInput(input);</span>
+<span class="fc" id="L819">        Sha256Hash hash = hashForSignature(inputs.size() - 1, scriptPubKey, sigHash, anyoneCanPay);</span>
+<span class="fc" id="L820">        ECKey.ECDSASignature ecSig = sigKey.sign(hash);</span>
+<span class="fc" id="L821">        TransactionSignature txSig = new TransactionSignature(ecSig, sigHash, anyoneCanPay);</span>
+<span class="fc bfc" id="L822" title="All 2 branches covered.">        if (scriptPubKey.isSentToRawPubKey())</span>
+<span class="fc" id="L823">            input.setScriptSig(ScriptBuilder.createInputScript(txSig));</span>
+<span class="pc bpc" id="L824" title="1 of 2 branches missed.">        else if (scriptPubKey.isSentToAddress())</span>
+<span class="nc" id="L825">            input.setScriptSig(ScriptBuilder.createInputScript(txSig, sigKey));</span>
+        else
+<span class="fc" id="L827">            throw new ScriptException(ScriptError.SCRIPT_ERR_UNKNOWN_ERROR, &quot;Don't know how to sign for this kind of scriptPubKey: &quot; + scriptPubKey);</span>
+<span class="fc" id="L828">        return input;</span>
+    }
+
+    /**
+     * Same as {@link #addSignedInput(TransactionOutPoint, org.bitcoinj.script.Script, ECKey, org.bitcoinj.core.Transaction.SigHash, boolean)}
+     * but defaults to {@link SigHash#ALL} and &quot;false&quot; for the anyoneCanPay flag. This is normally what you want.
+     */
+    public TransactionInput addSignedInput(TransactionOutPoint prevOut, Script scriptPubKey, ECKey sigKey) throws ScriptException {
+<span class="fc" id="L836">        return addSignedInput(prevOut, scriptPubKey, sigKey, SigHash.ALL, false);</span>
+    }
+
+    /**
+     * Adds an input that points to the given output and contains a valid signature for it, calculated using the
+     * signing key.
+     */
+    public TransactionInput addSignedInput(TransactionOutput output, ECKey signingKey) {
+<span class="nc" id="L844">        return addSignedInput(output.getOutPointFor(), output.getScriptPubKey(), signingKey);</span>
+    }
+
+    /**
+     * Adds an input that points to the given output and contains a valid signature for it, calculated using the
+     * signing key.
+     */
+    public TransactionInput addSignedInput(TransactionOutput output, ECKey signingKey, SigHash sigHash, boolean anyoneCanPay) {
+<span class="nc" id="L852">        return addSignedInput(output.getOutPointFor(), output.getScriptPubKey(), signingKey, sigHash, anyoneCanPay);</span>
+    }
+
+    /**
+     * Removes all the outputs from this transaction.
+     * Note that this also invalidates the length attribute
+     */
+    public void clearOutputs() {
+<span class="fc" id="L860">        unCache();</span>
+<span class="fc bfc" id="L861" title="All 2 branches covered.">        for (TransactionOutput output : outputs) {</span>
+<span class="fc" id="L862">            output.setParent(null);</span>
+<span class="fc" id="L863">        }</span>
+<span class="fc" id="L864">        outputs.clear();</span>
+        // You wanted to reserialize, right?
+<span class="fc" id="L866">        this.length = this.unsafeBitcoinSerialize().length;</span>
+<span class="fc" id="L867">    }</span>
+
+    /**
+     * Adds the given output to this transaction. The output must be completely initialized. Returns the given output.
+     */
+    public TransactionOutput addOutput(TransactionOutput to) {
+<span class="fc" id="L873">        unCache();</span>
+<span class="fc" id="L874">        to.setParent(this);</span>
+<span class="fc" id="L875">        outputs.add(to);</span>
+<span class="fc" id="L876">        adjustLength(outputs.size(), to.length);</span>
+<span class="fc" id="L877">        return to;</span>
+    }
+
+    /**
+     * Creates an output based on the given address and value, adds it to this transaction, and returns the new output.
+     */
+    public TransactionOutput addOutput(Coin value, Address address) {
+<span class="fc" id="L884">        return addOutput(new TransactionOutput(params, this, value, address));</span>
+    }
+
+    /**
+     * Creates an output that pays to the given pubkey directly (no address) with the given value, adds it to this
+     * transaction, and returns the new output.
+     */
+    public TransactionOutput addOutput(Coin value, ECKey pubkey) {
+<span class="fc" id="L892">        return addOutput(new TransactionOutput(params, this, value, pubkey));</span>
+    }
+
+    /**
+     * Creates an output that pays to the given script. The address and key forms are specialisations of this method,
+     * you won't normally need to use it unless you're doing unusual things.
+     */
+    public TransactionOutput addOutput(Coin value, Script script) {
+<span class="fc" id="L900">        return addOutput(new TransactionOutput(params, this, value, script.getProgram()));</span>
+    }
+
+
+    /**
+     * Calculates a signature that is valid for being inserted into the input at the given position. This is simply
+     * a wrapper around calling {@link Transaction#hashForSignature(int, byte[], org.bitcoinj.core.Transaction.SigHash, boolean)}
+     * followed by {@link ECKey#sign(Sha256Hash)} and then returning a new {@link TransactionSignature}. The key
+     * must be usable for signing as-is: if the key is encrypted it must be decrypted first external to this method.
+     *
+     * @param inputIndex Which input to calculate the signature for, as an index.
+     * @param key The private key used to calculate the signature.
+     * @param redeemScript Byte-exact contents of the scriptPubKey that is being satisified, or the P2SH redeem script.
+     * @param hashType Signing mode, see the enum for documentation.
+     * @param anyoneCanPay Signing mode, see the SigHash enum for documentation.
+     * @return A newly calculated signature object that wraps the r, s and sighash components.
+     */
+    public TransactionSignature calculateSignature(int inputIndex, ECKey key,
+                                                                byte[] redeemScript,
+                                                                SigHash hashType, boolean anyoneCanPay) {
+<span class="fc" id="L920">        Sha256Hash hash = hashForSignature(inputIndex, redeemScript, hashType, anyoneCanPay);</span>
+<span class="fc" id="L921">        return new TransactionSignature(key.sign(hash), hashType, anyoneCanPay);</span>
+    }
+
+    /**
+     * Calculates a signature that is valid for being inserted into the input at the given position. This is simply
+     * a wrapper around calling {@link Transaction#hashForSignature(int, byte[], org.bitcoinj.core.Transaction.SigHash, boolean)}
+     * followed by {@link ECKey#sign(Sha256Hash)} and then returning a new {@link TransactionSignature}.
+     *
+     * @param inputIndex Which input to calculate the signature for, as an index.
+     * @param key The private key used to calculate the signature.
+     * @param redeemScript The scriptPubKey that is being satisified, or the P2SH redeem script.
+     * @param hashType Signing mode, see the enum for documentation.
+     * @param anyoneCanPay Signing mode, see the SigHash enum for documentation.
+     * @return A newly calculated signature object that wraps the r, s and sighash components.
+     */
+    public TransactionSignature calculateSignature(int inputIndex, ECKey key,
+                                                                 Script redeemScript,
+                                                                 SigHash hashType, boolean anyoneCanPay) {
+<span class="fc" id="L939">        Sha256Hash hash = hashForSignature(inputIndex, redeemScript.getProgram(), hashType, anyoneCanPay);</span>
+<span class="fc" id="L940">        return new TransactionSignature(key.sign(hash), hashType, anyoneCanPay);</span>
+    }
+
+    /**
+     * Calculates a signature that is valid for being inserted into the input at the given position. This is simply
+     * a wrapper around calling {@link Transaction#hashForSignature(int, byte[], org.bitcoinj.core.Transaction.SigHash, boolean)}
+     * followed by {@link ECKey#sign(Sha256Hash)} and then returning a new {@link TransactionSignature}. The key
+     * must be usable for signing as-is: if the key is encrypted it must be decrypted first external to this method.
+     *
+     * @param inputIndex Which input to calculate the signature for, as an index.
+     * @param key The private key used to calculate the signature.
+     * @param aesKey The AES key to use for decryption of the private key. If null then no decryption is required.
+     * @param redeemScript Byte-exact contents of the scriptPubKey that is being satisified, or the P2SH redeem script.
+     * @param hashType Signing mode, see the enum for documentation.
+     * @param anyoneCanPay Signing mode, see the SigHash enum for documentation.
+     * @return A newly calculated signature object that wraps the r, s and sighash components.
+     */
+    public TransactionSignature calculateSignature(int inputIndex, ECKey key,
+                                                   @Nullable KeyParameter aesKey,
+                                                   byte[] redeemScript,
+                                                   SigHash hashType, boolean anyoneCanPay) {
+<span class="nc" id="L961">        Sha256Hash hash = hashForSignature(inputIndex, redeemScript, hashType, anyoneCanPay);</span>
+<span class="nc" id="L962">        return new TransactionSignature(key.sign(hash, aesKey), hashType, anyoneCanPay);</span>
+    }
+
+    /**
+     * Calculates a signature that is valid for being inserted into the input at the given position. This is simply
+     * a wrapper around calling {@link Transaction#hashForSignature(int, byte[], org.bitcoinj.core.Transaction.SigHash, boolean)}
+     * followed by {@link ECKey#sign(Sha256Hash)} and then returning a new {@link TransactionSignature}.
+     *
+     * @param inputIndex Which input to calculate the signature for, as an index.
+     * @param key The private key used to calculate the signature.
+     * @param aesKey The AES key to use for decryption of the private key. If null then no decryption is required.
+     * @param redeemScript The scriptPubKey that is being satisified, or the P2SH redeem script.
+     * @param hashType Signing mode, see the enum for documentation.
+     * @param anyoneCanPay Signing mode, see the SigHash enum for documentation.
+     * @return A newly calculated signature object that wraps the r, s and sighash components.
+     */
+    public TransactionSignature calculateSignature(int inputIndex, ECKey key,
+                                                   @Nullable KeyParameter aesKey,
+                                                   Script redeemScript,
+                                                   SigHash hashType, boolean anyoneCanPay) {
+<span class="fc" id="L982">        Sha256Hash hash = hashForSignature(inputIndex, redeemScript.getProgram(), hashType, anyoneCanPay);</span>
+<span class="fc" id="L983">        return new TransactionSignature(key.sign(hash, aesKey), hashType, anyoneCanPay);</span>
+    }
+
+    /**
+     * &lt;p&gt;Calculates a signature hash, that is, a hash of a simplified form of the transaction. How exactly the transaction
+     * is simplified is specified by the type and anyoneCanPay parameters.&lt;/p&gt;
+     *
+     * &lt;p&gt;This is a low level API and when using the regular {@link Wallet} class you don't have to call this yourself.
+     * When working with more complex transaction types and contracts, it can be necessary. When signing a P2SH output
+     * the redeemScript should be the script encoded into the scriptSig field, for normal transactions, it's the
+     * scriptPubKey of the output you're signing for.&lt;/p&gt;
+     *
+     * @param inputIndex input the signature is being calculated for. Tx signatures are always relative to an input.
+     * @param redeemScript the bytes that should be in the given input during signing.
+     * @param type Should be SigHash.ALL
+     * @param anyoneCanPay should be false.
+     */
+    public Sha256Hash hashForSignature(int inputIndex, byte[] redeemScript,
+                                                    SigHash type, boolean anyoneCanPay) {
+<span class="fc" id="L1002">        byte sigHashType = (byte) TransactionSignature.calcSigHashValue(type, anyoneCanPay);</span>
+<span class="fc" id="L1003">        return hashForSignature(inputIndex, redeemScript, sigHashType);</span>
+    }
+
+    /**
+     * &lt;p&gt;Calculates a signature hash, that is, a hash of a simplified form of the transaction. How exactly the transaction
+     * is simplified is specified by the type and anyoneCanPay parameters.&lt;/p&gt;
+     *
+     * &lt;p&gt;This is a low level API and when using the regular {@link Wallet} class you don't have to call this yourself.
+     * When working with more complex transaction types and contracts, it can be necessary. When signing a P2SH output
+     * the redeemScript should be the script encoded into the scriptSig field, for normal transactions, it's the
+     * scriptPubKey of the output you're signing for.&lt;/p&gt;
+     *
+     * @param inputIndex input the signature is being calculated for. Tx signatures are always relative to an input.
+     * @param redeemScript the script that should be in the given input during signing.
+     * @param type Should be SigHash.ALL
+     * @param anyoneCanPay should be false.
+     */
+    public Sha256Hash hashForSignature(int inputIndex, Script redeemScript,
+                                                    SigHash type, boolean anyoneCanPay) {
+<span class="fc" id="L1022">        int sigHash = TransactionSignature.calcSigHashValue(type, anyoneCanPay);</span>
+<span class="fc" id="L1023">        return hashForSignature(inputIndex, redeemScript.getProgram(), (byte) sigHash);</span>
+    }
+
+    /**
+     * This is required for signatures which use a sigHashType which cannot be represented using SigHash and anyoneCanPay
+     * See transaction c99c49da4c38af669dea436d3e73780dfdb6c1ecf9958baa52960e8baee30e73, which has sigHashType 0
+     */
+    public Sha256Hash hashForSignature(int inputIndex, byte[] connectedScript, byte sigHashType) {
+        // The SIGHASH flags are used in the design of contracts, please see this page for a further understanding of
+        // the purposes of the code in this method:
+        //
+        //   https://en.bitcoin.it/wiki/Contracts
+
+        try {
+            // Create a copy of this transaction to operate upon because we need make changes to the inputs and outputs.
+            // It would not be thread-safe to change the attributes of the transaction object itself.
+<span class="fc" id="L1039">            Transaction tx = this.params.getDefaultSerializer().makeTransaction(this.bitcoinSerialize());</span>
+
+            // Clear input scripts in preparation for signing. If we're signing a fresh
+            // transaction that step isn't very helpful, but it doesn't add much cost relative to the actual
+            // EC math so we'll do it anyway.
+<span class="fc bfc" id="L1044" title="All 2 branches covered.">            for (int i = 0; i &lt; tx.inputs.size(); i++) {</span>
+<span class="fc" id="L1045">                tx.inputs.get(i).clearScriptBytes();</span>
+            }
+
+            // This step has no purpose beyond being synchronized with Bitcoin Core's bugs. OP_CODESEPARATOR
+            // is a legacy holdover from a previous, broken design of executing scripts that shipped in Bitcoin 0.1.
+            // It was seriously flawed and would have let anyone take anyone elses money. Later versions switched to
+            // the design we use today where scripts are executed independently but share a stack. This left the
+            // OP_CODESEPARATOR instruction having no purpose as it was only meant to be used internally, not actually
+            // ever put into scripts. Deleting OP_CODESEPARATOR is a step that should never be required but if we don't
+            // do it, we could split off the main chain.
+<span class="fc" id="L1055">            connectedScript = Script.removeAllInstancesOfOp(connectedScript, ScriptOpCodes.OP_CODESEPARATOR);</span>
+
+            // Set the input to the script of its output. Bitcoin Core does this but the step has no obvious purpose as
+            // the signature covers the hash of the prevout transaction which obviously includes the output script
+            // already. Perhaps it felt safer to him in some way, or is another leftover from how the code was written.
+<span class="fc" id="L1060">            TransactionInput input = tx.inputs.get(inputIndex);</span>
+<span class="fc" id="L1061">            input.setScriptBytes(connectedScript);</span>
+
+<span class="fc bfc" id="L1063" title="All 2 branches covered.">            if ((sigHashType &amp; 0x1f) == SigHash.NONE.value) {</span>
+                // SIGHASH_NONE means no outputs are signed at all - the signature is effectively for a &quot;blank cheque&quot;.
+<span class="fc" id="L1065">                tx.outputs = new ArrayList&lt;&gt;(0);</span>
+                // The signature isn't broken by new versions of the transaction issued by other parties.
+<span class="fc bfc" id="L1067" title="All 2 branches covered.">                for (int i = 0; i &lt; tx.inputs.size(); i++)</span>
+<span class="fc bfc" id="L1068" title="All 2 branches covered.">                    if (i != inputIndex)</span>
+<span class="fc" id="L1069">                        tx.inputs.get(i).setSequenceNumber(0);</span>
+<span class="fc bfc" id="L1070" title="All 2 branches covered.">            } else if ((sigHashType &amp; 0x1f) == SigHash.SINGLE.value) {</span>
+                // SIGHASH_SINGLE means only sign the output at the same index as the input (ie, my output).
+<span class="fc bfc" id="L1072" title="All 2 branches covered.">                if (inputIndex &gt;= tx.outputs.size()) {</span>
+                    // The input index is beyond the number of outputs, it's a buggy signature made by a broken
+                    // Bitcoin implementation. Bitcoin Core also contains a bug in handling this case:
+                    // any transaction output that is signed in this case will result in both the signed output
+                    // and any future outputs to this public key being steal-able by anyone who has
+                    // the resulting signature and the public key (both of which are part of the signed tx input).
+
+                    // Bitcoin Core's bug is that SignatureHash was supposed to return a hash and on this codepath it
+                    // actually returns the constant &quot;1&quot; to indicate an error, which is never checked for. Oops.
+<span class="fc" id="L1081">                    return Sha256Hash.wrap(&quot;0100000000000000000000000000000000000000000000000000000000000000&quot;);</span>
+                }
+                // In SIGHASH_SINGLE the outputs after the matching input index are deleted, and the outputs before
+                // that position are &quot;nulled out&quot;. Unintuitively, the value in a &quot;null&quot; transaction is set to -1.
+<span class="fc" id="L1085">                tx.outputs = new ArrayList&lt;&gt;(tx.outputs.subList(0, inputIndex + 1));</span>
+<span class="fc bfc" id="L1086" title="All 2 branches covered.">                for (int i = 0; i &lt; inputIndex; i++)</span>
+<span class="fc" id="L1087">                    tx.outputs.set(i, new TransactionOutput(tx.params, tx, Coin.NEGATIVE_SATOSHI, new byte[] {}));</span>
+                // The signature isn't broken by new versions of the transaction issued by other parties.
+<span class="fc bfc" id="L1089" title="All 2 branches covered.">                for (int i = 0; i &lt; tx.inputs.size(); i++)</span>
+<span class="fc bfc" id="L1090" title="All 2 branches covered.">                    if (i != inputIndex)</span>
+<span class="fc" id="L1091">                        tx.inputs.get(i).setSequenceNumber(0);</span>
+            }
+
+<span class="fc bfc" id="L1094" title="All 2 branches covered.">            if ((sigHashType &amp; SigHash.ANYONECANPAY.value) == SigHash.ANYONECANPAY.value) {</span>
+                // SIGHASH_ANYONECANPAY means the signature in the input is not broken by changes/additions/removals
+                // of other inputs. For example, this is useful for building assurance contracts.
+<span class="fc" id="L1097">                tx.inputs = new ArrayList&lt;TransactionInput&gt;();</span>
+<span class="fc" id="L1098">                tx.inputs.add(input);</span>
+            }
+
+<span class="pc bpc" id="L1101" title="1 of 2 branches missed.">            ByteArrayOutputStream bos = new UnsafeByteArrayOutputStream(tx.length == UNKNOWN_LENGTH ? 256 : tx.length + 4);</span>
+<span class="fc" id="L1102">            tx.bitcoinSerialize(bos);</span>
+            // We also have to write a hash type (sigHashType is actually an unsigned char)
+<span class="fc" id="L1104">            uint32ToByteStreamLE(0x000000ff &amp; sigHashType, bos);</span>
+            // Note that this is NOT reversed to ensure it will be signed correctly. If it were to be printed out
+            // however then we would expect that it is IS reversed.
+<span class="fc" id="L1107">            Sha256Hash hash = Sha256Hash.twiceOf(bos.toByteArray());</span>
+<span class="fc" id="L1108">            bos.close();</span>
+
+<span class="fc" id="L1110">            return hash;</span>
+<span class="nc" id="L1111">        } catch (IOException e) {</span>
+<span class="nc" id="L1112">            throw new RuntimeException(e);  // Cannot happen.</span>
+        }
+    }
+
+    @Override
+    protected void bitcoinSerializeToStream(OutputStream stream) throws IOException {
+<span class="fc" id="L1118">        uint32ToByteStreamLE(version, stream);</span>
+<span class="fc" id="L1119">        stream.write(new VarInt(inputs.size()).encode());</span>
+<span class="fc bfc" id="L1120" title="All 2 branches covered.">        for (TransactionInput in : inputs)</span>
+<span class="fc" id="L1121">            in.bitcoinSerialize(stream);</span>
+<span class="fc" id="L1122">        stream.write(new VarInt(outputs.size()).encode());</span>
+<span class="fc bfc" id="L1123" title="All 2 branches covered.">        for (TransactionOutput out : outputs)</span>
+<span class="fc" id="L1124">            out.bitcoinSerialize(stream);</span>
+<span class="fc" id="L1125">        uint32ToByteStreamLE(lockTime, stream);</span>
+<span class="fc" id="L1126">    }</span>
+
+
+    /**
+     * Transactions can have an associated lock time, specified either as a block height or in seconds since the
+     * UNIX epoch. A transaction is not allowed to be confirmed by miners until the lock time is reached, and
+     * since Bitcoin 0.8+ a transaction that did not end its lock period (non final) is considered to be non
+     * standard and won't be relayed or included in the memory pool either.
+     */
+    public long getLockTime() {
+<span class="fc" id="L1136">        return lockTime;</span>
+    }
+
+    /**
+     * Transactions can have an associated lock time, specified either as a block height or in seconds since the
+     * UNIX epoch. A transaction is not allowed to be confirmed by miners until the lock time is reached, and
+     * since Bitcoin 0.8+ a transaction that did not end its lock period (non final) is considered to be non
+     * standard and won't be relayed or included in the memory pool either.
+     */
+    public void setLockTime(long lockTime) {
+<span class="fc" id="L1146">        unCache();</span>
+<span class="fc" id="L1147">        boolean seqNumSet = false;</span>
+<span class="fc bfc" id="L1148" title="All 2 branches covered.">        for (TransactionInput input : inputs) {</span>
+<span class="fc bfc" id="L1149" title="All 2 branches covered.">            if (input.getSequenceNumber() != TransactionInput.NO_SEQUENCE) {</span>
+<span class="fc" id="L1150">                seqNumSet = true;</span>
+<span class="fc" id="L1151">                break;</span>
+            }
+<span class="fc" id="L1153">        }</span>
+<span class="pc bpc" id="L1154" title="1 of 6 branches missed.">        if (lockTime != 0 &amp;&amp; (!seqNumSet || inputs.isEmpty())) {</span>
+            // At least one input must have a non-default sequence number for lock times to have any effect.
+            // For instance one of them can be set to zero to make this feature work.
+<span class="fc" id="L1157">            log.warn(&quot;You are setting the lock time on a transaction but none of the inputs have non-default sequence numbers. This will not do what you expect!&quot;);</span>
+        }
+<span class="fc" id="L1159">        this.lockTime = lockTime;</span>
+<span class="fc" id="L1160">    }</span>
+
+    public long getVersion() {
+<span class="fc" id="L1163">        return version;</span>
+    }
+
+    public void setVersion(int version) {
+<span class="fc" id="L1167">        this.version = version;</span>
+<span class="fc" id="L1168">        unCache();</span>
+<span class="fc" id="L1169">    }</span>
+
+    /** Returns an unmodifiable view of all inputs. */
+    public List&lt;TransactionInput&gt; getInputs() {
+<span class="fc" id="L1173">        return Collections.unmodifiableList(inputs);</span>
+    }
+
+    /** Returns an unmodifiable view of all outputs. */
+    public List&lt;TransactionOutput&gt; getOutputs() {
+<span class="fc" id="L1178">        return Collections.unmodifiableList(outputs);</span>
+    }
+
+    /**
+     * &lt;p&gt;Returns the list of transacion outputs, whether spent or unspent, that match a wallet by address or that are
+     * watched by a wallet, i.e., transaction outputs whose script's address is controlled by the wallet and transaction
+     * outputs whose script is watched by the wallet.&lt;/p&gt;
+     *
+     * @param transactionBag The wallet that controls addresses and watches scripts.
+     * @return linked list of outputs relevant to the wallet in this transaction
+     */
+    public List&lt;TransactionOutput&gt; getWalletOutputs(TransactionBag transactionBag){
+<span class="fc" id="L1190">        List&lt;TransactionOutput&gt; walletOutputs = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L1191" title="All 2 branches covered.">        for (TransactionOutput o : outputs) {</span>
+<span class="fc bfc" id="L1192" title="All 2 branches covered.">            if (!o.isMineOrWatched(transactionBag)) continue;</span>
+<span class="fc" id="L1193">            walletOutputs.add(o);</span>
+<span class="fc" id="L1194">        }</span>
+
+<span class="fc" id="L1196">        return walletOutputs;</span>
+    }
+
+    /** Randomly re-orders the transaction outputs: good for privacy */
+    public void shuffleOutputs() {
+<span class="fc" id="L1201">        Collections.shuffle(outputs);</span>
+<span class="fc" id="L1202">    }</span>
+
+    /** Same as getInputs().get(index). */
+    public TransactionInput getInput(long index) {
+<span class="fc" id="L1206">        return inputs.get((int)index);</span>
+    }
+
+    /** Same as getOutputs().get(index) */
+    public TransactionOutput getOutput(long index) {
+<span class="fc" id="L1211">        return outputs.get((int)index);</span>
+    }
+
+    /**
+     * Returns the confidence object for this transaction from the {@link org.bitcoinj.core.TxConfidenceTable}
+     * referenced by the implicit {@link Context}.
+     */
+    public TransactionConfidence getConfidence() {
+<span class="fc" id="L1219">        return getConfidence(Context.get());</span>
+    }
+
+    /**
+     * Returns the confidence object for this transaction from the {@link org.bitcoinj.core.TxConfidenceTable}
+     * referenced by the given {@link Context}.
+     */
+    public TransactionConfidence getConfidence(Context context) {
+<span class="fc" id="L1227">        return getConfidence(context.getConfidenceTable());</span>
+    }
+
+    /**
+     * Returns the confidence object for this transaction from the {@link org.bitcoinj.core.TxConfidenceTable}
+     */
+    public TransactionConfidence getConfidence(TxConfidenceTable table) {
+<span class="fc bfc" id="L1234" title="All 2 branches covered.">        if (confidence == null)</span>
+<span class="fc" id="L1235">            confidence = table.getOrCreate(getHash()) ;</span>
+<span class="fc" id="L1236">        return confidence;</span>
+    }
+
+    /** Check if the transaction has a known confidence */
+    public boolean hasConfidence() {
+<span class="fc bfc" id="L1241" title="All 2 branches covered.">        return getConfidence().getConfidenceType() != TransactionConfidence.ConfidenceType.UNKNOWN;</span>
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="fc bfc" id="L1246" title="All 2 branches covered.">        if (this == o) return true;</span>
+<span class="pc bpc" id="L1247" title="1 of 4 branches missed.">        if (o == null || getClass() != o.getClass()) return false;</span>
+<span class="fc" id="L1248">        return getHash().equals(((Transaction)o).getHash());</span>
+    }
+
+    @Override
+    public int hashCode() {
+<span class="fc" id="L1253">        return getHash().hashCode();</span>
+    }
+
+    /**
+     * Gets the count of regular SigOps in this transactions
+     */
+    public int getSigOpCount() throws ScriptException {
+<span class="fc" id="L1260">        int sigOps = 0;</span>
+<span class="fc bfc" id="L1261" title="All 2 branches covered.">        for (TransactionInput input : inputs)</span>
+<span class="fc" id="L1262">            sigOps += Script.getSigOpCount(input.getScriptBytes());</span>
+<span class="fc bfc" id="L1263" title="All 2 branches covered.">        for (TransactionOutput output : outputs)</span>
+<span class="fc" id="L1264">            sigOps += Script.getSigOpCount(output.getScriptBytes());</span>
+<span class="fc" id="L1265">        return sigOps;</span>
+    }
+
+    /**
+     * Check block height is in coinbase input script, for use after BIP 34
+     * enforcement is enabled.
+     */
+    public void checkCoinBaseHeight(final int height)
+            throws VerificationException {
+<span class="pc bpc" id="L1274" title="1 of 2 branches missed.">        checkArgument(height &gt;= Block.BLOCK_HEIGHT_GENESIS);</span>
+<span class="fc" id="L1275">        checkState(isCoinBase());</span>
+
+        // Check block height is in coinbase input script
+<span class="fc" id="L1278">        final TransactionInput in = this.getInputs().get(0);</span>
+<span class="fc" id="L1279">        final ScriptBuilder builder = new ScriptBuilder();</span>
+<span class="fc" id="L1280">        builder.number(height);</span>
+<span class="fc" id="L1281">        final byte[] expected = builder.build().getProgram();</span>
+<span class="fc" id="L1282">        final byte[] actual = in.getScriptBytes();</span>
+<span class="pc bpc" id="L1283" title="1 of 2 branches missed.">        if (actual.length &lt; expected.length) {</span>
+<span class="nc" id="L1284">            throw new VerificationException.CoinbaseHeightMismatch(&quot;Block height mismatch in coinbase.&quot;);</span>
+        }
+<span class="fc bfc" id="L1286" title="All 2 branches covered.">        for (int scriptIdx = 0; scriptIdx &lt; expected.length; scriptIdx++) {</span>
+<span class="fc bfc" id="L1287" title="All 2 branches covered.">            if (actual[scriptIdx] != expected[scriptIdx]) {</span>
+<span class="fc" id="L1288">                throw new VerificationException.CoinbaseHeightMismatch(&quot;Block height mismatch in coinbase.&quot;);</span>
+            }
+        }
+<span class="fc" id="L1291">    }</span>
+
+    /**
+     * &lt;p&gt;Checks the transaction contents for sanity, in ways that can be done in a standalone manner.
+     * Does &lt;b&gt;not&lt;/b&gt; perform all checks on a transaction such as whether the inputs are already spent.
+     * Specifically this method verifies:&lt;/p&gt;
+     *
+     * &lt;ul&gt;
+     *     &lt;li&gt;That there is at least one input and output.&lt;/li&gt;
+     *     &lt;li&gt;That the serialized size is not larger than the max block size.&lt;/li&gt;
+     *     &lt;li&gt;That no outputs have negative value.&lt;/li&gt;
+     *     &lt;li&gt;That the outputs do not sum to larger than the max allowed quantity of coin in the system.&lt;/li&gt;
+     *     &lt;li&gt;If the tx is a coinbase tx, the coinbase scriptSig size is within range. Otherwise that there are no
+     *     coinbase inputs in the tx.&lt;/li&gt;
+     * &lt;/ul&gt;
+     *
+     * @throws VerificationException
+     */
+    public void verify() throws VerificationException {
+<span class="fc bfc" id="L1310" title="All 4 branches covered.">        if (inputs.size() == 0 || outputs.size() == 0)</span>
+<span class="fc" id="L1311">            throw new VerificationException.EmptyInputsOrOutputs();</span>
+<span class="fc bfc" id="L1312" title="All 2 branches covered.">        if (this.getMessageSize() &gt; Block.MAX_BLOCK_SIZE)</span>
+<span class="fc" id="L1313">            throw new VerificationException.LargerThanMaxBlockSize();</span>
+
+<span class="fc" id="L1315">        Coin valueOut = Coin.ZERO;</span>
+<span class="fc" id="L1316">        HashSet&lt;TransactionOutPoint&gt; outpoints = new HashSet&lt;&gt;();</span>
+<span class="fc bfc" id="L1317" title="All 2 branches covered.">        for (TransactionInput input : inputs) {</span>
+<span class="fc bfc" id="L1318" title="All 2 branches covered.">            if (outpoints.contains(input.getOutpoint()))</span>
+<span class="fc" id="L1319">                throw new VerificationException.DuplicatedOutPoint();</span>
+<span class="fc" id="L1320">            outpoints.add(input.getOutpoint());</span>
+<span class="fc" id="L1321">        }</span>
+        try {
+<span class="fc bfc" id="L1323" title="All 2 branches covered.">            for (TransactionOutput output : outputs) {</span>
+<span class="fc bfc" id="L1324" title="All 2 branches covered.">                if (output.getValue().signum() &lt; 0)    // getValue() can throw IllegalStateException</span>
+<span class="fc" id="L1325">                    throw new VerificationException.NegativeValueOutput();</span>
+<span class="fc" id="L1326">                valueOut = valueOut.add(output.getValue());</span>
+<span class="pc bpc" id="L1327" title="1 of 4 branches missed.">                if (params.hasMaxMoney() &amp;&amp; valueOut.compareTo(params.getMaxMoney()) &gt; 0)</span>
+<span class="fc" id="L1328">                    throw new IllegalArgumentException();</span>
+<span class="fc" id="L1329">            }</span>
+<span class="nc" id="L1330">        } catch (IllegalStateException e) {</span>
+<span class="nc" id="L1331">            throw new VerificationException.ExcessiveValue();</span>
+<span class="fc" id="L1332">        } catch (IllegalArgumentException e) {</span>
+<span class="fc" id="L1333">            throw new VerificationException.ExcessiveValue();</span>
+<span class="fc" id="L1334">        }</span>
+
+<span class="fc bfc" id="L1336" title="All 2 branches covered.">        if (isCoinBase()) {</span>
+<span class="fc bfc" id="L1337" title="All 4 branches covered.">            if (inputs.get(0).getScriptBytes().length &lt; 2 || inputs.get(0).getScriptBytes().length &gt; 100)</span>
+<span class="fc" id="L1338">                throw new VerificationException.CoinbaseScriptSizeOutOfRange();</span>
+        } else {
+<span class="fc bfc" id="L1340" title="All 2 branches covered.">            for (TransactionInput input : inputs)</span>
+<span class="fc bfc" id="L1341" title="All 2 branches covered.">                if (input.isCoinBase())</span>
+<span class="fc" id="L1342">                    throw new VerificationException.UnexpectedCoinbaseInput();</span>
+        }
+<span class="fc" id="L1344">    }</span>
+
+    /**
+     * &lt;p&gt;A transaction is time-locked if at least one of its inputs is non-final and it has a lock time. A transaction can
+     * also have a relative lock time which this method doesn't tell. Use {@link #hasRelativeLockTime()} to find out.&lt;/p&gt;
+     *
+     * &lt;p&gt;To check if this transaction is final at a given height and time, see {@link Transaction#isFinal(int, long)}
+     * &lt;/p&gt;
+     */
+    public boolean isTimeLocked() {
+<span class="fc bfc" id="L1354" title="All 2 branches covered.">        if (getLockTime() == 0)</span>
+<span class="fc" id="L1355">            return false;</span>
+<span class="fc bfc" id="L1356" title="All 2 branches covered.">        for (TransactionInput input : getInputs())</span>
+<span class="fc bfc" id="L1357" title="All 2 branches covered.">            if (input.hasSequence())</span>
+<span class="fc" id="L1358">                return true;</span>
+<span class="fc" id="L1359">        return false;</span>
+    }
+
+    /**
+     * A transaction has a relative lock time
+     * (&lt;a href=&quot;https://github.com/bitcoin/bips/blob/master/bip-0068.mediawiki&quot;&gt;BIP 68&lt;/a&gt;) if it is version 2 or
+     * higher and at least one of its inputs has its {@link TransactionInput.SEQUENCE_LOCKTIME_DISABLE_FLAG} cleared.
+     */
+    public boolean hasRelativeLockTime() {
+<span class="fc bfc" id="L1368" title="All 2 branches covered.">        if (version &lt; 2)</span>
+<span class="fc" id="L1369">            return false;</span>
+<span class="fc bfc" id="L1370" title="All 2 branches covered.">        for (TransactionInput input : getInputs())</span>
+<span class="pc bpc" id="L1371" title="1 of 2 branches missed.">            if (input.hasRelativeLockTime())</span>
+<span class="nc" id="L1372">                return true;</span>
+<span class="fc" id="L1373">        return false;</span>
+    }
+
+    /**
+     * Returns whether this transaction will opt into the
+     * &lt;a href=&quot;https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki&quot;&gt;full replace-by-fee &lt;/a&gt; semantics.
+     */
+    public boolean isOptInFullRBF() {
+<span class="fc bfc" id="L1381" title="All 2 branches covered.">        for (TransactionInput input : getInputs())</span>
+<span class="fc bfc" id="L1382" title="All 2 branches covered.">            if (input.isOptInFullRBF())</span>
+<span class="fc" id="L1383">                return true;</span>
+<span class="fc" id="L1384">        return false;</span>
+    }
+
+    /**
+     * &lt;p&gt;Returns true if this transaction is considered finalized and can be placed in a block. Non-finalized
+     * transactions won't be included by miners and can be replaced with newer versions using sequence numbers.
+     * This is useful in certain types of &lt;a href=&quot;http://en.bitcoin.it/wiki/Contracts&quot;&gt;contracts&lt;/a&gt;, such as
+     * micropayment channels.&lt;/p&gt;
+     *
+     * &lt;p&gt;Note that currently the replacement feature is disabled in Bitcoin Core and will need to be
+     * re-activated before this functionality is useful.&lt;/p&gt;
+     */
+    public boolean isFinal(int height, long blockTimeSeconds) {
+<span class="fc" id="L1397">        long time = getLockTime();</span>
+<span class="fc bfc" id="L1398" title="All 6 branches covered.">        return time &lt; (time &lt; LOCKTIME_THRESHOLD ? height : blockTimeSeconds) || !isTimeLocked();</span>
+    }
+
+    /**
+     * Returns either the lock time as a date, if it was specified in seconds, or an estimate based on the time in
+     * the current head block if it was specified as a block time.
+     */
+    public Date estimateLockTime(AbstractBlockChain chain) {
+<span class="pc bpc" id="L1406" title="1 of 2 branches missed.">        if (lockTime &lt; LOCKTIME_THRESHOLD)</span>
+<span class="fc" id="L1407">            return chain.estimateBlockTime((int)getLockTime());</span>
+        else
+<span class="nc" id="L1409">            return new Date(getLockTime()*1000);</span>
+    }
+
+    /**
+     * Returns the purpose for which this transaction was created. See the javadoc for {@link Purpose} for more
+     * information on the point of this field and what it can be.
+     */
+    public Purpose getPurpose() {
+<span class="fc" id="L1417">        return purpose;</span>
+    }
+
+    /**
+     * Marks the transaction as being created for the given purpose. See the javadoc for {@link Purpose} for more
+     * information on the point of this field and what it can be.
+     */
+    public void setPurpose(Purpose purpose) {
+<span class="fc" id="L1425">        this.purpose = purpose;</span>
+<span class="fc" id="L1426">    }</span>
+
+    /**
+     * Getter for {@link #exchangeRate}.
+     */
+    @Nullable
+    public ExchangeRate getExchangeRate() {
+<span class="fc" id="L1433">        return exchangeRate;</span>
+    }
+
+    /**
+     * Setter for {@link #exchangeRate}.
+     */
+    public void setExchangeRate(ExchangeRate exchangeRate) {
+<span class="fc" id="L1440">        this.exchangeRate = exchangeRate;</span>
+<span class="fc" id="L1441">    }</span>
+
+    /**
+     * Returns the transaction {@link #memo}.
+     */
+    public String getMemo() {
+<span class="fc" id="L1447">        return memo;</span>
+    }
+
+    /**
+     * Set the transaction {@link #memo}. It can be used to record the memo of the payment request that initiated the
+     * transaction.
+     */
+    public void setMemo(String memo) {
+<span class="fc" id="L1455">        this.memo = memo;</span>
+<span class="fc" id="L1456">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

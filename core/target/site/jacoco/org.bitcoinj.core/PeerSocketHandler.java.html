@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>PeerSocketHandler.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">PeerSocketHandler.java</span></div><h1>PeerSocketHandler.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import org.bitcoinj.net.AbstractTimeoutHandler;
+import org.bitcoinj.net.MessageWriteTarget;
+import org.bitcoinj.net.StreamConnection;
+import org.bitcoinj.utils.Threading;
+import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.ConnectException;
+import java.net.InetSocketAddress;
+import java.nio.BufferUnderflowException;
+import java.nio.ByteBuffer;
+import java.nio.channels.NotYetConnectedException;
+import java.util.concurrent.locks.Lock;
+
+import static com.google.common.base.Preconditions.*;
+
+/**
+ * Handles high-level message (de)serialization for peers, acting as the bridge between the
+ * {@link org.bitcoinj.net} classes and {@link Peer}.
+ */
+public abstract class PeerSocketHandler extends AbstractTimeoutHandler implements StreamConnection {
+<span class="fc" id="L43">    private static final Logger log = LoggerFactory.getLogger(PeerSocketHandler.class);</span>
+
+    private final MessageSerializer serializer;
+    protected PeerAddress peerAddress;
+    // If we close() before we know our writeTarget, set this to true to call writeTarget.closeConnection() right away.
+<span class="fc" id="L48">    private boolean closePending = false;</span>
+    // writeTarget will be thread-safe, and may call into PeerGroup, which calls us, so we should call it unlocked
+<span class="fc" id="L50">    @VisibleForTesting protected MessageWriteTarget writeTarget = null;</span>
+
+    // The ByteBuffers passed to us from the writeTarget are static in size, and usually smaller than some messages we
+    // will receive. For SPV clients, this should be rare (ie we're mostly dealing with small transactions), but for
+    // messages which are larger than the read buffer, we have to keep a temporary buffer with its bytes.
+    private byte[] largeReadBuffer;
+    private int largeReadBufferPos;
+    private BitcoinSerializer.BitcoinPacketHeader header;
+
+<span class="fc" id="L59">    private Lock lock = Threading.lock(&quot;PeerSocketHandler&quot;);</span>
+
+<span class="fc" id="L61">    public PeerSocketHandler(NetworkParameters params, InetSocketAddress remoteIp) {</span>
+<span class="fc" id="L62">        checkNotNull(params);</span>
+<span class="fc" id="L63">        serializer = params.getDefaultSerializer();</span>
+<span class="fc" id="L64">        this.peerAddress = new PeerAddress(params, remoteIp);</span>
+<span class="fc" id="L65">    }</span>
+
+<span class="fc" id="L67">    public PeerSocketHandler(NetworkParameters params, PeerAddress peerAddress) {</span>
+<span class="fc" id="L68">        checkNotNull(params);</span>
+<span class="fc" id="L69">        serializer = params.getDefaultSerializer();</span>
+<span class="fc" id="L70">        this.peerAddress = checkNotNull(peerAddress);</span>
+<span class="fc" id="L71">    }</span>
+
+    /**
+     * Sends the given message to the peer. Due to the asynchronousness of network programming, there is no guarantee
+     * the peer will have received it. Throws NotYetConnectedException if we are not yet connected to the remote peer.
+     * TODO: Maybe use something other than the unchecked NotYetConnectedException here
+     */
+    public void sendMessage(Message message) throws NotYetConnectedException {
+<span class="fc" id="L79">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L81" title="1 of 2 branches missed.">            if (writeTarget == null)</span>
+<span class="nc" id="L82">                throw new NotYetConnectedException();</span>
+        } finally {
+<span class="pc" id="L84">            lock.unlock();</span>
+<span class="fc" id="L85">        }</span>
+        // TODO: Some round-tripping could be avoided here
+<span class="fc" id="L87">        ByteArrayOutputStream out = new ByteArrayOutputStream();</span>
+        try {
+<span class="fc" id="L89">            serializer.serialize(message, out);</span>
+<span class="fc" id="L90">            writeTarget.writeBytes(out.toByteArray());</span>
+<span class="fc" id="L91">        } catch (IOException e) {</span>
+<span class="fc" id="L92">            exceptionCaught(e);</span>
+<span class="fc" id="L93">        }</span>
+<span class="fc" id="L94">    }</span>
+
+    /**
+     * Closes the connection to the peer if one exists, or immediately closes the connection as soon as it opens
+     */
+    public void close() {
+<span class="fc" id="L100">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L102" title="All 2 branches covered.">            if (writeTarget == null) {</span>
+<span class="fc" id="L103">                closePending = true;</span>
+<span class="fc" id="L104">                return;</span>
+            }
+        } finally {
+<span class="pc" id="L107">            lock.unlock();</span>
+<span class="fc" id="L108">        }</span>
+<span class="fc" id="L109">        writeTarget.closeConnection();</span>
+<span class="fc" id="L110">    }</span>
+
+    @Override
+    protected void timeoutOccurred() {
+<span class="fc" id="L114">        log.info(&quot;{}: Timed out&quot;, getAddress());</span>
+<span class="fc" id="L115">        close();</span>
+<span class="fc" id="L116">    }</span>
+
+    /**
+     * Called every time a message is received from the network
+     */
+    protected abstract void processMessage(Message m) throws Exception;
+
+    @Override
+    public int receiveBytes(ByteBuffer buff) {
+<span class="pc bpc" id="L125" title="1 of 2 branches missed.">        checkArgument(buff.position() == 0 &amp;&amp;</span>
+<span class="pc bpc" id="L126" title="1 of 2 branches missed.">                buff.capacity() &gt;= BitcoinSerializer.BitcoinPacketHeader.HEADER_LENGTH + 4);</span>
+        try {
+            // Repeatedly try to deserialize messages until we hit a BufferUnderflowException
+<span class="fc" id="L129">            boolean firstMessage = true;</span>
+            while (true) {
+                // If we are in the middle of reading a message, try to fill that one first, before we expect another
+<span class="fc bfc" id="L132" title="All 2 branches covered.">                if (largeReadBuffer != null) {</span>
+                    // This can only happen in the first iteration
+<span class="fc" id="L134">                    checkState(firstMessage);</span>
+                    // Read new bytes into the largeReadBuffer
+<span class="fc" id="L136">                    int bytesToGet = Math.min(buff.remaining(), largeReadBuffer.length - largeReadBufferPos);</span>
+<span class="fc" id="L137">                    buff.get(largeReadBuffer, largeReadBufferPos, bytesToGet);</span>
+<span class="fc" id="L138">                    largeReadBufferPos += bytesToGet;</span>
+                    // Check the largeReadBuffer's status
+<span class="fc bfc" id="L140" title="All 2 branches covered.">                    if (largeReadBufferPos == largeReadBuffer.length) {</span>
+                        // ...processing a message if one is available
+<span class="fc" id="L142">                        processMessage(serializer.deserializePayload(header, ByteBuffer.wrap(largeReadBuffer)));</span>
+<span class="fc" id="L143">                        largeReadBuffer = null;</span>
+<span class="fc" id="L144">                        header = null;</span>
+<span class="fc" id="L145">                        firstMessage = false;</span>
+                    } else // ...or just returning if we don't have enough bytes yet
+<span class="fc" id="L147">                        return buff.position();</span>
+                }
+                // Now try to deserialize any messages left in buff
+                Message message;
+<span class="fc" id="L151">                int preSerializePosition = buff.position();</span>
+                try {
+<span class="fc" id="L153">                    message = serializer.deserialize(buff);</span>
+<span class="fc" id="L154">                } catch (BufferUnderflowException e) {</span>
+                    // If we went through the whole buffer without a full message, we need to use the largeReadBuffer
+<span class="fc bfc" id="L156" title="All 4 branches covered.">                    if (firstMessage &amp;&amp; buff.limit() == buff.capacity()) {</span>
+                        // ...so reposition the buffer to 0 and read the next message header
+<span class="fc" id="L158">                        buff.position(0);</span>
+                        try {
+<span class="fc" id="L160">                            serializer.seekPastMagicBytes(buff);</span>
+<span class="fc" id="L161">                            header = serializer.deserializeHeader(buff);</span>
+                            // Initialize the largeReadBuffer with the next message's size and fill it with any bytes
+                            // left in buff
+<span class="fc" id="L164">                            largeReadBuffer = new byte[header.size];</span>
+<span class="fc" id="L165">                            largeReadBufferPos = buff.remaining();</span>
+<span class="fc" id="L166">                            buff.get(largeReadBuffer, 0, largeReadBufferPos);</span>
+<span class="nc" id="L167">                        } catch (BufferUnderflowException e1) {</span>
+                            // If we went through a whole buffer's worth of bytes without getting a header, give up
+                            // In cases where the buff is just really small, we could create a second largeReadBuffer
+                            // that we use to deserialize the magic+header, but that is rather complicated when the buff
+                            // should probably be at least that big anyway (for efficiency)
+<span class="nc" id="L172">                            throw new ProtocolException(&quot;No magic bytes+header after reading &quot; + buff.capacity() + &quot; bytes&quot;);</span>
+<span class="fc" id="L173">                        }</span>
+                    } else {
+                        // Reposition the buffer to its original position, which saves us from skipping messages by
+                        // seeking past part of the magic bytes before all of them are in the buffer
+<span class="fc" id="L177">                        buff.position(preSerializePosition);</span>
+                    }
+<span class="fc" id="L179">                    return buff.position();</span>
+<span class="fc" id="L180">                }</span>
+                // Process our freshly deserialized message
+<span class="fc" id="L182">                processMessage(message);</span>
+<span class="fc" id="L183">                firstMessage = false;</span>
+<span class="fc" id="L184">            }</span>
+<span class="fc" id="L185">        } catch (Exception e) {</span>
+<span class="fc" id="L186">            exceptionCaught(e);</span>
+<span class="fc" id="L187">            return -1; // Returning -1 also throws an IllegalStateException upstream and kills the connection</span>
+        }
+    }
+
+    /**
+     * Sets the {@link MessageWriteTarget} used to write messages to the peer. This should almost never be called, it is
+     * called automatically by {@link org.bitcoinj.net.NioClient} or
+     * {@link org.bitcoinj.net.NioClientManager} once the socket finishes initialization.
+     */
+    @Override
+    public void setWriteTarget(MessageWriteTarget writeTarget) {
+<span class="pc bpc" id="L198" title="1 of 2 branches missed.">        checkArgument(writeTarget != null);</span>
+<span class="fc" id="L199">        lock.lock();</span>
+<span class="fc" id="L200">        boolean closeNow = false;</span>
+        try {
+<span class="pc bpc" id="L202" title="1 of 2 branches missed.">            checkArgument(this.writeTarget == null);</span>
+<span class="fc" id="L203">            closeNow = closePending;</span>
+<span class="fc" id="L204">            this.writeTarget = writeTarget;</span>
+        } finally {
+<span class="pc" id="L206">            lock.unlock();</span>
+<span class="fc" id="L207">        }</span>
+<span class="pc bpc" id="L208" title="1 of 2 branches missed.">        if (closeNow)</span>
+<span class="nc" id="L209">            writeTarget.closeConnection();</span>
+<span class="fc" id="L210">    }</span>
+
+    @Override
+    public int getMaxMessageSize() {
+<span class="fc" id="L214">        return Message.MAX_SIZE;</span>
+    }
+
+    /**
+     * @return the IP address and port of peer.
+     */
+    public PeerAddress getAddress() {
+<span class="fc" id="L221">        return peerAddress;</span>
+    }
+
+    /** Catch any exceptions, logging them and then closing the channel. */
+    private void exceptionCaught(Exception e) {
+<span class="fc" id="L226">        PeerAddress addr = getAddress();</span>
+<span class="pc bpc" id="L227" title="1 of 2 branches missed.">        String s = addr == null ? &quot;?&quot; : addr.toString();</span>
+<span class="pc bpc" id="L228" title="1 of 4 branches missed.">        if (e instanceof ConnectException || e instanceof IOException) {</span>
+            // Short message for network errors
+<span class="fc" id="L230">            log.info(s + &quot; - &quot; + e.getMessage());</span>
+        } else {
+<span class="fc" id="L232">            log.warn(s + &quot; - &quot;, e);</span>
+<span class="fc" id="L233">            Thread.UncaughtExceptionHandler handler = Threading.uncaughtExceptionHandler;</span>
+<span class="pc bpc" id="L234" title="1 of 2 branches missed.">            if (handler != null)</span>
+<span class="fc" id="L235">                handler.uncaughtException(Thread.currentThread(), e);</span>
+        }
+
+<span class="fc" id="L238">        close();</span>
+<span class="fc" id="L239">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

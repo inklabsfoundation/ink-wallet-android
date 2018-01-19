@@ -1,0 +1,1859 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>Peer.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">Peer.java</span></div><h1>Peer.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import com.google.common.base.*;
+import com.google.common.base.Objects;
+import org.bitcoinj.core.listeners.*;
+import org.bitcoinj.net.StreamConnection;
+import org.bitcoinj.store.BlockStore;
+import org.bitcoinj.store.BlockStoreException;
+import org.bitcoinj.utils.ListenerRegistration;
+import org.bitcoinj.utils.Threading;
+import org.bitcoinj.wallet.Wallet;
+
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
+import net.jcip.annotations.GuardedBy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+
+/**
+ * &lt;p&gt;A Peer handles the high level communication with a Bitcoin node, extending a {@link PeerSocketHandler} which
+ * handles low-level message (de)serialization.&lt;/p&gt;
+ *
+ * &lt;p&gt;Note that timeouts are handled by the extended
+ * {@link org.bitcoinj.net.AbstractTimeoutHandler} and timeout is automatically disabled (using
+ * {@link org.bitcoinj.net.AbstractTimeoutHandler#setTimeoutEnabled(boolean)}) once the version
+ * handshake completes.&lt;/p&gt;
+ */
+public class Peer extends PeerSocketHandler {
+<span class="fc" id="L59">    private static final Logger log = LoggerFactory.getLogger(Peer.class);</span>
+
+<span class="fc" id="L61">    protected final ReentrantLock lock = Threading.lock(&quot;peer&quot;);</span>
+
+    private final NetworkParameters params;
+    private final AbstractBlockChain blockChain;
+    private final Context context;
+
+<span class="fc" id="L67">    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;BlocksDownloadedEventListener&gt;&gt; blocksDownloadedEventListeners</span>
+        = new CopyOnWriteArrayList&lt;&gt;();
+<span class="fc" id="L69">    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;ChainDownloadStartedEventListener&gt;&gt; chainDownloadStartedEventListeners</span>
+        = new CopyOnWriteArrayList&lt;&gt;();
+<span class="fc" id="L71">    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;PeerConnectedEventListener&gt;&gt; connectedEventListeners</span>
+        = new CopyOnWriteArrayList&lt;&gt;();
+<span class="fc" id="L73">    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;PeerDisconnectedEventListener&gt;&gt; disconnectedEventListeners</span>
+        = new CopyOnWriteArrayList&lt;&gt;();
+<span class="fc" id="L75">    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;GetDataEventListener&gt;&gt; getDataEventListeners</span>
+        = new CopyOnWriteArrayList&lt;&gt;();
+<span class="fc" id="L77">    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;PreMessageReceivedEventListener&gt;&gt; preMessageReceivedEventListeners</span>
+        = new CopyOnWriteArrayList&lt;&gt;();
+<span class="fc" id="L79">    private final CopyOnWriteArrayList&lt;ListenerRegistration&lt;OnTransactionBroadcastListener&gt;&gt; onTransactionEventListeners</span>
+        = new CopyOnWriteArrayList&lt;&gt;();
+    // Whether to try and download blocks and transactions from this peer. Set to false by PeerGroup if not the
+    // primary peer. This is to avoid redundant work and concurrency problems with downloading the same chain
+    // in parallel.
+    private volatile boolean vDownloadData;
+    // The version data to announce to the other side of the connections we make: useful for setting our &quot;user agent&quot;
+    // equivalent and other things.
+    private final VersionMessage versionMessage;
+    // Maximum depth up to which pending transaction dependencies are downloaded, or 0 for disabled.
+    private volatile int vDownloadTxDependencyDepth;
+    // How many block messages the peer has announced to us. Peers only announce blocks that attach to their best chain
+    // so we can use this to calculate the height of the peers chain, by adding it to the initial height in the version
+    // message. This method can go wrong if the peer re-orgs onto a shorter (but harder) chain, however, this is rare.
+<span class="fc" id="L93">    private final AtomicInteger blocksAnnounced = new AtomicInteger();</span>
+    // Each wallet added to the peer will be notified of downloaded transaction data.
+    private final CopyOnWriteArrayList&lt;Wallet&gt; wallets;
+    // A time before which we only download block headers, after that point we download block bodies.
+    @GuardedBy(&quot;lock&quot;) private long fastCatchupTimeSecs;
+    // Whether we are currently downloading headers only or block bodies. Starts at true. If the fast catchup time is
+    // set AND our best block is before that date, switch to false until block headers beyond that point have been
+    // received at which point it gets set to true again. This isn't relevant unless vDownloadData is true.
+<span class="fc" id="L101">    @GuardedBy(&quot;lock&quot;) private boolean downloadBlockBodies = true;</span>
+    // Whether to request filtered blocks instead of full blocks if the protocol version allows for them.
+<span class="fc" id="L103">    @GuardedBy(&quot;lock&quot;) private boolean useFilteredBlocks = false;</span>
+    // The current Bloom filter set on the connection, used to tell the remote peer what transactions to send us.
+    private volatile BloomFilter vBloomFilter;
+    // The last filtered block we received, we're waiting to fill it out with transactions.
+<span class="fc" id="L107">    private FilteredBlock currentFilteredBlock = null;</span>
+    // How many filtered blocks have been received during the lifetime of this connection. Used to decide when to
+    // refresh the server-side side filter by sending a new one (it degrades over time as false positives are added
+    // on the remote side, see BIP 37 for a discussion of this).
+    // TODO: Is this still needed? It should not be since the auto FP tracking logic was added.
+    private int filteredBlocksReceived;
+    // If non-null, we should discard incoming filtered blocks because we ran out of keys and are awaiting a new filter
+    // to be calculated by the PeerGroup. The discarded block hashes should be added here so we can re-request them
+    // once we've recalculated and resent a new filter.
+    @GuardedBy(&quot;lock&quot;) @Nullable private List&lt;Sha256Hash&gt; awaitingFreshFilter;
+    // How frequently to refresh the filter. This should become dynamic in future and calculated depending on the
+    // actual false positive rate. For now a good value was determined empirically around January 2013.
+    private static final int RESEND_BLOOM_FILTER_BLOCK_COUNT = 25000;
+    // Keeps track of things we requested internally with getdata but didn't receive yet, so we can avoid re-requests.
+    // It's not quite the same as getDataFutures, as this is used only for getdatas done as part of downloading
+    // the chain and so is lighter weight (we just keep a bunch of hashes not futures).
+    //
+    // It is important to avoid a nasty edge case where we can end up with parallel chain downloads proceeding
+    // simultaneously if we were to receive a newly solved block whilst parts of the chain are streaming to us.
+<span class="fc" id="L126">    private final HashSet&lt;Sha256Hash&gt; pendingBlockDownloads = new HashSet&lt;&gt;();</span>
+    // Keep references to TransactionConfidence objects for transactions that were announced by a remote peer, but
+    // which we haven't downloaded yet. These objects are de-duplicated by the TxConfidenceTable class.
+    // Once the tx is downloaded (by some peer), the Transaction object that is created will have a reference to
+    // the confidence object held inside it, and it's then up to the event listeners that receive the Transaction
+    // to keep it pinned to the root set if they care about this data.
+<span class="fc" id="L132">    @SuppressWarnings(&quot;MismatchedQueryAndUpdateOfCollection&quot;)</span>
+    private final HashSet&lt;TransactionConfidence&gt; pendingTxDownloads = new HashSet&lt;&gt;();
+    // The lowest version number we're willing to accept. Lower than this will result in an immediate disconnect.
+    private volatile int vMinProtocolVersion;
+    // When an API user explicitly requests a block or transaction from a peer, the InventoryItem is put here
+    // whilst waiting for the response. Is not used for downloads Peer generates itself.
+    private static class GetDataRequest {
+<span class="fc" id="L139">        public GetDataRequest(Sha256Hash hash, SettableFuture future) {</span>
+<span class="fc" id="L140">            this.hash = hash;</span>
+<span class="fc" id="L141">            this.future = future;</span>
+<span class="fc" id="L142">        }</span>
+        final Sha256Hash hash;
+        final SettableFuture future;
+    }
+    // TODO: The types/locking should be rationalised a bit.
+    private final CopyOnWriteArrayList&lt;GetDataRequest&gt; getDataFutures;
+    @GuardedBy(&quot;getAddrFutures&quot;) private final LinkedList&lt;SettableFuture&lt;AddressMessage&gt;&gt; getAddrFutures;
+    @Nullable @GuardedBy(&quot;lock&quot;) private LinkedList&lt;SettableFuture&lt;UTXOsMessage&gt;&gt; getutxoFutures;
+
+    // Outstanding pings against this peer and how long the last one took to complete.
+<span class="fc" id="L152">    private final ReentrantLock lastPingTimesLock = new ReentrantLock();</span>
+<span class="fc" id="L153">    @GuardedBy(&quot;lastPingTimesLock&quot;) private long[] lastPingTimes = null;</span>
+    private final CopyOnWriteArrayList&lt;PendingPing&gt; pendingPings;
+    private static final int PING_MOVING_AVERAGE_WINDOW = 20;
+
+    private volatile VersionMessage vPeerVersionMessage;
+
+    // A settable future which completes (with this) when the connection is open
+<span class="fc" id="L160">    private final SettableFuture&lt;Peer&gt; connectionOpenFuture = SettableFuture.create();</span>
+<span class="fc" id="L161">    private final SettableFuture&lt;Peer&gt; outgoingVersionHandshakeFuture = SettableFuture.create();</span>
+<span class="fc" id="L162">    private final SettableFuture&lt;Peer&gt; incomingVersionHandshakeFuture = SettableFuture.create();</span>
+<span class="fc" id="L163">    private final ListenableFuture&lt;Peer&gt; versionHandshakeFuture = Futures.transform(</span>
+<span class="fc" id="L164">            Futures.allAsList(outgoingVersionHandshakeFuture, incomingVersionHandshakeFuture),</span>
+<span class="fc" id="L165">            new Function&lt;List&lt;Peer&gt;, Peer&gt;() {</span>
+
+                @Override
+                @Nullable
+                public Peer apply(@Nullable List&lt;Peer&gt; peers) {
+<span class="fc" id="L170">                    checkNotNull(peers);</span>
+<span class="pc bpc" id="L171" title="2 of 4 branches missed.">                    checkState(peers.size() == 2 &amp;&amp; peers.get(0) == peers.get(1));</span>
+<span class="fc" id="L172">                    return peers.get(0);</span>
+                }
+            });
+
+    /**
+     * &lt;p&gt;Construct a peer that reads/writes from the given block chain.&lt;/p&gt;
+     *
+     * &lt;p&gt;Note that this does &lt;b&gt;NOT&lt;/b&gt; make a connection to the given remoteAddress, it only creates a handler for a
+     * connection. If you want to create a one-off connection, create a Peer and pass it to
+     * {@link org.bitcoinj.net.NioClientManager#openConnection(java.net.SocketAddress, StreamConnection)}
+     * or
+     * {@link org.bitcoinj.net.NioClient#NioClient(java.net.SocketAddress, StreamConnection, int)}.&lt;/p&gt;
+     *
+     * &lt;p&gt;The remoteAddress provided should match the remote address of the peer which is being connected to, and is
+     * used to keep track of which peers relayed transactions and offer more descriptive logging.&lt;/p&gt;
+     */
+    public Peer(NetworkParameters params, VersionMessage ver, @Nullable AbstractBlockChain chain, PeerAddress remoteAddress) {
+<span class="nc" id="L189">        this(params, ver, remoteAddress, chain);</span>
+<span class="nc" id="L190">    }</span>
+
+    /**
+     * &lt;p&gt;Construct a peer that reads/writes from the given block chain. Transactions stored in a {@link org.bitcoinj.core.TxConfidenceTable}
+     * will have their confidence levels updated when a peer announces it, to reflect the greater likelyhood that
+     * the transaction is valid.&lt;/p&gt;
+     *
+     * &lt;p&gt;Note that this does &lt;b&gt;NOT&lt;/b&gt; make a connection to the given remoteAddress, it only creates a handler for a
+     * connection. If you want to create a one-off connection, create a Peer and pass it to
+     * {@link org.bitcoinj.net.NioClientManager#openConnection(java.net.SocketAddress, StreamConnection)}
+     * or
+     * {@link org.bitcoinj.net.NioClient#NioClient(java.net.SocketAddress, StreamConnection, int)}.&lt;/p&gt;
+     *
+     * &lt;p&gt;The remoteAddress provided should match the remote address of the peer which is being connected to, and is
+     * used to keep track of which peers relayed transactions and offer more descriptive logging.&lt;/p&gt;
+     */
+    public Peer(NetworkParameters params, VersionMessage ver, PeerAddress remoteAddress,
+                @Nullable AbstractBlockChain chain) {
+<span class="fc" id="L208">        this(params, ver, remoteAddress, chain, Integer.MAX_VALUE);</span>
+<span class="fc" id="L209">    }</span>
+
+    /**
+     * &lt;p&gt;Construct a peer that reads/writes from the given block chain. Transactions stored in a {@link org.bitcoinj.core.TxConfidenceTable}
+     * will have their confidence levels updated when a peer announces it, to reflect the greater likelyhood that
+     * the transaction is valid.&lt;/p&gt;
+     *
+     * &lt;p&gt;Note that this does &lt;b&gt;NOT&lt;/b&gt; make a connection to the given remoteAddress, it only creates a handler for a
+     * connection. If you want to create a one-off connection, create a Peer and pass it to
+     * {@link org.bitcoinj.net.NioClientManager#openConnection(java.net.SocketAddress, StreamConnection)}
+     * or
+     * {@link org.bitcoinj.net.NioClient#NioClient(java.net.SocketAddress, StreamConnection, int)}.&lt;/p&gt;
+     *
+     * &lt;p&gt;The remoteAddress provided should match the remote address of the peer which is being connected to, and is
+     * used to keep track of which peers relayed transactions and offer more descriptive logging.&lt;/p&gt;
+     */
+    public Peer(NetworkParameters params, VersionMessage ver, PeerAddress remoteAddress,
+                @Nullable AbstractBlockChain chain, int downloadTxDependencyDepth) {
+<span class="fc" id="L227">        super(params, remoteAddress);</span>
+<span class="fc" id="L228">        this.params = Preconditions.checkNotNull(params);</span>
+<span class="fc" id="L229">        this.versionMessage = Preconditions.checkNotNull(ver);</span>
+<span class="pc bpc" id="L230" title="1 of 2 branches missed.">        this.vDownloadTxDependencyDepth = chain != null ? downloadTxDependencyDepth : 0;</span>
+<span class="fc" id="L231">        this.blockChain = chain;  // Allowed to be null.</span>
+<span class="pc bpc" id="L232" title="1 of 2 branches missed.">        this.vDownloadData = chain != null;</span>
+<span class="fc" id="L233">        this.getDataFutures = new CopyOnWriteArrayList&lt;&gt;();</span>
+<span class="fc" id="L234">        this.getAddrFutures = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L235">        this.fastCatchupTimeSecs = params.getGenesisBlock().getTimeSeconds();</span>
+<span class="fc" id="L236">        this.pendingPings = new CopyOnWriteArrayList&lt;&gt;();</span>
+<span class="fc" id="L237">        this.vMinProtocolVersion = params.getProtocolVersionNum(NetworkParameters.ProtocolVersion.PONG);</span>
+<span class="fc" id="L238">        this.wallets = new CopyOnWriteArrayList&lt;&gt;();</span>
+<span class="fc" id="L239">        this.context = Context.get();</span>
+
+<span class="fc" id="L241">        this.versionHandshakeFuture.addListener(new Runnable() {</span>
+            @Override
+            public void run() {
+<span class="fc" id="L244">                versionHandshakeComplete();</span>
+<span class="fc" id="L245">            }</span>
+        }, Threading.SAME_THREAD);
+<span class="fc" id="L247">    }</span>
+
+    /**
+     * &lt;p&gt;Construct a peer that reads/writes from the given chain. Automatically creates a VersionMessage for you from
+     * the given software name/version strings, which should be something like &quot;MySimpleTool&quot;, &quot;1.0&quot; and which will tell
+     * the remote node to relay transaction inv messages before it has received a filter.&lt;/p&gt;
+     *
+     * &lt;p&gt;Note that this does &lt;b&gt;NOT&lt;/b&gt; make a connection to the given remoteAddress, it only creates a handler for a
+     * connection. If you want to create a one-off connection, create a Peer and pass it to
+     * {@link org.bitcoinj.net.NioClientManager#openConnection(java.net.SocketAddress, StreamConnection)}
+     * or
+     * {@link org.bitcoinj.net.NioClient#NioClient(java.net.SocketAddress, StreamConnection, int)}.&lt;/p&gt;
+     *
+     * &lt;p&gt;The remoteAddress provided should match the remote address of the peer which is being connected to, and is
+     * used to keep track of which peers relayed transactions and offer more descriptive logging.&lt;/p&gt;
+     */
+    public Peer(NetworkParameters params, AbstractBlockChain blockChain, PeerAddress peerAddress, String thisSoftwareName, String thisSoftwareVersion) {
+<span class="nc" id="L264">        this(params, new VersionMessage(params, blockChain.getBestChainHeight()), blockChain, peerAddress);</span>
+<span class="nc" id="L265">        this.versionMessage.appendToSubVer(thisSoftwareName, thisSoftwareVersion, null);</span>
+<span class="nc" id="L266">    }</span>
+
+    /** Deprecated: use the more specific event handler methods instead */
+    @Deprecated @SuppressWarnings(&quot;deprecation&quot;)
+    public void addEventListener(AbstractPeerEventListener listener) {
+<span class="nc" id="L271">        addBlocksDownloadedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L272">        addChainDownloadStartedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L273">        addConnectedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L274">        addDisconnectedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L275">        addGetDataEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L276">        addOnTransactionBroadcastListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L277">        addPreMessageReceivedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L278">    }</span>
+
+    /** Deprecated: use the more specific event handler methods instead */
+    @Deprecated
+    public void addEventListener(AbstractPeerEventListener listener, Executor executor) {
+<span class="nc" id="L283">        addBlocksDownloadedEventListener(executor, listener);</span>
+<span class="nc" id="L284">        addChainDownloadStartedEventListener(executor, listener);</span>
+<span class="nc" id="L285">        addConnectedEventListener(executor, listener);</span>
+<span class="nc" id="L286">        addDisconnectedEventListener(executor, listener);</span>
+<span class="nc" id="L287">        addGetDataEventListener(executor, listener);</span>
+<span class="nc" id="L288">        addOnTransactionBroadcastListener(executor, listener);</span>
+<span class="nc" id="L289">        addPreMessageReceivedEventListener(executor, listener);</span>
+<span class="nc" id="L290">    }</span>
+
+    /** Deprecated: use the more specific event handler methods instead */
+    @Deprecated
+    public void removeEventListener(AbstractPeerEventListener listener) {
+<span class="nc" id="L295">        removeBlocksDownloadedEventListener(listener);</span>
+<span class="nc" id="L296">        removeChainDownloadStartedEventListener(listener);</span>
+<span class="nc" id="L297">        removeConnectedEventListener(listener);</span>
+<span class="nc" id="L298">        removeDisconnectedEventListener(listener);</span>
+<span class="nc" id="L299">        removeGetDataEventListener(listener);</span>
+<span class="nc" id="L300">        removeOnTransactionBroadcastListener(listener);</span>
+<span class="nc" id="L301">        removePreMessageReceivedEventListener(listener);</span>
+<span class="nc" id="L302">    }</span>
+
+    /** Registers a listener that is invoked when new blocks are downloaded. */
+    public void addBlocksDownloadedEventListener(BlocksDownloadedEventListener listener) {
+<span class="nc" id="L306">        addBlocksDownloadedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L307">    }</span>
+
+    /** Registers a listener that is invoked when new blocks are downloaded. */
+    public void addBlocksDownloadedEventListener(Executor executor, BlocksDownloadedEventListener listener) {
+<span class="fc" id="L311">        blocksDownloadedEventListeners.add(new ListenerRegistration(listener, executor));</span>
+<span class="fc" id="L312">    }</span>
+
+    /** Registers a listener that is invoked when a blockchain downloaded starts. */
+    public void addChainDownloadStartedEventListener(ChainDownloadStartedEventListener listener) {
+<span class="nc" id="L316">        addChainDownloadStartedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L317">    }</span>
+
+    /** Registers a listener that is invoked when a blockchain downloaded starts. */
+    public void addChainDownloadStartedEventListener(Executor executor, ChainDownloadStartedEventListener listener) {
+<span class="fc" id="L321">        chainDownloadStartedEventListeners.add(new ListenerRegistration(listener, executor));</span>
+<span class="fc" id="L322">    }</span>
+
+    /** Registers a listener that is invoked when a peer is connected. */
+    public void addConnectedEventListener(PeerConnectedEventListener listener) {
+<span class="fc" id="L326">        addConnectedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="fc" id="L327">    }</span>
+
+    /** Registers a listener that is invoked when a peer is connected. */
+    public void addConnectedEventListener(Executor executor, PeerConnectedEventListener listener) {
+<span class="fc" id="L331">        connectedEventListeners.add(new ListenerRegistration(listener, executor));</span>
+<span class="fc" id="L332">    }</span>
+
+    /** Registers a listener that is invoked when a peer is disconnected. */
+    public void addDisconnectedEventListener(PeerDisconnectedEventListener listener) {
+<span class="fc" id="L336">        addDisconnectedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="fc" id="L337">    }</span>
+
+    /** Registers a listener that is invoked when a peer is disconnected. */
+    public void addDisconnectedEventListener(Executor executor, PeerDisconnectedEventListener listener) {
+<span class="fc" id="L341">        disconnectedEventListeners.add(new ListenerRegistration(listener, executor));</span>
+<span class="fc" id="L342">    }</span>
+
+    /** Registers a listener that is called when messages are received. */
+    public void addGetDataEventListener(GetDataEventListener listener) {
+<span class="nc" id="L346">        addGetDataEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L347">    }</span>
+
+    /** Registers a listener that is called when messages are received. */
+    public void addGetDataEventListener(Executor executor, GetDataEventListener listener) {
+<span class="fc" id="L351">        getDataEventListeners.add(new ListenerRegistration&lt;&gt;(listener, executor));</span>
+<span class="fc" id="L352">    }</span>
+
+    /** Registers a listener that is called when a transaction is broadcast across the network */
+    public void addOnTransactionBroadcastListener(OnTransactionBroadcastListener listener) {
+<span class="nc" id="L356">        addOnTransactionBroadcastListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L357">    }</span>
+
+    /** Registers a listener that is called when a transaction is broadcast across the network */
+    public void addOnTransactionBroadcastListener(Executor executor, OnTransactionBroadcastListener listener) {
+<span class="fc" id="L361">        onTransactionEventListeners.add(new ListenerRegistration&lt;&gt;(listener, executor));</span>
+<span class="fc" id="L362">    }</span>
+
+    /** Registers a listener that is called immediately before a message is received */
+    public void addPreMessageReceivedEventListener(PreMessageReceivedEventListener listener) {
+<span class="nc" id="L366">        addPreMessageReceivedEventListener(Threading.USER_THREAD, listener);</span>
+<span class="nc" id="L367">    }</span>
+
+    /** Registers a listener that is called immediately before a message is received */
+    public void addPreMessageReceivedEventListener(Executor executor, PreMessageReceivedEventListener listener) {
+<span class="fc" id="L371">        preMessageReceivedEventListeners.add(new ListenerRegistration&lt;&gt;(listener, executor));</span>
+<span class="fc" id="L372">    }</span>
+
+    public boolean removeBlocksDownloadedEventListener(BlocksDownloadedEventListener listener) {
+<span class="fc" id="L375">        return ListenerRegistration.removeFromList(listener, blocksDownloadedEventListeners);</span>
+    }
+
+    public boolean removeChainDownloadStartedEventListener(ChainDownloadStartedEventListener listener) {
+<span class="fc" id="L379">        return ListenerRegistration.removeFromList(listener, chainDownloadStartedEventListeners);</span>
+    }
+
+    public boolean removeConnectedEventListener(PeerConnectedEventListener listener) {
+<span class="fc" id="L383">        return ListenerRegistration.removeFromList(listener, connectedEventListeners);</span>
+    }
+
+    public boolean removeDisconnectedEventListener(PeerDisconnectedEventListener listener) {
+<span class="fc" id="L387">        return ListenerRegistration.removeFromList(listener, disconnectedEventListeners);</span>
+    }
+
+    public boolean removeGetDataEventListener(GetDataEventListener listener) {
+<span class="fc" id="L391">        return ListenerRegistration.removeFromList(listener, getDataEventListeners);</span>
+    }
+
+    public boolean removeOnTransactionBroadcastListener(OnTransactionBroadcastListener listener) {
+<span class="fc" id="L395">        return ListenerRegistration.removeFromList(listener, onTransactionEventListeners);</span>
+    }
+
+    public boolean removePreMessageReceivedEventListener(PreMessageReceivedEventListener listener) {
+<span class="fc" id="L399">        return ListenerRegistration.removeFromList(listener, preMessageReceivedEventListeners);</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="fc" id="L404">        PeerAddress addr = getAddress();</span>
+        // if null, it's a user-provided NetworkConnection object
+<span class="pc bpc" id="L406" title="1 of 2 branches missed.">        return addr == null ? &quot;Peer()&quot; : addr.toString();</span>
+    }
+
+    @Override
+    protected void timeoutOccurred() {
+<span class="fc" id="L411">        super.timeoutOccurred();</span>
+<span class="pc bpc" id="L412" title="1 of 2 branches missed.">        if (!connectionOpenFuture.isDone()) {</span>
+<span class="nc" id="L413">            connectionClosed();  // Invoke the event handlers to tell listeners e.g. PeerGroup that we never managed to connect.</span>
+        }
+<span class="fc" id="L415">    }</span>
+
+    @Override
+    public void connectionClosed() {
+<span class="fc bfc" id="L419" title="All 2 branches covered.">        for (final ListenerRegistration&lt;PeerDisconnectedEventListener&gt; registration : disconnectedEventListeners) {</span>
+<span class="fc" id="L420">            registration.executor.execute(new Runnable() {</span>
+                @Override
+                public void run() {
+<span class="fc" id="L423">                    registration.listener.onPeerDisconnected(Peer.this, 0);</span>
+<span class="fc" id="L424">                }</span>
+            });
+<span class="fc" id="L426">        }</span>
+<span class="fc" id="L427">    }</span>
+
+    @Override
+    public void connectionOpened() {
+        // Announce ourselves. This has to come first to connect to clients beyond v0.3.20.2 which wait to hear
+        // from us until they send their version message back.
+<span class="fc" id="L433">        PeerAddress address = getAddress();</span>
+<span class="pc bpc" id="L434" title="1 of 2 branches missed.">        log.info(&quot;Announcing to {} as: {}&quot;, address == null ? &quot;Peer&quot; : address.toSocketAddress(), versionMessage.subVer);</span>
+<span class="fc" id="L435">        sendMessage(versionMessage);</span>
+<span class="fc" id="L436">        connectionOpenFuture.set(this);</span>
+        // When connecting, the remote peer sends us a version message with various bits of
+        // useful data in it. We need to know the peer protocol version before we can talk to it.
+<span class="fc" id="L439">    }</span>
+
+    /**
+     * Provides a ListenableFuture that can be used to wait for the socket to connect.  A socket connection does not
+     * mean that protocol handshake has occurred.
+     */
+    public ListenableFuture&lt;Peer&gt; getConnectionOpenFuture() {
+<span class="fc" id="L446">        return connectionOpenFuture;</span>
+    }
+
+    public ListenableFuture&lt;Peer&gt; getVersionHandshakeFuture() {
+<span class="fc" id="L450">        return versionHandshakeFuture;</span>
+    }
+
+    @Override
+    protected void processMessage(Message m) throws Exception {
+        // Allow event listeners to filter the message stream. Listeners are allowed to drop messages by
+        // returning null.
+<span class="fc bfc" id="L457" title="All 2 branches covered.">        for (ListenerRegistration&lt;PreMessageReceivedEventListener&gt; registration : preMessageReceivedEventListeners) {</span>
+            // Skip any listeners that are supposed to run in another thread as we don't want to block waiting
+            // for it, which might cause circular deadlock.
+<span class="fc bfc" id="L460" title="All 2 branches covered.">            if (registration.executor == Threading.SAME_THREAD) {</span>
+<span class="fc" id="L461">                m = registration.listener.onPreMessageReceived(this, m);</span>
+<span class="fc bfc" id="L462" title="All 2 branches covered.">                if (m == null) break;</span>
+            }
+<span class="fc" id="L464">        }</span>
+<span class="fc bfc" id="L465" title="All 2 branches covered.">        if (m == null) return;</span>
+
+        // If we are in the middle of receiving transactions as part of a filtered block push from the remote node,
+        // and we receive something that's not a transaction, then we're done.
+<span class="fc bfc" id="L469" title="All 4 branches covered.">        if (currentFilteredBlock != null &amp;&amp; !(m instanceof Transaction)) {</span>
+<span class="fc" id="L470">            endFilteredBlock(currentFilteredBlock);</span>
+<span class="fc" id="L471">            currentFilteredBlock = null;</span>
+        }
+
+        // No further communication is possible until version handshake is complete.
+<span class="fc bfc" id="L475" title="All 4 branches covered.">        if (!(m instanceof VersionMessage || m instanceof VersionAck</span>
+<span class="pc bpc" id="L476" title="2 of 4 branches missed.">                || (versionHandshakeFuture.isDone() &amp;&amp; !versionHandshakeFuture.isCancelled())))</span>
+<span class="nc" id="L477">            throw new ProtocolException(</span>
+<span class="nc" id="L478">                    &quot;Received &quot; + m.getClass().getSimpleName() + &quot; before version handshake is complete.&quot;);</span>
+
+<span class="fc bfc" id="L480" title="All 2 branches covered.">        if (m instanceof Ping) {</span>
+<span class="fc" id="L481">            processPing((Ping) m);</span>
+<span class="fc bfc" id="L482" title="All 2 branches covered.">        } else if (m instanceof Pong) {</span>
+<span class="fc" id="L483">            processPong((Pong) m);</span>
+<span class="fc bfc" id="L484" title="All 2 branches covered.">        } else if (m instanceof NotFoundMessage) {</span>
+            // This is sent to us when we did a getdata on some transactions that aren't in the peers memory pool.
+            // Because NotFoundMessage is a subclass of InventoryMessage, the test for it must come before the next.
+<span class="fc" id="L487">            processNotFoundMessage((NotFoundMessage) m);</span>
+<span class="fc bfc" id="L488" title="All 2 branches covered.">        } else if (m instanceof InventoryMessage) {</span>
+<span class="fc" id="L489">            processInv((InventoryMessage) m);</span>
+<span class="fc bfc" id="L490" title="All 2 branches covered.">        } else if (m instanceof Block) {</span>
+<span class="fc" id="L491">            processBlock((Block) m);</span>
+<span class="fc bfc" id="L492" title="All 2 branches covered.">        } else if (m instanceof FilteredBlock) {</span>
+<span class="fc" id="L493">            startFilteredBlock((FilteredBlock) m);</span>
+<span class="fc bfc" id="L494" title="All 2 branches covered.">        } else if (m instanceof Transaction) {</span>
+<span class="fc" id="L495">            processTransaction((Transaction) m);</span>
+<span class="pc bpc" id="L496" title="1 of 2 branches missed.">        } else if (m instanceof GetDataMessage) {</span>
+<span class="nc" id="L497">            processGetData((GetDataMessage) m);</span>
+<span class="pc bpc" id="L498" title="1 of 2 branches missed.">        } else if (m instanceof AddressMessage) {</span>
+            // We don't care about addresses of the network right now. But in future,
+            // we should save them in the wallet so we don't put too much load on the seed nodes and can
+            // properly explore the network.
+<span class="nc" id="L502">            processAddressMessage((AddressMessage) m);</span>
+<span class="fc bfc" id="L503" title="All 2 branches covered.">        } else if (m instanceof HeadersMessage) {</span>
+<span class="fc" id="L504">            processHeaders((HeadersMessage) m);</span>
+<span class="pc bpc" id="L505" title="1 of 2 branches missed.">        } else if (m instanceof AlertMessage) {</span>
+<span class="nc" id="L506">            processAlert((AlertMessage) m);</span>
+<span class="fc bfc" id="L507" title="All 2 branches covered.">        } else if (m instanceof VersionMessage) {</span>
+<span class="fc" id="L508">            processVersionMessage((VersionMessage) m);</span>
+<span class="fc bfc" id="L509" title="All 2 branches covered.">        } else if (m instanceof VersionAck) {</span>
+<span class="fc" id="L510">            processVersionAck((VersionAck) m);</span>
+<span class="fc bfc" id="L511" title="All 2 branches covered.">        } else if (m instanceof UTXOsMessage) {</span>
+<span class="fc" id="L512">            processUTXOMessage((UTXOsMessage) m);</span>
+<span class="pc bpc" id="L513" title="1 of 2 branches missed.">        } else if (m instanceof RejectMessage) {</span>
+<span class="fc" id="L514">            log.error(&quot;{} {}: Received {}&quot;, this, getPeerVersionMessage().subVer, m);</span>
+        } else {
+<span class="nc" id="L516">            log.warn(&quot;{}: Received unhandled message: {}&quot;, this, m);</span>
+        }
+<span class="fc" id="L518">    }</span>
+
+    protected void processUTXOMessage(UTXOsMessage m) {
+<span class="fc" id="L521">        SettableFuture&lt;UTXOsMessage&gt; future = null;</span>
+<span class="fc" id="L522">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L524" title="1 of 2 branches missed.">            if (getutxoFutures != null)</span>
+<span class="fc" id="L525">                future = getutxoFutures.pollFirst();</span>
+        } finally {
+<span class="pc" id="L527">            lock.unlock();</span>
+<span class="fc" id="L528">        }</span>
+<span class="pc bpc" id="L529" title="1 of 2 branches missed.">        if (future != null)</span>
+<span class="fc" id="L530">            future.set(m);</span>
+<span class="fc" id="L531">    }</span>
+
+    private void processAddressMessage(AddressMessage m) {
+        SettableFuture&lt;AddressMessage&gt; future;
+<span class="nc" id="L535">        synchronized (getAddrFutures) {</span>
+<span class="nc" id="L536">            future = getAddrFutures.poll();</span>
+<span class="nc bnc" id="L537" title="All 2 branches missed.">            if (future == null)  // Not an addr message we are waiting for.</span>
+<span class="nc" id="L538">                return;</span>
+<span class="nc" id="L539">        }</span>
+<span class="nc" id="L540">        future.set(m);</span>
+<span class="nc" id="L541">    }</span>
+
+    private void processVersionMessage(VersionMessage m) throws ProtocolException {
+<span class="pc bpc" id="L544" title="1 of 2 branches missed.">        if (vPeerVersionMessage != null)</span>
+<span class="nc" id="L545">            throw new ProtocolException(&quot;Got two version messages from peer&quot;);</span>
+<span class="fc" id="L546">        vPeerVersionMessage = m;</span>
+        // Switch to the new protocol version.
+<span class="fc" id="L548">        long peerTime = vPeerVersionMessage.time * 1000;</span>
+<span class="fc" id="L549">        log.info(&quot;{}: Got version={}, subVer='{}', services=0x{}, time={}, blocks={}&quot;,</span>
+                this,
+<span class="fc" id="L551">                vPeerVersionMessage.clientVersion,</span>
+                vPeerVersionMessage.subVer,
+<span class="fc" id="L553">                vPeerVersionMessage.localServices,</span>
+<span class="fc" id="L554">                String.format(Locale.US, &quot;%tF %tT&quot;, peerTime, peerTime),</span>
+<span class="fc" id="L555">                vPeerVersionMessage.bestHeight);</span>
+        // bitcoinj is a client mode implementation. That means there's not much point in us talking to other client
+        // mode nodes because we can't download the data from them we need to find/verify transactions. Some bogus
+        // implementations claim to have a block chain in their services field but then report a height of zero, filter
+        // them out here.
+<span class="pc bpc" id="L560" title="1 of 2 branches missed.">        if (!vPeerVersionMessage.hasBlockChain() ||</span>
+<span class="pc bpc" id="L561" title="3 of 4 branches missed.">                (!params.allowEmptyPeerChain() &amp;&amp; vPeerVersionMessage.bestHeight == 0)) {</span>
+            // Shut down the channel gracefully.
+<span class="nc" id="L563">            log.info(&quot;{}: Peer does not have a copy of the block chain.&quot;, this);</span>
+<span class="nc" id="L564">            close();</span>
+<span class="nc" id="L565">            return;</span>
+        }
+<span class="pc bpc" id="L567" title="1 of 2 branches missed.">        if ((vPeerVersionMessage.localServices</span>
+                &amp; VersionMessage.NODE_BITCOIN_CASH) == VersionMessage.NODE_BITCOIN_CASH) {
+<span class="nc" id="L569">            log.info(&quot;{}: Peer follows an incompatible block chain.&quot;, this);</span>
+            // Shut down the channel gracefully.
+<span class="nc" id="L571">            close();</span>
+<span class="nc" id="L572">            return;</span>
+        }
+<span class="pc bpc" id="L574" title="1 of 2 branches missed.">        if (vPeerVersionMessage.bestHeight &lt; 0)</span>
+            // In this case, it's a protocol violation.
+<span class="nc" id="L576">            throw new ProtocolException(&quot;Peer reports invalid best height: &quot; + vPeerVersionMessage.bestHeight);</span>
+        // Now it's our turn ...
+        // Send an ACK message stating we accept the peers protocol version.
+<span class="fc" id="L579">        sendMessage(new VersionAck());</span>
+<span class="fc" id="L580">        log.debug(&quot;{}: Incoming version handshake complete.&quot;, this);</span>
+<span class="fc" id="L581">        incomingVersionHandshakeFuture.set(this);</span>
+<span class="fc" id="L582">    }</span>
+
+    private void processVersionAck(VersionAck m) throws ProtocolException {
+<span class="pc bpc" id="L585" title="1 of 2 branches missed.">        if (vPeerVersionMessage == null) {</span>
+<span class="nc" id="L586">            throw new ProtocolException(&quot;got a version ack before version&quot;);</span>
+        }
+<span class="pc bpc" id="L588" title="1 of 2 branches missed.">        if (outgoingVersionHandshakeFuture.isDone()) {</span>
+<span class="nc" id="L589">            throw new ProtocolException(&quot;got more than one version ack&quot;);</span>
+        }
+<span class="fc" id="L591">        log.debug(&quot;{}: Outgoing version handshake complete.&quot;, this);</span>
+<span class="fc" id="L592">        outgoingVersionHandshakeFuture.set(this);</span>
+<span class="fc" id="L593">    }</span>
+
+    private void versionHandshakeComplete() {
+<span class="fc" id="L596">        log.debug(&quot;{}: Handshake complete.&quot;, this);</span>
+<span class="fc" id="L597">        setTimeoutEnabled(false);</span>
+<span class="fc bfc" id="L598" title="All 2 branches covered.">        for (final ListenerRegistration&lt;PeerConnectedEventListener&gt; registration : connectedEventListeners) {</span>
+<span class="fc" id="L599">            registration.executor.execute(new Runnable() {</span>
+                @Override
+                public void run() {
+<span class="fc" id="L602">                    registration.listener.onPeerConnected(Peer.this, 1);</span>
+<span class="fc" id="L603">                }</span>
+            });
+<span class="fc" id="L605">        }</span>
+        // We check min version after onPeerConnected as channel.close() will
+        // call onPeerDisconnected, and we should probably call onPeerConnected first.
+<span class="fc" id="L608">        final int version = vMinProtocolVersion;</span>
+<span class="fc bfc" id="L609" title="All 2 branches covered.">        if (vPeerVersionMessage.clientVersion &lt; version) {</span>
+<span class="fc" id="L610">            log.warn(&quot;Connected to a peer speaking protocol version {} but need {}, closing&quot;,</span>
+<span class="fc" id="L611">                    vPeerVersionMessage.clientVersion, version);</span>
+<span class="fc" id="L612">            close();</span>
+        }
+<span class="fc" id="L614">    }</span>
+
+    protected void startFilteredBlock(FilteredBlock m) {
+        // Filtered blocks come before the data that they refer to, so stash it here and then fill it out as
+        // messages stream in. We'll call endFilteredBlock when a non-tx message arrives (eg, another
+        // FilteredBlock) or when a tx that isn't needed by that block is found. A ping message is sent after
+        // a getblocks, to force the non-tx message path.
+<span class="fc" id="L621">        currentFilteredBlock = m;</span>
+        // Potentially refresh the server side filter. Because the remote node adds hits back into the filter
+        // to save round-tripping back through us, the filter degrades over time as false positives get added,
+        // triggering yet more false positives. We refresh it every so often to get the FP rate back down.
+<span class="fc" id="L625">        filteredBlocksReceived++;</span>
+<span class="pc bpc" id="L626" title="1 of 2 branches missed.">        if (filteredBlocksReceived % RESEND_BLOOM_FILTER_BLOCK_COUNT == RESEND_BLOOM_FILTER_BLOCK_COUNT - 1) {</span>
+<span class="nc" id="L627">            sendMessage(vBloomFilter);</span>
+        }
+<span class="fc" id="L629">    }</span>
+
+    protected void processNotFoundMessage(NotFoundMessage m) {
+        // This is received when we previously did a getdata but the peer couldn't find what we requested in it's
+        // memory pool. Typically, because we are downloading dependencies of a relevant transaction and reached
+        // the bottom of the dependency tree (where the unconfirmed transactions connect to transactions that are
+        // in the chain).
+        //
+        // We go through and cancel the pending getdata futures for the items we were told weren't found.
+<span class="fc bfc" id="L638" title="All 2 branches covered.">        for (GetDataRequest req : getDataFutures) {</span>
+<span class="fc bfc" id="L639" title="All 2 branches covered.">            for (InventoryItem item : m.getItems()) {</span>
+<span class="fc bfc" id="L640" title="All 2 branches covered.">                if (item.hash.equals(req.hash)) {</span>
+<span class="fc" id="L641">                    log.info(&quot;{}: Bottomed out dep tree at {}&quot;, this, req.hash);</span>
+<span class="fc" id="L642">                    req.future.cancel(true);</span>
+<span class="fc" id="L643">                    getDataFutures.remove(req);</span>
+<span class="fc" id="L644">                    break;</span>
+                }
+<span class="fc" id="L646">            }</span>
+<span class="fc" id="L647">        }</span>
+<span class="fc" id="L648">    }</span>
+
+    protected void processAlert(AlertMessage m) {
+        try {
+<span class="nc bnc" id="L652" title="All 2 branches missed.">            if (m.isSignatureValid()) {</span>
+<span class="nc" id="L653">                log.debug(&quot;Received alert from peer {}: {}&quot;, this, m.getStatusBar());</span>
+            } else {
+<span class="nc" id="L655">                log.debug(&quot;Received alert with invalid signature from peer {}: {}&quot;, this, m.getStatusBar());</span>
+            }
+<span class="nc" id="L657">        } catch (Throwable t) {</span>
+            // Signature checking can FAIL on Android platforms before Gingerbread apparently due to bugs in their
+            // BigInteger implementations! See https://github.com/bitcoinj/bitcoinj/issues/526 for discussion. As
+            // alerts are just optional and not that useful, we just swallow the error here.
+<span class="nc" id="L661">            log.error(&quot;Failed to check signature: bug in platform libraries?&quot;, t);</span>
+<span class="nc" id="L662">        }</span>
+<span class="nc" id="L663">    }</span>
+
+    protected void processHeaders(HeadersMessage m) throws ProtocolException {
+        // Runs in network loop thread for this peer.
+        //
+        // This method can run if a peer just randomly sends us a &quot;headers&quot; message (should never happen), or more
+        // likely when we've requested them as part of chain download using fast catchup. We need to add each block to
+        // the chain if it pre-dates the fast catchup time. If we go past it, we can stop processing the headers and
+        // request the full blocks from that point on instead.
+        boolean downloadBlockBodies;
+        long fastCatchupTimeSecs;
+
+<span class="fc" id="L675">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L677" title="1 of 2 branches missed.">            if (blockChain == null) {</span>
+                // Can happen if we are receiving unrequested data, or due to programmer error.
+<span class="nc" id="L679">                log.warn(&quot;Received headers when Peer is not configured with a chain.&quot;);</span>
+<span class="nc" id="L680">                return;</span>
+            }
+<span class="fc" id="L682">            fastCatchupTimeSecs = this.fastCatchupTimeSecs;</span>
+<span class="fc" id="L683">            downloadBlockBodies = this.downloadBlockBodies;</span>
+        } finally {
+<span class="pc" id="L685">            lock.unlock();</span>
+<span class="fc" id="L686">        }</span>
+
+        try {
+<span class="pc bpc" id="L689" title="1 of 2 branches missed.">            checkState(!downloadBlockBodies, toString());</span>
+<span class="pc bpc" id="L690" title="1 of 2 branches missed.">            for (int i = 0; i &lt; m.getBlockHeaders().size(); i++) {</span>
+<span class="fc" id="L691">                Block header = m.getBlockHeaders().get(i);</span>
+                // Process headers until we pass the fast catchup time, or are about to catch up with the head
+                // of the chain - always process the last block as a full/filtered block to kick us out of the
+                // fast catchup mode (in which we ignore new blocks).
+<span class="fc bfc" id="L695" title="All 2 branches covered.">                boolean passedTime = header.getTimeSeconds() &gt;= fastCatchupTimeSecs;</span>
+<span class="pc bpc" id="L696" title="1 of 2 branches missed.">                boolean reachedTop = blockChain.getBestChainHeight() &gt;= vPeerVersionMessage.bestHeight;</span>
+<span class="pc bpc" id="L697" title="1 of 4 branches missed.">                if (!passedTime &amp;&amp; !reachedTop) {</span>
+<span class="pc bpc" id="L698" title="1 of 2 branches missed.">                    if (!vDownloadData) {</span>
+                        // Not download peer anymore, some other peer probably became better.
+<span class="nc" id="L700">                        log.info(&quot;Lost download peer status, throwing away downloaded headers.&quot;);</span>
+<span class="nc" id="L701">                        return;</span>
+                    }
+<span class="pc bpc" id="L703" title="1 of 2 branches missed.">                    if (blockChain.add(header)) {</span>
+                        // The block was successfully linked into the chain. Notify the user of our progress.
+<span class="fc" id="L705">                        invokeOnBlocksDownloaded(header, null);</span>
+                    } else {
+                        // This block is unconnected - we don't know how to get from it back to the genesis block yet.
+                        // That must mean that the peer is buggy or malicious because we specifically requested for
+                        // headers that are part of the best chain.
+<span class="nc" id="L710">                        throw new ProtocolException(&quot;Got unconnected header from peer: &quot; + header.getHashAsString());</span>
+                    }
+                } else {
+<span class="fc" id="L713">                    lock.lock();</span>
+                    try {
+<span class="fc" id="L715">                        log.info(</span>
+                                &quot;Passed the fast catchup time ({}) at height {}, discarding {} headers and requesting full blocks&quot;,
+<span class="fc" id="L717">                                Utils.dateTimeFormat(fastCatchupTimeSecs * 1000), blockChain.getBestChainHeight() + 1,</span>
+<span class="fc" id="L718">                                m.getBlockHeaders().size() - i);</span>
+<span class="fc" id="L719">                        this.downloadBlockBodies = true;</span>
+                        // Prevent this request being seen as a duplicate.
+<span class="fc" id="L721">                        this.lastGetBlocksBegin = Sha256Hash.ZERO_HASH;</span>
+<span class="fc" id="L722">                        blockChainDownloadLocked(Sha256Hash.ZERO_HASH);</span>
+                    } finally {
+<span class="pc" id="L724">                        lock.unlock();</span>
+<span class="fc" id="L725">                    }</span>
+<span class="fc" id="L726">                    return;</span>
+                }
+            }
+            // We added all headers in the message to the chain. Request some more if we got up to the limit, otherwise
+            // we are at the end of the chain.
+<span class="nc bnc" id="L731" title="All 2 branches missed.">            if (m.getBlockHeaders().size() &gt;= HeadersMessage.MAX_HEADERS) {</span>
+<span class="nc" id="L732">                lock.lock();</span>
+                try {
+<span class="nc" id="L734">                    blockChainDownloadLocked(Sha256Hash.ZERO_HASH);</span>
+                } finally {
+<span class="nc" id="L736">                    lock.unlock();</span>
+<span class="nc" id="L737">                }</span>
+            }
+<span class="nc" id="L739">        } catch (VerificationException e) {</span>
+<span class="nc" id="L740">            log.warn(&quot;Block header verification failed&quot;, e);</span>
+<span class="nc" id="L741">        } catch (PrunedException e) {</span>
+            // Unreachable when in SPV mode.
+<span class="nc" id="L743">            throw new RuntimeException(e);</span>
+<span class="nc" id="L744">        }</span>
+<span class="nc" id="L745">    }</span>
+
+    protected void processGetData(GetDataMessage getdata) {
+<span class="nc" id="L748">        log.info(&quot;{}: Received getdata message: {}&quot;, getAddress(), getdata.toString());</span>
+<span class="nc" id="L749">        ArrayList&lt;Message&gt; items = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L750" title="All 2 branches missed.">        for (ListenerRegistration&lt;GetDataEventListener&gt; registration : getDataEventListeners) {</span>
+<span class="nc bnc" id="L751" title="All 2 branches missed.">            if (registration.executor != Threading.SAME_THREAD) continue;</span>
+<span class="nc" id="L752">            List&lt;Message&gt; listenerItems = registration.listener.getData(this, getdata);</span>
+<span class="nc bnc" id="L753" title="All 2 branches missed.">            if (listenerItems == null) continue;</span>
+<span class="nc" id="L754">            items.addAll(listenerItems);</span>
+<span class="nc" id="L755">        }</span>
+<span class="nc bnc" id="L756" title="All 2 branches missed.">        if (items.isEmpty()) {</span>
+<span class="nc" id="L757">            return;</span>
+        }
+<span class="nc" id="L759">        log.info(&quot;{}: Sending {} items gathered from listeners to peer&quot;, getAddress(), items.size());</span>
+<span class="nc bnc" id="L760" title="All 2 branches missed.">        for (Message item : items) {</span>
+<span class="nc" id="L761">            sendMessage(item);</span>
+<span class="nc" id="L762">        }</span>
+<span class="nc" id="L763">    }</span>
+
+    protected void processTransaction(final Transaction tx) throws VerificationException {
+        // Check a few basic syntax issues to ensure the received TX isn't nonsense.
+<span class="fc" id="L767">        tx.verify();</span>
+<span class="fc" id="L768">        lock.lock();</span>
+        try {
+<span class="fc" id="L770">            log.debug(&quot;{}: Received tx {}&quot;, getAddress(), tx.getHashAsString());</span>
+            // Label the transaction as coming in from the P2P network (as opposed to being created by us, direct import,
+            // etc). This helps the wallet decide how to risk analyze it later.
+            //
+            // Additionally, by invoking tx.getConfidence(), this tx now pins the confidence data into the heap, meaning
+            // we can stop holding a reference to the confidence object ourselves. It's up to event listeners on the
+            // Peer to stash the tx object somewhere if they want to keep receiving updates about network propagation
+            // and so on.
+<span class="fc" id="L778">            TransactionConfidence confidence = tx.getConfidence();</span>
+<span class="fc" id="L779">            confidence.setSource(TransactionConfidence.Source.NETWORK);</span>
+<span class="fc" id="L780">            pendingTxDownloads.remove(confidence);</span>
+<span class="fc bfc" id="L781" title="All 2 branches covered.">            if (maybeHandleRequestedData(tx)) {</span>
+<span class="fc" id="L782">                return;</span>
+            }
+<span class="fc bfc" id="L784" title="All 2 branches covered.">            if (currentFilteredBlock != null) {</span>
+<span class="pc bpc" id="L785" title="1 of 2 branches missed.">                if (!currentFilteredBlock.provideTransaction(tx)) {</span>
+                    // Got a tx that didn't fit into the filtered block, so we must have received everything.
+<span class="nc" id="L787">                    endFilteredBlock(currentFilteredBlock);</span>
+<span class="nc" id="L788">                    currentFilteredBlock = null;</span>
+                }
+                // Don't tell wallets or listeners about this tx as they'll learn about it when the filtered block is
+                // fully downloaded instead.
+<span class="fc" id="L792">                return;</span>
+            }
+            // It's a broadcast transaction. Tell all wallets about this tx so they can check if it's relevant or not.
+<span class="fc bfc" id="L795" title="All 2 branches covered.">            for (final Wallet wallet : wallets) {</span>
+                try {
+<span class="fc bfc" id="L797" title="All 2 branches covered.">                    if (wallet.isPendingTransactionRelevant(tx)) {</span>
+<span class="fc bfc" id="L798" title="All 2 branches covered.">                        if (vDownloadTxDependencyDepth &gt; 0) {</span>
+                            // This transaction seems interesting to us, so let's download its dependencies. This has
+                            // several purposes: we can check that the sender isn't attacking us by engaging in protocol
+                            // abuse games, like depending on a time-locked transaction that will never confirm, or
+                            // building huge chains of unconfirmed transactions (again - so they don't confirm and the
+                            // money can be taken back with a Finney attack). Knowing the dependencies also lets us
+                            // store them in a serialized wallet so we always have enough data to re-announce to the
+                            // network and get the payment into the chain, in case the sender goes away and the network
+                            // starts to forget.
+                            //
+                            // TODO: Not all the above things are implemented.
+                            //
+                            // Note that downloading of dependencies can end up walking around 15 minutes back even
+                            // through transactions that have confirmed, as getdata on the remote peer also checks
+                            // relay memory not only the mempool. Unfortunately we have no way to know that here. In
+                            // practice it should not matter much.
+<span class="fc" id="L814">                            Futures.addCallback(downloadDependencies(tx), new FutureCallback&lt;List&lt;Transaction&gt;&gt;() {</span>
+                                @Override
+                                public void onSuccess(List&lt;Transaction&gt; dependencies) {
+                                    try {
+<span class="fc" id="L818">                                        log.info(&quot;{}: Dependency download complete!&quot;, getAddress());</span>
+<span class="fc" id="L819">                                        wallet.receivePending(tx, dependencies);</span>
+<span class="nc" id="L820">                                    } catch (VerificationException e) {</span>
+<span class="nc" id="L821">                                        log.error(&quot;{}: Wallet failed to process pending transaction {}&quot;, getAddress(), tx.getHash());</span>
+<span class="nc" id="L822">                                        log.error(&quot;Error was: &quot;, e);</span>
+                                        // Not much more we can do at this point.
+<span class="fc" id="L824">                                    }</span>
+<span class="fc" id="L825">                                }</span>
+
+                                @Override
+                                public void onFailure(Throwable throwable) {
+<span class="nc" id="L829">                                    log.error(&quot;Could not download dependencies of tx {}&quot;, tx.getHashAsString());</span>
+<span class="nc" id="L830">                                    log.error(&quot;Error was: &quot;, throwable);</span>
+                                    // Not much more we can do at this point.
+<span class="nc" id="L832">                                }</span>
+                            });
+                        } else {
+<span class="fc" id="L835">                            wallet.receivePending(tx, null);</span>
+                        }
+                    }
+<span class="nc" id="L838">                } catch (VerificationException e) {</span>
+<span class="nc" id="L839">                    log.error(&quot;Wallet failed to verify tx&quot;, e);</span>
+                    // Carry on, listeners may still want to know.
+<span class="fc" id="L841">                }</span>
+<span class="fc" id="L842">            }</span>
+        } finally {
+<span class="pc" id="L844">            lock.unlock();</span>
+<span class="fc" id="L845">        }</span>
+        // Tell all listeners about this tx so they can decide whether to keep it or not. If no listener keeps a
+        // reference around then the memory pool will forget about it after a while too because it uses weak references.
+<span class="fc bfc" id="L848" title="All 2 branches covered.">        for (final ListenerRegistration&lt;OnTransactionBroadcastListener&gt; registration : onTransactionEventListeners) {</span>
+<span class="fc" id="L849">            registration.executor.execute(new Runnable() {</span>
+                @Override
+                public void run() {
+<span class="fc" id="L852">                    registration.listener.onTransaction(Peer.this, tx);</span>
+<span class="fc" id="L853">                }</span>
+            });
+<span class="fc" id="L855">        }</span>
+<span class="fc" id="L856">    }</span>
+
+    /**
+     * &lt;p&gt;Returns a future that wraps a list of all transactions that the given transaction depends on, recursively.
+     * Only transactions in peers memory pools are included; the recursion stops at transactions that are in the
+     * current best chain. So it doesn't make much sense to provide a tx that was already in the best chain and
+     * a precondition checks this.&lt;/p&gt;
+     *
+     * &lt;p&gt;For example, if tx has 2 inputs that connect to transactions A and B, and transaction B is unconfirmed and
+     * has one input connecting to transaction C that is unconfirmed, and transaction C connects to transaction D
+     * that is in the chain, then this method will return either {B, C} or {C, B}. No ordering is guaranteed.&lt;/p&gt;
+     *
+     * &lt;p&gt;This method is useful for apps that want to learn about how long an unconfirmed transaction might take
+     * to confirm, by checking for unexpectedly time locked transactions, unusually deep dependency trees or fee-paying
+     * transactions that depend on unconfirmed free transactions.&lt;/p&gt;
+     *
+     * &lt;p&gt;Note that dependencies downloaded this way will not trigger the onTransaction method of event listeners.&lt;/p&gt;
+     */
+    public ListenableFuture&lt;List&lt;Transaction&gt;&gt; downloadDependencies(Transaction tx) {
+<span class="fc" id="L875">        TransactionConfidence.ConfidenceType txConfidence = tx.getConfidence().getConfidenceType();</span>
+<span class="pc bpc" id="L876" title="1 of 2 branches missed.">        Preconditions.checkArgument(txConfidence != TransactionConfidence.ConfidenceType.BUILDING);</span>
+<span class="fc" id="L877">        log.info(&quot;{}: Downloading dependencies of {}&quot;, getAddress(), tx.getHashAsString());</span>
+<span class="fc" id="L878">        final LinkedList&lt;Transaction&gt; results = new LinkedList&lt;&gt;();</span>
+        // future will be invoked when the entire dependency tree has been walked and the results compiled.
+<span class="fc" id="L880">        final ListenableFuture&lt;Object&gt; future = downloadDependenciesInternal(vDownloadTxDependencyDepth, 0, tx,</span>
+                new Object(), results);
+<span class="fc" id="L882">        final SettableFuture&lt;List&lt;Transaction&gt;&gt; resultFuture = SettableFuture.create();</span>
+<span class="fc" id="L883">        Futures.addCallback(future, new FutureCallback&lt;Object&gt;() {</span>
+            @Override
+            public void onSuccess(Object ignored) {
+<span class="fc" id="L886">                resultFuture.set(results);</span>
+<span class="fc" id="L887">            }</span>
+
+            @Override
+            public void onFailure(Throwable throwable) {
+<span class="nc" id="L891">                resultFuture.setException(throwable);</span>
+<span class="nc" id="L892">            }</span>
+        });
+<span class="fc" id="L894">        return resultFuture;</span>
+    }
+
+    // The marker object in the future returned is the same as the parameter. It is arbitrary and can be anything.
+    protected ListenableFuture&lt;Object&gt; downloadDependenciesInternal(final int maxDepth, final int depth,
+            final Transaction tx, final Object marker, final List&lt;Transaction&gt; results) {
+
+<span class="fc" id="L901">        final SettableFuture&lt;Object&gt; resultFuture = SettableFuture.create();</span>
+<span class="fc" id="L902">        final Sha256Hash rootTxHash = tx.getHash();</span>
+        // We want to recursively grab its dependencies. This is so listeners can learn important information like
+        // whether a transaction is dependent on a timelocked transaction or has an unexpectedly deep dependency tree
+        // or depends on a no-fee transaction.
+
+        // We may end up requesting transactions that we've already downloaded and thrown away here.
+<span class="fc" id="L908">        Set&lt;Sha256Hash&gt; needToRequest = new CopyOnWriteArraySet&lt;&gt;();</span>
+<span class="fc bfc" id="L909" title="All 2 branches covered.">        for (TransactionInput input : tx.getInputs()) {</span>
+            // There may be multiple inputs that connect to the same transaction.
+<span class="fc" id="L911">            needToRequest.add(input.getOutpoint().getHash());</span>
+<span class="fc" id="L912">        }</span>
+<span class="fc" id="L913">        lock.lock();</span>
+        try {
+            // Build the request for the missing dependencies.
+<span class="fc" id="L916">            List&lt;ListenableFuture&lt;Transaction&gt;&gt; futures = Lists.newArrayList();</span>
+<span class="fc" id="L917">            GetDataMessage getdata = new GetDataMessage(params);</span>
+<span class="fc bfc" id="L918" title="All 2 branches covered.">            if (needToRequest.size() &gt; 1)</span>
+<span class="fc" id="L919">                log.info(&quot;{}: Requesting {} transactions for depth {} dep resolution&quot;, getAddress(), needToRequest.size(), depth + 1);</span>
+<span class="fc bfc" id="L920" title="All 2 branches covered.">            for (Sha256Hash hash : needToRequest) {</span>
+<span class="fc" id="L921">                getdata.addTransaction(hash);</span>
+<span class="fc" id="L922">                GetDataRequest req = new GetDataRequest(hash, SettableFuture.create());</span>
+<span class="fc" id="L923">                futures.add(req.future);</span>
+<span class="fc" id="L924">                getDataFutures.add(req);</span>
+<span class="fc" id="L925">            }</span>
+<span class="fc" id="L926">            ListenableFuture&lt;List&lt;Transaction&gt;&gt; successful = Futures.successfulAsList(futures);</span>
+<span class="fc" id="L927">            Futures.addCallback(successful, new FutureCallback&lt;List&lt;Transaction&gt;&gt;() {</span>
+                @Override
+                public void onSuccess(List&lt;Transaction&gt; transactions) {
+                    // Once all transactions either were received, or we know there are no more to come ...
+                    // Note that transactions will contain &quot;null&quot; for any positions that weren't successful.
+<span class="fc" id="L932">                    List&lt;ListenableFuture&lt;Object&gt;&gt; childFutures = Lists.newLinkedList();</span>
+<span class="fc bfc" id="L933" title="All 2 branches covered.">                    for (Transaction tx : transactions) {</span>
+<span class="fc bfc" id="L934" title="All 2 branches covered.">                        if (tx == null) continue;</span>
+<span class="fc" id="L935">                        log.info(&quot;{}: Downloaded dependency of {}: {}&quot;, getAddress(), rootTxHash, tx.getHashAsString());</span>
+<span class="fc" id="L936">                        results.add(tx);</span>
+                        // Now recurse into the dependencies of this transaction too.
+<span class="fc bfc" id="L938" title="All 2 branches covered.">                        if (depth + 1 &lt; maxDepth)</span>
+<span class="fc" id="L939">                            childFutures.add(downloadDependenciesInternal(maxDepth, depth + 1, tx, marker, results));</span>
+<span class="fc" id="L940">                    }</span>
+<span class="fc bfc" id="L941" title="All 2 branches covered.">                    if (childFutures.size() == 0) {</span>
+                        // Short-circuit: we're at the bottom of this part of the tree.
+<span class="fc" id="L943">                        resultFuture.set(marker);</span>
+                    } else {
+                        // There are some children to download. Wait until it's done (and their children and their
+                        // children...) to inform the caller that we're finished.
+<span class="fc" id="L947">                        Futures.addCallback(Futures.successfulAsList(childFutures), new FutureCallback&lt;List&lt;Object&gt;&gt;() {</span>
+                            @Override
+                            public void onSuccess(List&lt;Object&gt; objects) {
+<span class="fc" id="L950">                                resultFuture.set(marker);</span>
+<span class="fc" id="L951">                            }</span>
+
+                            @Override
+                            public void onFailure(Throwable throwable) {
+<span class="nc" id="L955">                                resultFuture.setException(throwable);</span>
+<span class="nc" id="L956">                            }</span>
+                        });
+                    }
+<span class="fc" id="L959">                }</span>
+
+                @Override
+                public void onFailure(Throwable throwable) {
+<span class="nc" id="L963">                    resultFuture.setException(throwable);</span>
+<span class="nc" id="L964">                }</span>
+            });
+            // Start the operation.
+<span class="fc" id="L967">            sendMessage(getdata);</span>
+<span class="nc" id="L968">        } catch (Exception e) {</span>
+<span class="nc" id="L969">            log.error(&quot;{}: Couldn't send getdata in downloadDependencies({})&quot;, this, tx.getHash(), e);</span>
+<span class="nc" id="L970">            resultFuture.setException(e);</span>
+<span class="nc" id="L971">            return resultFuture;</span>
+        } finally {
+<span class="pc" id="L973">            lock.unlock();</span>
+<span class="fc" id="L974">        }</span>
+<span class="fc" id="L975">        return resultFuture;</span>
+    }
+
+    protected void processBlock(Block m) {
+<span class="pc bpc" id="L979" title="1 of 2 branches missed.">        if (log.isDebugEnabled()) {</span>
+<span class="nc" id="L980">            log.debug(&quot;{}: Received broadcast block {}&quot;, getAddress(), m.getHashAsString());</span>
+        }
+        // Was this block requested by getBlock()?
+<span class="fc bfc" id="L983" title="All 2 branches covered.">        if (maybeHandleRequestedData(m)) return;</span>
+<span class="pc bpc" id="L984" title="1 of 2 branches missed.">        if (blockChain == null) {</span>
+<span class="nc" id="L985">            log.debug(&quot;Received block but was not configured with an AbstractBlockChain&quot;);</span>
+<span class="nc" id="L986">            return;</span>
+        }
+        // Did we lose download peer status after requesting block data?
+<span class="pc bpc" id="L989" title="1 of 2 branches missed.">        if (!vDownloadData) {</span>
+<span class="nc" id="L990">            log.debug(&quot;{}: Received block we did not ask for: {}&quot;, getAddress(), m.getHashAsString());</span>
+<span class="nc" id="L991">            return;</span>
+        }
+<span class="fc" id="L993">        pendingBlockDownloads.remove(m.getHash());</span>
+        try {
+            // Otherwise it's a block sent to us because the peer thought we needed it, so add it to the block chain.
+<span class="fc bfc" id="L996" title="All 2 branches covered.">            if (blockChain.add(m)) {</span>
+                // The block was successfully linked into the chain. Notify the user of our progress.
+<span class="fc" id="L998">                invokeOnBlocksDownloaded(m, null);</span>
+            } else {
+                // This block is an orphan - we don't know how to get from it back to the genesis block yet. That
+                // must mean that there are blocks we are missing, so do another getblocks with a new block locator
+                // to ask the peer to send them to us. This can happen during the initial block chain download where
+                // the peer will only send us 500 at a time and then sends us the head block expecting us to request
+                // the others.
+                //
+                // We must do two things here:
+                // (1) Request from current top of chain to the oldest ancestor of the received block in the orphan set
+                // (2) Filter out duplicate getblock requests (done in blockChainDownloadLocked).
+                //
+                // The reason for (1) is that otherwise if new blocks were solved during the middle of chain download
+                // we'd do a blockChainDownloadLocked() on the new best chain head, which would cause us to try and grab the
+                // chain twice (or more!) on the same connection! The block chain would filter out the duplicates but
+                // only at a huge speed penalty. By finding the orphan root we ensure every getblocks looks the same
+                // no matter how many blocks are solved, and therefore that the (2) duplicate filtering can work.
+                //
+                // We only do this if we are not currently downloading headers. If we are then we don't want to kick
+                // off a request for lots more headers in parallel.
+<span class="fc" id="L1018">                lock.lock();</span>
+                try {
+<span class="pc bpc" id="L1020" title="1 of 2 branches missed.">                    if (downloadBlockBodies) {</span>
+<span class="fc" id="L1021">                        final Block orphanRoot = checkNotNull(blockChain.getOrphanRoot(m.getHash()));</span>
+<span class="fc" id="L1022">                        blockChainDownloadLocked(orphanRoot.getHash());</span>
+<span class="fc" id="L1023">                    } else {</span>
+<span class="nc" id="L1024">                        log.info(&quot;Did not start chain download on solved block due to in-flight header download.&quot;);</span>
+                    }
+                } finally {
+<span class="pc" id="L1027">                    lock.unlock();</span>
+<span class="fc" id="L1028">                }</span>
+            }
+<span class="nc" id="L1030">        } catch (VerificationException e) {</span>
+            // We don't want verification failures to kill the thread.
+<span class="nc" id="L1032">            log.warn(&quot;{}: Block verification failed&quot;, getAddress(), e);</span>
+<span class="nc" id="L1033">        } catch (PrunedException e) {</span>
+            // Unreachable when in SPV mode.
+<span class="nc" id="L1035">            throw new RuntimeException(e);</span>
+<span class="pc" id="L1036">        }</span>
+<span class="fc" id="L1037">    }</span>
+
+    // TODO: Fix this duplication.
+    protected void endFilteredBlock(FilteredBlock m) {
+<span class="pc bpc" id="L1041" title="1 of 2 branches missed.">        if (log.isDebugEnabled())</span>
+<span class="nc" id="L1042">            log.debug(&quot;{}: Received broadcast filtered block {}&quot;, getAddress(), m.getHash().toString());</span>
+<span class="pc bpc" id="L1043" title="1 of 2 branches missed.">        if (!vDownloadData) {</span>
+<span class="nc" id="L1044">            log.debug(&quot;{}: Received block we did not ask for: {}&quot;, getAddress(), m.getHash().toString());</span>
+<span class="nc" id="L1045">            return;</span>
+        }
+<span class="pc bpc" id="L1047" title="1 of 2 branches missed.">        if (blockChain == null) {</span>
+<span class="nc" id="L1048">            log.debug(&quot;Received filtered block but was not configured with an AbstractBlockChain&quot;);</span>
+<span class="nc" id="L1049">            return;</span>
+        }
+        // Note that we currently do nothing about peers which maliciously do not include transactions which
+        // actually match our filter or which simply do not send us all the transactions we need: it can be fixed
+        // by cross-checking peers against each other.
+<span class="fc" id="L1054">        pendingBlockDownloads.remove(m.getBlockHeader().getHash());</span>
+        try {
+            // It's a block sent to us because the peer thought we needed it, so maybe add it to the block chain.
+            // The FilteredBlock m here contains a list of hashes, and may contain Transaction objects for a subset
+            // of the hashes (those that were sent to us by the remote peer). Any hashes that haven't had a tx
+            // provided in processTransaction are ones that were announced to us previously via an 'inv' so the
+            // assumption is we have already downloaded them and either put them in the wallet, or threw them away
+            // for being false positives.
+            //
+            // TODO: Fix the following protocol race.
+            // It is possible for this code to go wrong such that we miss a confirmation. If the remote peer announces
+            // a relevant transaction via an 'inv' and then it immediately announces the block that confirms
+            // the tx before we had a chance to download it+its dependencies and provide them to the wallet, then we
+            // will add the block to the chain here without the tx being in the wallet and thus it will miss its
+            // confirmation and become stuck forever. The fix is to notice that there's a pending getdata for a tx
+            // that appeared in this block and delay processing until it arrived ... it's complicated by the fact that
+            // the data may be requested by a different peer to this one.
+
+            // Ask each wallet attached to the peer/blockchain if this block exhausts the list of data items
+            // (keys/addresses) that were used to calculate the previous filter. If so, then it's possible this block
+            // is only partial. Check for discarding first so we don't check for exhaustion on blocks we already know
+            // we're going to discard, otherwise redundant filters might end up being queued and calculated.
+<span class="fc" id="L1076">            lock.lock();</span>
+            try {
+<span class="fc bfc" id="L1078" title="All 2 branches covered.">                if (awaitingFreshFilter != null) {</span>
+<span class="fc" id="L1079">                    log.info(&quot;Discarding block {} because we're still waiting for a fresh filter&quot;, m.getHash());</span>
+                    // We must record the hashes of blocks we discard because you cannot do getblocks twice on the same
+                    // range of blocks and get an inv both times, due to the codepath in Bitcoin Core hitting
+                    // CPeer::PushInventory() which checks CPeer::setInventoryKnown and thus deduplicates.
+<span class="fc" id="L1083">                    awaitingFreshFilter.add(m.getHash());</span>
+<span class="fc" id="L1084">                    return;   // Chain download process is restarted via a call to setBloomFilter.</span>
+<span class="fc bfc" id="L1085" title="All 2 branches covered.">                } else if (checkForFilterExhaustion(m)) {</span>
+                    // Yes, so we must abandon the attempt to process this block and any further blocks we receive,
+                    // then wait for the Bloom filter to be recalculated, sent to this peer and for the peer to acknowledge
+                    // that the new filter is now in use (which we have to simulate with a ping/pong), and then we can
+                    // safely restart the chain download with the new filter that contains a new set of lookahead keys.
+<span class="fc" id="L1090">                    log.info(&quot;Bloom filter exhausted whilst processing block {}, discarding&quot;, m.getHash());</span>
+<span class="fc" id="L1091">                    awaitingFreshFilter = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L1092">                    awaitingFreshFilter.add(m.getHash());</span>
+<span class="fc" id="L1093">                    awaitingFreshFilter.addAll(blockChain.drainOrphanBlocks());</span>
+<span class="fc" id="L1094">                    return;   // Chain download process is restarted via a call to setBloomFilter.</span>
+                }
+            } finally {
+<span class="pc" id="L1097">                lock.unlock();</span>
+<span class="fc" id="L1098">            }</span>
+
+<span class="pc bpc" id="L1100" title="1 of 2 branches missed.">            if (blockChain.add(m)) {</span>
+                // The block was successfully linked into the chain. Notify the user of our progress.
+<span class="fc" id="L1102">                invokeOnBlocksDownloaded(m.getBlockHeader(), m);</span>
+            } else {
+                // This block is an orphan - we don't know how to get from it back to the genesis block yet. That
+                // must mean that there are blocks we are missing, so do another getblocks with a new block locator
+                // to ask the peer to send them to us. This can happen during the initial block chain download where
+                // the peer will only send us 500 at a time and then sends us the head block expecting us to request
+                // the others.
+                //
+                // We must do two things here:
+                // (1) Request from current top of chain to the oldest ancestor of the received block in the orphan set
+                // (2) Filter out duplicate getblock requests (done in blockChainDownloadLocked).
+                //
+                // The reason for (1) is that otherwise if new blocks were solved during the middle of chain download
+                // we'd do a blockChainDownloadLocked() on the new best chain head, which would cause us to try and grab the
+                // chain twice (or more!) on the same connection! The block chain would filter out the duplicates but
+                // only at a huge speed penalty. By finding the orphan root we ensure every getblocks looks the same
+                // no matter how many blocks are solved, and therefore that the (2) duplicate filtering can work.
+<span class="nc" id="L1119">                lock.lock();</span>
+                try {
+<span class="nc" id="L1121">                    final Block orphanRoot = checkNotNull(blockChain.getOrphanRoot(m.getHash()));</span>
+<span class="nc" id="L1122">                    blockChainDownloadLocked(orphanRoot.getHash());</span>
+                } finally {
+<span class="nc" id="L1124">                    lock.unlock();</span>
+<span class="nc" id="L1125">                }</span>
+            }
+<span class="nc" id="L1127">        } catch (VerificationException e) {</span>
+            // We don't want verification failures to kill the thread.
+<span class="nc" id="L1129">            log.warn(&quot;{}: FilteredBlock verification failed&quot;, getAddress(), e);</span>
+<span class="nc" id="L1130">        } catch (PrunedException e) {</span>
+            // We pruned away some of the data we need to properly handle this block. We need to request the needed
+            // data from the remote peer and fix things. Or just give up.
+            // TODO: Request e.getHash() and submit it to the block store before any other blocks
+<span class="nc" id="L1134">            throw new RuntimeException(e);</span>
+<span class="pc" id="L1135">        }</span>
+<span class="fc" id="L1136">    }</span>
+
+    private boolean checkForFilterExhaustion(FilteredBlock m) {
+<span class="fc" id="L1139">        boolean exhausted = false;</span>
+<span class="fc bfc" id="L1140" title="All 2 branches covered.">        for (Wallet wallet : wallets) {</span>
+<span class="fc" id="L1141">            exhausted |= wallet.checkForFilterExhaustion(m);</span>
+<span class="fc" id="L1142">        }</span>
+<span class="fc" id="L1143">        return exhausted;</span>
+    }
+
+    private boolean maybeHandleRequestedData(Message m) {
+<span class="fc" id="L1147">        boolean found = false;</span>
+<span class="fc" id="L1148">        Sha256Hash hash = m.getHash();</span>
+<span class="fc bfc" id="L1149" title="All 2 branches covered.">        for (GetDataRequest req : getDataFutures) {</span>
+<span class="fc bfc" id="L1150" title="All 2 branches covered.">            if (hash.equals(req.hash)) {</span>
+<span class="fc" id="L1151">                req.future.set(m);</span>
+<span class="fc" id="L1152">                getDataFutures.remove(req);</span>
+<span class="fc" id="L1153">                found = true;</span>
+                // Keep going in case there are more.
+            }
+<span class="fc" id="L1156">        }</span>
+<span class="fc" id="L1157">        return found;</span>
+    }
+
+    private void invokeOnBlocksDownloaded(final Block block, @Nullable final FilteredBlock fb) {
+        // It is possible for the peer block height difference to be negative when blocks have been solved and broadcast
+        // since the time we first connected to the peer. However, it's weird and unexpected to receive a callback
+        // with negative &quot;blocks left&quot; in this case, so we clamp to zero so the API user doesn't have to think about it.
+<span class="fc" id="L1164">        final int blocksLeft = Math.max(0, (int) vPeerVersionMessage.bestHeight - checkNotNull(blockChain).getBestChainHeight());</span>
+<span class="fc bfc" id="L1165" title="All 2 branches covered.">        for (final ListenerRegistration&lt;BlocksDownloadedEventListener&gt; registration : blocksDownloadedEventListeners) {</span>
+<span class="fc" id="L1166">            registration.executor.execute(new Runnable() {</span>
+                @Override
+                public void run() {
+<span class="fc" id="L1169">                    registration.listener.onBlocksDownloaded(Peer.this, block, fb, blocksLeft);</span>
+<span class="fc" id="L1170">                }</span>
+            });
+<span class="fc" id="L1172">        }</span>
+<span class="fc" id="L1173">    }</span>
+
+    protected void processInv(InventoryMessage inv) {
+<span class="fc" id="L1176">        List&lt;InventoryItem&gt; items = inv.getItems();</span>
+
+        // Separate out the blocks and transactions, we'll handle them differently
+<span class="fc" id="L1179">        List&lt;InventoryItem&gt; transactions = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L1180">        List&lt;InventoryItem&gt; blocks = new LinkedList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L1182" title="All 2 branches covered.">        for (InventoryItem item : items) {</span>
+<span class="pc bpc" id="L1183" title="1 of 3 branches missed.">            switch (item.type) {</span>
+                case Transaction:
+<span class="fc" id="L1185">                    transactions.add(item);</span>
+<span class="fc" id="L1186">                    break;</span>
+                case Block:
+<span class="fc" id="L1188">                    blocks.add(item);</span>
+<span class="fc" id="L1189">                    break;</span>
+                default:
+<span class="nc" id="L1191">                    throw new IllegalStateException(&quot;Not implemented: &quot; + item.type);</span>
+            }
+<span class="fc" id="L1193">        }</span>
+
+<span class="fc" id="L1195">        final boolean downloadData = this.vDownloadData;</span>
+
+<span class="fc bfc" id="L1197" title="All 4 branches covered.">        if (transactions.size() == 0 &amp;&amp; blocks.size() == 1) {</span>
+            // Single block announcement. If we're downloading the chain this is just a tickle to make us continue
+            // (the block chain download protocol is very implicit and not well thought out). If we're not downloading
+            // the chain then this probably means a new block was solved and the peer believes it connects to the best
+            // chain, so count it. This way getBestChainHeight() can be accurate.
+<span class="pc bpc" id="L1202" title="1 of 4 branches missed.">            if (downloadData &amp;&amp; blockChain != null) {</span>
+<span class="fc bfc" id="L1203" title="All 2 branches covered.">                if (!blockChain.isOrphan(blocks.get(0).hash)) {</span>
+<span class="fc" id="L1204">                    blocksAnnounced.incrementAndGet();</span>
+                }
+            } else {
+<span class="fc" id="L1207">                blocksAnnounced.incrementAndGet();</span>
+            }
+        }
+
+<span class="fc" id="L1211">        GetDataMessage getdata = new GetDataMessage(params);</span>
+
+<span class="fc" id="L1213">        Iterator&lt;InventoryItem&gt; it = transactions.iterator();</span>
+<span class="fc bfc" id="L1214" title="All 2 branches covered.">        while (it.hasNext()) {</span>
+<span class="fc" id="L1215">            InventoryItem item = it.next();</span>
+            // Only download the transaction if we are the first peer that saw it be advertised. Other peers will also
+            // see it be advertised in inv packets asynchronously, they co-ordinate via the memory pool. We could
+            // potentially download transactions faster by always asking every peer for a tx when advertised, as remote
+            // peers run at different speeds. However to conserve bandwidth on mobile devices we try to only download a
+            // transaction once. This means we can miss broadcasts if the peer disconnects between sending us an inv and
+            // sending us the transaction: currently we'll never try to re-fetch after a timeout.
+            //
+            // The line below can trigger confidence listeners.
+<span class="fc" id="L1224">            TransactionConfidence conf = context.getConfidenceTable().seen(item.hash, this.getAddress());</span>
+<span class="fc bfc" id="L1225" title="All 2 branches covered.">            if (conf.numBroadcastPeers() &gt; 1) {</span>
+                // Some other peer already announced this so don't download.
+<span class="fc" id="L1227">                it.remove();</span>
+<span class="fc bfc" id="L1228" title="All 2 branches covered.">            } else if (conf.getSource().equals(TransactionConfidence.Source.SELF)) {</span>
+                // We created this transaction ourselves, so don't download.
+<span class="fc" id="L1230">                it.remove();</span>
+            } else {
+<span class="fc" id="L1232">                log.debug(&quot;{}: getdata on tx {}&quot;, getAddress(), item.hash);</span>
+<span class="fc" id="L1233">                getdata.addItem(item);</span>
+                // Register with the garbage collector that we care about the confidence data for a while.
+<span class="fc" id="L1235">                pendingTxDownloads.add(conf);</span>
+            }
+<span class="fc" id="L1237">        }</span>
+
+        // If we are requesting filteredblocks we have to send a ping after the getdata so that we have a clear
+        // end to the final FilteredBlock's transactions (in the form of a pong) sent to us
+<span class="fc" id="L1241">        boolean pingAfterGetData = false;</span>
+
+<span class="fc" id="L1243">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L1245" title="1 of 6 branches missed.">            if (blocks.size() &gt; 0 &amp;&amp; downloadData &amp;&amp; blockChain != null) {</span>
+                // Ideally, we'd only ask for the data here if we actually needed it. However that can imply a lot of
+                // disk IO to figure out what we've got. Normally peers will not send us inv for things we already have
+                // so we just re-request it here, and if we get duplicates the block chain / wallet will filter them out.
+<span class="fc bfc" id="L1249" title="All 2 branches covered.">                for (InventoryItem item : blocks) {</span>
+<span class="pc bpc" id="L1250" title="1 of 4 branches missed.">                    if (blockChain.isOrphan(item.hash) &amp;&amp; downloadBlockBodies) {</span>
+                        // If an orphan was re-advertised, ask for more blocks unless we are not currently downloading
+                        // full block data because we have a getheaders outstanding.
+<span class="fc" id="L1253">                        final Block orphanRoot = checkNotNull(blockChain.getOrphanRoot(item.hash));</span>
+<span class="fc" id="L1254">                        blockChainDownloadLocked(orphanRoot.getHash());</span>
+<span class="fc" id="L1255">                    } else {</span>
+                        // Don't re-request blocks we already requested. Normally this should not happen. However there is
+                        // an edge case: if a block is solved and we complete the inv&lt;-&gt;getdata&lt;-&gt;block&lt;-&gt;getblocks cycle
+                        // whilst other parts of the chain are streaming in, then the new getblocks request won't match the
+                        // previous one: whilst the stopHash is the same (because we use the orphan root), the start hash
+                        // will be different and so the getblocks req won't be dropped as a duplicate. We'll end up
+                        // requesting a subset of what we already requested, which can lead to parallel chain downloads
+                        // and other nastyness. So we just do a quick removal of redundant getdatas here too.
+                        //
+                        // Note that as of June 2012 Bitcoin Core won't actually ever interleave blocks pushed as
+                        // part of chain download with newly announced blocks, so it should always be taken care of by
+                        // the duplicate check in blockChainDownloadLocked(). But Bitcoin Core may change in future so
+                        // it's better to be safe here.
+<span class="pc bpc" id="L1268" title="1 of 2 branches missed.">                        if (!pendingBlockDownloads.contains(item.hash)) {</span>
+<span class="pc bpc" id="L1269" title="1 of 4 branches missed.">                            if (vPeerVersionMessage.isBloomFilteringSupported() &amp;&amp; useFilteredBlocks) {</span>
+<span class="fc" id="L1270">                                getdata.addFilteredBlock(item.hash);</span>
+<span class="fc" id="L1271">                                pingAfterGetData = true;</span>
+                            } else {
+<span class="fc" id="L1273">                                getdata.addItem(item);</span>
+                            }
+<span class="fc" id="L1275">                            pendingBlockDownloads.add(item.hash);</span>
+                        }
+                    }
+<span class="fc" id="L1278">                }</span>
+                // If we're downloading the chain, doing a getdata on the last block we were told about will cause the
+                // peer to advertize the head block to us in a single-item inv. When we download THAT, it will be an
+                // orphan block, meaning we'll re-enter blockChainDownloadLocked() to trigger another getblocks between the
+                // current best block we have and the orphan block. If more blocks arrive in the meantime they'll also
+                // become orphan.
+            }
+        } finally {
+<span class="pc" id="L1286">            lock.unlock();</span>
+<span class="fc" id="L1287">        }</span>
+
+<span class="fc bfc" id="L1289" title="All 2 branches covered.">        if (!getdata.getItems().isEmpty()) {</span>
+            // This will cause us to receive a bunch of block or tx messages.
+<span class="fc" id="L1291">            sendMessage(getdata);</span>
+        }
+
+<span class="fc bfc" id="L1294" title="All 2 branches covered.">        if (pingAfterGetData)</span>
+<span class="fc" id="L1295">            sendMessage(new Ping((long) (Math.random() * Long.MAX_VALUE)));</span>
+<span class="fc" id="L1296">    }</span>
+
+    /**
+     * Asks the connected peer for the block of the given hash, and returns a future representing the answer.
+     * If you want the block right away and don't mind waiting for it, just call .get() on the result. Your thread
+     * will block until the peer answers.
+     */
+    @SuppressWarnings(&quot;unchecked&quot;)
+    // The 'unchecked conversion' warning being suppressed here comes from the sendSingleGetData() formally returning
+    // ListenableFuture instead of ListenableFuture&lt;Block&gt;. This is okay as sendSingleGetData() actually returns
+    // ListenableFuture&lt;Block&gt; in this context. Note that sendSingleGetData() is also used for Transactions.
+    public ListenableFuture&lt;Block&gt; getBlock(Sha256Hash blockHash) {
+        // This does not need to be locked.
+<span class="fc" id="L1309">        log.info(&quot;Request to fetch block {}&quot;, blockHash);</span>
+<span class="fc" id="L1310">        GetDataMessage getdata = new GetDataMessage(params);</span>
+<span class="fc" id="L1311">        getdata.addBlock(blockHash);</span>
+<span class="fc" id="L1312">        return sendSingleGetData(getdata);</span>
+    }
+
+    /**
+     * Asks the connected peer for the given transaction from its memory pool. Transactions in the chain cannot be
+     * retrieved this way because peers don't have a transaction ID to transaction-pos-on-disk index, and besides,
+     * in future many peers will delete old transaction data they don't need.
+     */
+    @SuppressWarnings(&quot;unchecked&quot;)
+    // The 'unchecked conversion' warning being suppressed here comes from the sendSingleGetData() formally returning
+    // ListenableFuture instead of ListenableFuture&lt;Transaction&gt;. This is okay as sendSingleGetData() actually returns
+    // ListenableFuture&lt;Transaction&gt; in this context. Note that sendSingleGetData() is also used for Blocks.
+    public ListenableFuture&lt;Transaction&gt; getPeerMempoolTransaction(Sha256Hash hash) {
+        // This does not need to be locked.
+        // TODO: Unit test this method.
+<span class="nc" id="L1327">        log.info(&quot;Request to fetch peer mempool tx  {}&quot;, hash);</span>
+<span class="nc" id="L1328">        GetDataMessage getdata = new GetDataMessage(params);</span>
+<span class="nc" id="L1329">        getdata.addTransaction(hash);</span>
+<span class="nc" id="L1330">        return sendSingleGetData(getdata);</span>
+    }
+
+    /** Sends a getdata with a single item in it. */
+    private ListenableFuture sendSingleGetData(GetDataMessage getdata) {
+        // This does not need to be locked.
+<span class="pc bpc" id="L1336" title="1 of 2 branches missed.">        Preconditions.checkArgument(getdata.getItems().size() == 1);</span>
+<span class="fc" id="L1337">        GetDataRequest req = new GetDataRequest(getdata.getItems().get(0).hash, SettableFuture.create());</span>
+<span class="fc" id="L1338">        getDataFutures.add(req);</span>
+<span class="fc" id="L1339">        sendMessage(getdata);</span>
+<span class="fc" id="L1340">        return req.future;</span>
+    }
+
+    /** Sends a getaddr request to the peer and returns a future that completes with the answer once the peer has replied. */
+    public ListenableFuture&lt;AddressMessage&gt; getAddr() {
+<span class="nc" id="L1345">        SettableFuture&lt;AddressMessage&gt; future = SettableFuture.create();</span>
+<span class="nc" id="L1346">        synchronized (getAddrFutures) {</span>
+<span class="nc" id="L1347">            getAddrFutures.add(future);</span>
+<span class="nc" id="L1348">        }</span>
+<span class="nc" id="L1349">        sendMessage(new GetAddrMessage(params));</span>
+<span class="nc" id="L1350">        return future;</span>
+    }
+
+    /**
+     * When downloading the block chain, the bodies will be skipped for blocks created before the given date. Any
+     * transactions relevant to the wallet will therefore not be found, but if you know your wallet has no such
+     * transactions it doesn't matter and can save a lot of bandwidth and processing time. Note that the times of blocks
+     * isn't known until their headers are available and they are requested in chunks, so some headers may be downloaded
+     * twice using this scheme, but this optimization can still be a large win for newly created wallets.
+     *
+     * @param secondsSinceEpoch Time in seconds since the epoch or 0 to reset to always downloading block bodies.
+     */
+    public void setDownloadParameters(long secondsSinceEpoch, boolean useFilteredBlocks) {
+<span class="fc" id="L1363">        lock.lock();</span>
+        try {
+<span class="pc bpc" id="L1365" title="1 of 2 branches missed.">            if (secondsSinceEpoch == 0) {</span>
+<span class="nc" id="L1366">                fastCatchupTimeSecs = params.getGenesisBlock().getTimeSeconds();</span>
+<span class="nc" id="L1367">                downloadBlockBodies = true;</span>
+            } else {
+<span class="fc" id="L1369">                fastCatchupTimeSecs = secondsSinceEpoch;</span>
+                // If the given time is before the current chains head block time, then this has no effect (we already
+                // downloaded everything we need).
+<span class="pc bpc" id="L1372" title="1 of 4 branches missed.">                if (blockChain != null &amp;&amp; fastCatchupTimeSecs &gt; blockChain.getChainHead().getHeader().getTimeSeconds())</span>
+<span class="fc" id="L1373">                    downloadBlockBodies = false;</span>
+            }
+<span class="fc" id="L1375">            this.useFilteredBlocks = useFilteredBlocks;</span>
+        } finally {
+<span class="pc" id="L1377">            lock.unlock();</span>
+<span class="fc" id="L1378">        }</span>
+<span class="fc" id="L1379">    }</span>
+
+    /**
+     * Links the given wallet to this peer. If you have multiple peers, you should use a {@link PeerGroup} to manage
+     * them and use the {@link PeerGroup#addWallet(Wallet)} method instead of registering the wallet with each peer
+     * independently, otherwise the wallet will receive duplicate notifications.
+     */
+    public void addWallet(Wallet wallet) {
+<span class="fc" id="L1387">        wallets.add(wallet);</span>
+<span class="fc" id="L1388">    }</span>
+
+    /** Unlinks the given wallet from peer. See {@link Peer#addWallet(Wallet)}. */
+    public void removeWallet(Wallet wallet) {
+<span class="fc" id="L1392">        wallets.remove(wallet);</span>
+<span class="fc" id="L1393">    }</span>
+
+    // Keep track of the last request we made to the peer in blockChainDownloadLocked so we can avoid redundant and harmful
+    // getblocks requests.
+    @GuardedBy(&quot;lock&quot;)
+    private Sha256Hash lastGetBlocksBegin, lastGetBlocksEnd;
+
+    @GuardedBy(&quot;lock&quot;)
+    private void blockChainDownloadLocked(Sha256Hash toHash) {
+<span class="fc" id="L1402">        checkState(lock.isHeldByCurrentThread());</span>
+        // The block chain download process is a bit complicated. Basically, we start with one or more blocks in a
+        // chain that we have from a previous session. We want to catch up to the head of the chain BUT we don't know
+        // where that chain is up to or even if the top block we have is even still in the chain - we
+        // might have got ourselves onto a fork that was later resolved by the network.
+        //
+        // To solve this, we send the peer a block locator which is just a list of block hashes. It contains the
+        // blocks we know about, but not all of them, just enough of them so the peer can figure out if we did end up
+        // on a fork and if so, what the earliest still valid block we know about is likely to be.
+        //
+        // Once it has decided which blocks we need, it will send us an inv with up to 500 block messages. We may
+        // have some of them already if we already have a block chain and just need to catch up. Once we request the
+        // last block, if there are still more to come it sends us an &quot;inv&quot; containing only the hash of the head
+        // block.
+        //
+        // That causes us to download the head block but then we find (in processBlock) that we can't connect
+        // it to the chain yet because we don't have the intermediate blocks. So we rerun this function building a
+        // new block locator describing where we're up to.
+        //
+        // The getblocks with the new locator gets us another inv with another bunch of blocks. We download them once
+        // again. This time when the peer sends us an inv with the head block, we already have it so we won't download
+        // it again - but we recognize this case as special and call back into blockChainDownloadLocked to continue the
+        // process.
+        //
+        // So this is a complicated process but it has the advantage that we can download a chain of enormous length
+        // in a relatively stateless manner and with constant memory usage.
+        //
+        // All this is made more complicated by the desire to skip downloading the bodies of blocks that pre-date the
+        // 'fast catchup time', which is usually set to the creation date of the earliest key in the wallet. Because
+        // we know there are no transactions using our keys before that date, we need only the headers. To do that we
+        // use the &quot;getheaders&quot; command. Once we find we've gone past the target date, we throw away the downloaded
+        // headers and then request the blocks from that point onwards. &quot;getheaders&quot; does not send us an inv, it just
+        // sends us the data we requested in a &quot;headers&quot; message.
+
+        // TODO: Block locators should be abstracted out rather than special cased here.
+<span class="fc" id="L1437">        List&lt;Sha256Hash&gt; blockLocator = new ArrayList&lt;&gt;(51);</span>
+        // For now we don't do the exponential thinning as suggested here:
+        //
+        //   https://en.bitcoin.it/wiki/Protocol_specification#getblocks
+        //
+        // This is because it requires scanning all the block chain headers, which is very slow. Instead we add the top
+        // 100 block headers. If there is a re-org deeper than that, we'll end up downloading the entire chain. We
+        // must always put the genesis block as the first entry.
+<span class="fc" id="L1445">        BlockStore store = checkNotNull(blockChain).getBlockStore();</span>
+<span class="fc" id="L1446">        StoredBlock chainHead = blockChain.getChainHead();</span>
+<span class="fc" id="L1447">        Sha256Hash chainHeadHash = chainHead.getHeader().getHash();</span>
+        // Did we already make this request? If so, don't do it again.
+<span class="pc bpc" id="L1449" title="1 of 4 branches missed.">        if (Objects.equal(lastGetBlocksBegin, chainHeadHash) &amp;&amp; Objects.equal(lastGetBlocksEnd, toHash)) {</span>
+<span class="fc" id="L1450">            log.info(&quot;blockChainDownloadLocked({}): ignoring duplicated request: {}&quot;, toHash, chainHeadHash);</span>
+<span class="fc bfc" id="L1451" title="All 2 branches covered.">            for (Sha256Hash hash : pendingBlockDownloads)</span>
+<span class="fc" id="L1452">                log.info(&quot;Pending block download: {}&quot;, hash);</span>
+<span class="fc" id="L1453">            log.info(Throwables.getStackTraceAsString(new Throwable()));</span>
+<span class="fc" id="L1454">            return;</span>
+        }
+<span class="pc bpc" id="L1456" title="1 of 2 branches missed.">        if (log.isDebugEnabled())</span>
+<span class="nc" id="L1457">            log.debug(&quot;{}: blockChainDownloadLocked({}) current head = {}&quot;,</span>
+<span class="nc" id="L1458">                    this, toHash, chainHead.getHeader().getHashAsString());</span>
+<span class="fc" id="L1459">        StoredBlock cursor = chainHead;</span>
+<span class="pc bpc" id="L1460" title="1 of 4 branches missed.">        for (int i = 100; cursor != null &amp;&amp; i &gt; 0; i--) {</span>
+<span class="fc" id="L1461">            blockLocator.add(cursor.getHeader().getHash());</span>
+            try {
+<span class="fc" id="L1463">                cursor = cursor.getPrev(store);</span>
+<span class="nc" id="L1464">            } catch (BlockStoreException e) {</span>
+<span class="nc" id="L1465">                log.error(&quot;Failed to walk the block chain whilst constructing a locator&quot;);</span>
+<span class="nc" id="L1466">                throw new RuntimeException(e);</span>
+<span class="fc" id="L1467">            }</span>
+        }
+        // Only add the locator if we didn't already do so. If the chain is &lt; 50 blocks we already reached it.
+<span class="pc bpc" id="L1470" title="1 of 2 branches missed.">        if (cursor != null)</span>
+<span class="nc" id="L1471">            blockLocator.add(params.getGenesisBlock().getHash());</span>
+
+        // Record that we requested this range of blocks so we can filter out duplicate requests in the event of a
+        // block being solved during chain download.
+<span class="fc" id="L1475">        lastGetBlocksBegin = chainHeadHash;</span>
+<span class="fc" id="L1476">        lastGetBlocksEnd = toHash;</span>
+
+<span class="fc bfc" id="L1478" title="All 2 branches covered.">        if (downloadBlockBodies) {</span>
+<span class="fc" id="L1479">            GetBlocksMessage message = new GetBlocksMessage(params, blockLocator, toHash);</span>
+<span class="fc" id="L1480">            sendMessage(message);</span>
+<span class="fc" id="L1481">        } else {</span>
+            // Downloading headers for a while instead of full blocks.
+<span class="fc" id="L1483">            GetHeadersMessage message = new GetHeadersMessage(params, blockLocator, toHash);</span>
+<span class="fc" id="L1484">            sendMessage(message);</span>
+        }
+<span class="fc" id="L1486">    }</span>
+
+    /**
+     * Starts an asynchronous download of the block chain. The chain download is deemed to be complete once we've
+     * downloaded the same number of blocks that the peer advertised having in its version handshake message.
+     */
+    public void startBlockChainDownload() {
+<span class="fc" id="L1493">        setDownloadData(true);</span>
+        // TODO: peer might still have blocks that we don't have, and even have a heavier
+        // chain even if the chain block count is lower.
+<span class="fc" id="L1496">        final int blocksLeft = getPeerBlockHeightDifference();</span>
+<span class="pc bpc" id="L1497" title="1 of 2 branches missed.">        if (blocksLeft &gt;= 0) {</span>
+<span class="fc bfc" id="L1498" title="All 2 branches covered.">            for (final ListenerRegistration&lt;ChainDownloadStartedEventListener&gt; registration : chainDownloadStartedEventListeners) {</span>
+<span class="fc" id="L1499">                registration.executor.execute(new Runnable() {</span>
+                    @Override
+                    public void run() {
+<span class="fc" id="L1502">                        registration.listener.onChainDownloadStarted(Peer.this, blocksLeft);</span>
+<span class="fc" id="L1503">                    }</span>
+                });
+<span class="fc" id="L1505">            }</span>
+            // When we just want as many blocks as possible, we can set the target hash to zero.
+<span class="fc" id="L1507">            lock.lock();</span>
+            try {
+<span class="fc" id="L1509">                blockChainDownloadLocked(Sha256Hash.ZERO_HASH);</span>
+            } finally {
+<span class="pc" id="L1511">                lock.unlock();</span>
+<span class="fc" id="L1512">            }</span>
+        }
+<span class="fc" id="L1514">    }</span>
+
+    private class PendingPing {
+        // The future that will be invoked when the pong is heard back.
+        public SettableFuture&lt;Long&gt; future;
+        // The random nonce that lets us tell apart overlapping pings/pongs.
+        public final long nonce;
+        // Measurement of the time elapsed.
+        public final long startTimeMsec;
+
+<span class="fc" id="L1524">        public PendingPing(long nonce) {</span>
+<span class="fc" id="L1525">            future = SettableFuture.create();</span>
+<span class="fc" id="L1526">            this.nonce = nonce;</span>
+<span class="fc" id="L1527">            startTimeMsec = Utils.currentTimeMillis();</span>
+<span class="fc" id="L1528">        }</span>
+
+        public void complete() {
+<span class="pc bpc" id="L1531" title="1 of 2 branches missed.">            if (!future.isDone()) {</span>
+<span class="fc" id="L1532">                Long elapsed = Utils.currentTimeMillis() - startTimeMsec;</span>
+<span class="fc" id="L1533">                Peer.this.addPingTimeData(elapsed);</span>
+<span class="fc" id="L1534">                log.debug(&quot;{}: ping time is {} msec&quot;, Peer.this.toString(), elapsed);</span>
+<span class="fc" id="L1535">                future.set(elapsed);</span>
+            }
+<span class="fc" id="L1537">        }</span>
+    }
+
+    /** Adds a ping time sample to the averaging window. */
+    private void addPingTimeData(long sample) {
+<span class="fc" id="L1542">        lastPingTimesLock.lock();</span>
+        try {
+<span class="fc bfc" id="L1544" title="All 2 branches covered.">            if (lastPingTimes == null) {</span>
+<span class="fc" id="L1545">                lastPingTimes = new long[PING_MOVING_AVERAGE_WINDOW];</span>
+                // Initialize the averaging window to the first sample.
+<span class="fc" id="L1547">                Arrays.fill(lastPingTimes, sample);</span>
+            } else {
+                // Shift all elements backwards by one.
+<span class="fc" id="L1550">                System.arraycopy(lastPingTimes, 1, lastPingTimes, 0, lastPingTimes.length - 1);</span>
+                // And append the new sample to the end.
+<span class="fc" id="L1552">                lastPingTimes[lastPingTimes.length - 1] = sample;</span>
+            }
+        } finally {
+<span class="pc" id="L1555">            lastPingTimesLock.unlock();</span>
+<span class="fc" id="L1556">        }</span>
+<span class="fc" id="L1557">    }</span>
+
+    /**
+     * Sends the peer a ping message and returns a future that will be invoked when the pong is received back.
+     * The future provides a number which is the number of milliseconds elapsed between the ping and the pong.
+     * Once the pong is received the value returned by {@link org.bitcoinj.core.Peer#getLastPingTime()} is
+     * updated.
+     * @throws ProtocolException if the peer version is too low to support measurable pings.
+     */
+    public ListenableFuture&lt;Long&gt; ping() throws ProtocolException {
+<span class="fc" id="L1567">        return ping((long) (Math.random() * Long.MAX_VALUE));</span>
+    }
+
+    protected ListenableFuture&lt;Long&gt; ping(long nonce) throws ProtocolException {
+<span class="fc" id="L1571">        final VersionMessage ver = vPeerVersionMessage;</span>
+<span class="pc bpc" id="L1572" title="1 of 2 branches missed.">        if (!ver.isPingPongSupported())</span>
+<span class="nc" id="L1573">            throw new ProtocolException(&quot;Peer version is too low for measurable pings: &quot; + ver);</span>
+<span class="fc" id="L1574">        PendingPing pendingPing = new PendingPing(nonce);</span>
+<span class="fc" id="L1575">        pendingPings.add(pendingPing);</span>
+<span class="fc" id="L1576">        sendMessage(new Ping(pendingPing.nonce));</span>
+<span class="fc" id="L1577">        return pendingPing.future;</span>
+    }
+
+    /**
+     * Returns the elapsed time of the last ping/pong cycle. If {@link org.bitcoinj.core.Peer#ping()} has never
+     * been called or we did not hear back the &quot;pong&quot; message yet, returns {@link Long#MAX_VALUE}.
+     */
+    public long getLastPingTime() {
+<span class="fc" id="L1585">        lastPingTimesLock.lock();</span>
+        try {
+<span class="fc bfc" id="L1587" title="All 2 branches covered.">            if (lastPingTimes == null)</span>
+<span class="fc" id="L1588">                return Long.MAX_VALUE;</span>
+<span class="fc" id="L1589">            return lastPingTimes[lastPingTimes.length - 1];</span>
+        } finally {
+<span class="pc" id="L1591">            lastPingTimesLock.unlock();</span>
+        }
+    }
+
+    /**
+     * Returns a moving average of the last N ping/pong cycles. If {@link org.bitcoinj.core.Peer#ping()} has never
+     * been called or we did not hear back the &quot;pong&quot; message yet, returns {@link Long#MAX_VALUE}. The moving average
+     * window is 5 buckets.
+     */
+    public long getPingTime() {
+<span class="fc" id="L1601">        lastPingTimesLock.lock();</span>
+        try {
+<span class="fc bfc" id="L1603" title="All 2 branches covered.">            if (lastPingTimes == null)</span>
+<span class="fc" id="L1604">                return Long.MAX_VALUE;</span>
+<span class="fc" id="L1605">            long sum = 0;</span>
+<span class="fc bfc" id="L1606" title="All 2 branches covered.">            for (long i : lastPingTimes) sum += i;</span>
+<span class="fc" id="L1607">            return (long)((double) sum / lastPingTimes.length);</span>
+        } finally {
+<span class="pc" id="L1609">            lastPingTimesLock.unlock();</span>
+        }
+    }
+
+    private void processPing(Ping m) {
+<span class="pc bpc" id="L1614" title="1 of 2 branches missed.">        if (m.hasNonce())</span>
+<span class="nc" id="L1615">            sendMessage(new Pong(m.getNonce()));</span>
+<span class="fc" id="L1616">    }</span>
+
+    protected void processPong(Pong m) {
+        // Iterates over a snapshot of the list, so we can run unlocked here.
+<span class="pc bpc" id="L1620" title="1 of 2 branches missed.">        for (PendingPing ping : pendingPings) {</span>
+<span class="pc bpc" id="L1621" title="1 of 2 branches missed.">            if (m.getNonce() == ping.nonce) {</span>
+<span class="fc" id="L1622">                pendingPings.remove(ping);</span>
+                // This line may trigger an event listener that re-runs ping().
+<span class="fc" id="L1624">                ping.complete();</span>
+<span class="fc" id="L1625">                return;</span>
+            }
+<span class="nc" id="L1627">        }</span>
+<span class="nc" id="L1628">    }</span>
+
+    /**
+     * Returns the difference between our best chain height and the peers, which can either be positive if we are
+     * behind the peer, or negative if the peer is ahead of us.
+     */
+    public int getPeerBlockHeightDifference() {
+<span class="fc" id="L1635">        checkNotNull(blockChain, &quot;No block chain configured&quot;);</span>
+        // Chain will overflow signed int blocks in ~41,000 years.
+<span class="fc" id="L1637">        int chainHeight = (int) getBestHeight();</span>
+        // chainHeight should not be zero/negative because we shouldn't have given the user a Peer that is to another
+        // client-mode node, nor should it be unconnected. If that happens it means the user overrode us somewhere or
+        // there is a bug in the peer management code.
+<span class="pc bpc" id="L1641" title="3 of 4 branches missed.">        checkState(params.allowEmptyPeerChain() || chainHeight &gt; 0, &quot;Connected to peer with zero/negative chain height&quot;, chainHeight);</span>
+<span class="fc" id="L1642">        return chainHeight - blockChain.getBestChainHeight();</span>
+    }
+
+    private boolean isNotFoundMessageSupported() {
+<span class="nc bnc" id="L1646" title="All 2 branches missed.">        return vPeerVersionMessage.clientVersion &gt;= NotFoundMessage.MIN_PROTOCOL_VERSION;</span>
+    }
+
+    /**
+     * Returns true if this peer will try and download things it is sent in &quot;inv&quot; messages. Normally you only need
+     * one peer to be downloading data. Defaults to true.
+     */
+    public boolean isDownloadData() {
+<span class="nc" id="L1654">        return vDownloadData;</span>
+    }
+
+    /**
+     * If set to false, the peer won't try and fetch blocks and transactions it hears about. Normally, only one
+     * peer should download missing blocks. Defaults to true. Changing this value from false to true may trigger
+     * a request to the remote peer for the contents of its memory pool, if Bloom filtering is active.
+     */
+    public void setDownloadData(boolean downloadData) {
+<span class="fc" id="L1663">        this.vDownloadData = downloadData;</span>
+<span class="fc" id="L1664">    }</span>
+
+    /** Returns version data announced by the remote peer. */
+    public VersionMessage getPeerVersionMessage() {
+<span class="fc" id="L1668">        return vPeerVersionMessage;</span>
+    }
+
+    /** Returns version data we announce to our remote peers. */
+    public VersionMessage getVersionMessage() {
+<span class="nc" id="L1673">        return versionMessage;</span>
+    }
+
+    /**
+     * @return the height of the best chain as claimed by peer: sum of its ver announcement and blocks announced since.
+     */
+    public long getBestHeight() {
+<span class="fc" id="L1680">        return vPeerVersionMessage.bestHeight + blocksAnnounced.get();</span>
+    }
+
+    /**
+     * The minimum P2P protocol version that is accepted. If the peer speaks a protocol version lower than this, it
+     * will be disconnected.
+     * @return true if the peer was disconnected as a result
+     */
+    public boolean setMinProtocolVersion(int minProtocolVersion) {
+<span class="fc" id="L1689">        this.vMinProtocolVersion = minProtocolVersion;</span>
+<span class="fc" id="L1690">        VersionMessage ver = getPeerVersionMessage();</span>
+<span class="pc bpc" id="L1691" title="3 of 4 branches missed.">        if (ver != null &amp;&amp; ver.clientVersion &lt; minProtocolVersion) {</span>
+<span class="nc" id="L1692">            log.warn(&quot;{}: Disconnecting due to new min protocol version {}, got: {}&quot;, this, minProtocolVersion, ver.clientVersion);</span>
+<span class="nc" id="L1693">            close();</span>
+<span class="nc" id="L1694">            return true;</span>
+        }
+<span class="fc" id="L1696">        return false;</span>
+    }
+
+    /**
+     * &lt;p&gt;Sets a Bloom filter on this connection. This will cause the given {@link BloomFilter} object to be sent to the
+     * remote peer and if either a memory pool has been set using the constructor or the
+     * vDownloadData property is true, a {@link MemoryPoolMessage} is sent as well to trigger downloading of any
+     * pending transactions that may be relevant.&lt;/p&gt;
+     *
+     * &lt;p&gt;The Peer does not automatically request filters from any wallets added using {@link Peer#addWallet(Wallet)}.
+     * This is to allow callers to avoid redundantly recalculating the same filter repeatedly when using multiple peers
+     * and multiple wallets together.&lt;/p&gt;
+     *
+     * &lt;p&gt;Therefore, you should not use this method if your app uses a {@link PeerGroup}. It is called for you.&lt;/p&gt;
+     *
+     * &lt;p&gt;If the remote peer doesn't support Bloom filtering, then this call is ignored. Once set you presently cannot
+     * unset a filter, though the underlying p2p protocol does support it.&lt;/p&gt;
+     */
+    public void setBloomFilter(BloomFilter filter) {
+<span class="fc" id="L1715">        setBloomFilter(filter, true);</span>
+<span class="fc" id="L1716">    }</span>
+
+    /**
+     * &lt;p&gt;Sets a Bloom filter on this connection. This will cause the given {@link BloomFilter} object to be sent to the
+     * remote peer and if requested, a {@link MemoryPoolMessage} is sent as well to trigger downloading of any
+     * pending transactions that may be relevant.&lt;/p&gt;
+     *
+     * &lt;p&gt;The Peer does not automatically request filters from any wallets added using {@link Peer#addWallet(Wallet)}.
+     * This is to allow callers to avoid redundantly recalculating the same filter repeatedly when using multiple peers
+     * and multiple wallets together.&lt;/p&gt;
+     *
+     * &lt;p&gt;Therefore, you should not use this method if your app uses a {@link PeerGroup}. It is called for you.&lt;/p&gt;
+     *
+     * &lt;p&gt;If the remote peer doesn't support Bloom filtering, then this call is ignored. Once set you presently cannot
+     * unset a filter, though the underlying p2p protocol does support it.&lt;/p&gt;
+     */
+    public void setBloomFilter(BloomFilter filter, boolean andQueryMemPool) {
+<span class="fc" id="L1733">        checkNotNull(filter, &quot;Clearing filters is not currently supported&quot;);</span>
+<span class="fc" id="L1734">        final VersionMessage ver = vPeerVersionMessage;</span>
+<span class="pc bpc" id="L1735" title="2 of 4 branches missed.">        if (ver == null || !ver.isBloomFilteringSupported())</span>
+<span class="nc" id="L1736">            return;</span>
+<span class="fc" id="L1737">        vBloomFilter = filter;</span>
+<span class="pc bpc" id="L1738" title="1 of 2 branches missed.">        log.debug(&quot;{}: Sending Bloom filter{}&quot;, this, andQueryMemPool ? &quot; and querying mempool&quot; : &quot;&quot;);</span>
+<span class="fc" id="L1739">        sendMessage(filter);</span>
+<span class="pc bpc" id="L1740" title="1 of 2 branches missed.">        if (andQueryMemPool)</span>
+<span class="fc" id="L1741">            sendMessage(new MemoryPoolMessage());</span>
+<span class="fc" id="L1742">        maybeRestartChainDownload();</span>
+<span class="fc" id="L1743">    }</span>
+
+    private void maybeRestartChainDownload() {
+<span class="fc" id="L1746">        lock.lock();</span>
+        try {
+<span class="fc bfc" id="L1748" title="All 2 branches covered.">            if (awaitingFreshFilter == null)</span>
+<span class="fc" id="L1749">                return;</span>
+<span class="pc bpc" id="L1750" title="1 of 2 branches missed.">            if (!vDownloadData) {</span>
+                // This branch should be harmless but I want to know how often it happens in reality.
+<span class="nc" id="L1752">                log.warn(&quot;Lost download peer status whilst awaiting fresh filter.&quot;);</span>
+<span class="nc" id="L1753">                return;</span>
+            }
+            // Ping/pong to wait for blocks that are still being streamed to us to finish being downloaded and
+            // discarded.
+<span class="fc" id="L1757">            ping().addListener(new Runnable() {</span>
+                @Override
+                public void run() {
+<span class="fc" id="L1760">                    lock.lock();</span>
+<span class="fc" id="L1761">                    checkNotNull(awaitingFreshFilter);</span>
+<span class="fc" id="L1762">                    GetDataMessage getdata = new GetDataMessage(params);</span>
+<span class="fc bfc" id="L1763" title="All 2 branches covered.">                    for (Sha256Hash hash : awaitingFreshFilter)</span>
+<span class="fc" id="L1764">                        getdata.addFilteredBlock(hash);</span>
+<span class="fc" id="L1765">                    awaitingFreshFilter = null;</span>
+<span class="fc" id="L1766">                    lock.unlock();</span>
+
+<span class="fc" id="L1768">                    log.info(&quot;Restarting chain download&quot;);</span>
+<span class="fc" id="L1769">                    sendMessage(getdata);</span>
+                    // TODO: This bizarre ping-after-getdata hack probably isn't necessary.
+                    // It's to ensure we know when the end of a filtered block stream of txns is, but we should just be
+                    // able to match txns with the merkleblock. Ask Matt why it's written this way.
+<span class="fc" id="L1773">                    sendMessage(new Ping((long) (Math.random() * Long.MAX_VALUE)));</span>
+<span class="fc" id="L1774">                }</span>
+            }, Threading.SAME_THREAD);
+        } finally {
+<span class="pc" id="L1777">            lock.unlock();</span>
+<span class="fc" id="L1778">        }</span>
+<span class="fc" id="L1779">    }</span>
+
+    /**
+     * Returns the last {@link BloomFilter} set by {@link Peer#setBloomFilter(BloomFilter)}. Bloom filters tell
+     * the remote node what transactions to send us, in a compact manner.
+     */
+    public BloomFilter getBloomFilter() {
+<span class="nc" id="L1786">        return vBloomFilter;</span>
+    }
+
+    /**
+     * Sends a query to the remote peer asking for the unspent transaction outputs (UTXOs) for the given outpoints,
+     * with the memory pool included. The result should be treated only as a hint: it's possible for the returned
+     * outputs to be fictional and not exist in any transaction, and it's possible for them to be spent the moment
+     * after the query returns. &lt;b&gt;Most peers do not support this request. You will need to connect to Bitcoin XT
+     * peers if you want this to work.&lt;/b&gt;
+     *
+     * @throws ProtocolException if this peer doesn't support the protocol.
+     */
+    public ListenableFuture&lt;UTXOsMessage&gt; getUTXOs(List&lt;TransactionOutPoint&gt; outPoints) {
+<span class="fc" id="L1799">        return getUTXOs(outPoints, true);</span>
+    }
+
+    /**
+     * Sends a query to the remote peer asking for the unspent transaction outputs (UTXOs) for the given outpoints.
+     * The result should be treated only as a hint: it's possible for the returned outputs to be fictional and not
+     * exist in any transaction, and it's possible for them to be spent the moment after the query returns.
+     * &lt;b&gt;Most peers do not support this request. You will need to connect to Bitcoin XT peers if you want
+     * this to work.&lt;/b&gt;
+     *
+     * @param includeMempool If true (the default) the results take into account the contents of the memory pool too.
+     * @throws ProtocolException if this peer doesn't support the protocol.
+     */
+    public ListenableFuture&lt;UTXOsMessage&gt; getUTXOs(List&lt;TransactionOutPoint&gt; outPoints, boolean includeMempool) {
+<span class="fc" id="L1813">        lock.lock();</span>
+        try {
+<span class="fc" id="L1815">            VersionMessage peerVer = getPeerVersionMessage();</span>
+<span class="pc bpc" id="L1816" title="1 of 2 branches missed.">            if (peerVer.clientVersion &lt; GetUTXOsMessage.MIN_PROTOCOL_VERSION)</span>
+<span class="nc" id="L1817">                throw new ProtocolException(&quot;Peer does not support getutxos protocol version&quot;);</span>
+<span class="pc bpc" id="L1818" title="1 of 2 branches missed.">            if ((peerVer.localServices &amp; GetUTXOsMessage.SERVICE_FLAGS_REQUIRED) != GetUTXOsMessage.SERVICE_FLAGS_REQUIRED)</span>
+<span class="nc" id="L1819">                throw new ProtocolException(&quot;Peer does not support getutxos protocol flag: find Bitcoin XT nodes.&quot;);</span>
+<span class="fc" id="L1820">            SettableFuture&lt;UTXOsMessage&gt; future = SettableFuture.create();</span>
+            // Add to the list of in flight requests.
+<span class="fc bfc" id="L1822" title="All 2 branches covered.">            if (getutxoFutures == null)</span>
+<span class="fc" id="L1823">                getutxoFutures = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L1824">            getutxoFutures.add(future);</span>
+<span class="fc" id="L1825">            sendMessage(new GetUTXOsMessage(params, outPoints, includeMempool));</span>
+<span class="fc" id="L1826">            return future;</span>
+        } finally {
+<span class="pc" id="L1828">            lock.unlock();</span>
+        }
+    }
+
+    /**
+     * Returns true if this peer will use getdata/notfound messages to walk backwards through transaction dependencies
+     * before handing the transaction off to the wallet. The wallet can do risk analysis on pending/recent transactions
+     * to try and discover if a pending tx might be at risk of double spending.
+     */
+    public boolean isDownloadTxDependencies() {
+<span class="nc bnc" id="L1838" title="All 2 branches missed.">        return vDownloadTxDependencyDepth &gt; 0;</span>
+    }
+
+    /**
+     * Sets if this peer will use getdata/notfound messages to walk backwards through transaction dependencies
+     * before handing the transaction off to the wallet. The wallet can do risk analysis on pending/recent transactions
+     * to try and discover if a pending tx might be at risk of double spending.
+     */
+    public void setDownloadTxDependencies(boolean enable) {
+<span class="pc bpc" id="L1847" title="1 of 2 branches missed.">        vDownloadTxDependencyDepth = enable ? Integer.MAX_VALUE : 0;</span>
+<span class="fc" id="L1848">    }</span>
+
+    /**
+     * Sets if this peer will use getdata/notfound messages to walk backwards through transaction dependencies
+     * before handing the transaction off to the wallet. The wallet can do risk analysis on pending/recent transactions
+     * to try and discover if a pending tx might be at risk of double spending.
+     */
+    public void setDownloadTxDependencies(int depth) {
+<span class="fc" id="L1856">        vDownloadTxDependencyDepth = depth;</span>
+<span class="fc" id="L1857">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>ScriptError.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.script</a> &gt; <span class="el_source">ScriptError.java</span></div><h1>ScriptError.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2017 Nicola Atzei
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.script;
+
+import java.util.HashMap;
+import java.util.Map;
+
+<span class="pc" id="L22">public enum ScriptError {</span>
+
+<span class="fc" id="L24">    SCRIPT_ERR_OK(&quot;OK&quot;),</span>
+<span class="fc" id="L25">    SCRIPT_ERR_UNKNOWN_ERROR(&quot;UNKNOWN_ERROR&quot;),</span>
+<span class="fc" id="L26">    SCRIPT_ERR_EVAL_FALSE(&quot;EVAL_FALSE&quot;),</span>
+<span class="fc" id="L27">    SCRIPT_ERR_OP_RETURN(&quot;OP_RETURN&quot;),</span>
+
+    /* Max sizes */
+<span class="fc" id="L30">    SCRIPT_ERR_SCRIPT_SIZE(&quot;SCRIPT_SIZE&quot;),</span>
+<span class="fc" id="L31">    SCRIPT_ERR_PUSH_SIZE(&quot;PUSH_SIZE&quot;),</span>
+<span class="fc" id="L32">    SCRIPT_ERR_OP_COUNT(&quot;OP_COUNT&quot;),</span>
+<span class="fc" id="L33">    SCRIPT_ERR_STACK_SIZE(&quot;STACK_SIZE&quot;),</span>
+<span class="fc" id="L34">    SCRIPT_ERR_SIG_COUNT(&quot;SIG_COUNT&quot;),</span>
+<span class="fc" id="L35">    SCRIPT_ERR_PUBKEY_COUNT(&quot;PUBKEY_COUNT&quot;),</span>
+
+    /* Failed verify operations */
+<span class="fc" id="L38">    SCRIPT_ERR_VERIFY(&quot;VERIFY&quot;),</span>
+<span class="fc" id="L39">    SCRIPT_ERR_EQUALVERIFY(&quot;EQUALVERIFY&quot;),</span>
+<span class="fc" id="L40">    SCRIPT_ERR_CHECKMULTISIGVERIFY(&quot;CHECKMULTISIGVERIFY&quot;),</span>
+<span class="fc" id="L41">    SCRIPT_ERR_CHECKSIGVERIFY(&quot;CHECKSIGVERIFY&quot;),</span>
+<span class="fc" id="L42">    SCRIPT_ERR_NUMEQUALVERIFY(&quot;NUMEQUALVERIFY&quot;),</span>
+
+    /* Logical/Format/Canonical errors */
+<span class="fc" id="L45">    SCRIPT_ERR_BAD_OPCODE(&quot;BAD_OPCODE&quot;),</span>
+<span class="fc" id="L46">    SCRIPT_ERR_DISABLED_OPCODE(&quot;DISABLED_OPCODE&quot;),</span>
+<span class="fc" id="L47">    SCRIPT_ERR_INVALID_STACK_OPERATION(&quot;INVALID_STACK_OPERATION&quot;),</span>
+<span class="fc" id="L48">    SCRIPT_ERR_INVALID_ALTSTACK_OPERATION(&quot;INVALID_ALTSTACK_OPERATION&quot;),</span>
+<span class="fc" id="L49">    SCRIPT_ERR_UNBALANCED_CONDITIONAL(&quot;UNBALANCED_CONDITIONAL&quot;),</span>
+
+    /* CHECKLOCKTIMEVERIFY and CHECKSEQUENCEVERIFY */
+<span class="fc" id="L52">    SCRIPT_ERR_NEGATIVE_LOCKTIME(&quot;NEGATIVE_LOCKTIME&quot;),</span>
+<span class="fc" id="L53">    SCRIPT_ERR_UNSATISFIED_LOCKTIME(&quot;UNSATISFIED_LOCKTIME&quot;),</span>
+
+    /* Malleability */
+<span class="fc" id="L56">    SCRIPT_ERR_SIG_HASHTYPE(&quot;SIG_HASHTYPE&quot;),</span>
+<span class="fc" id="L57">    SCRIPT_ERR_SIG_DER(&quot;SIG_DER&quot;),</span>
+<span class="fc" id="L58">    SCRIPT_ERR_MINIMALDATA(&quot;MINIMALDATA&quot;),</span>
+<span class="fc" id="L59">    SCRIPT_ERR_SIG_PUSHONLY(&quot;SIG_PUSHONLY&quot;),</span>
+<span class="fc" id="L60">    SCRIPT_ERR_SIG_HIGH_S(&quot;SIG_HIGH_S&quot;),</span>
+<span class="fc" id="L61">    SCRIPT_ERR_SIG_NULLDUMMY(&quot;SIG_NULLDUMMY&quot;),</span>
+<span class="fc" id="L62">    SCRIPT_ERR_PUBKEYTYPE(&quot;PUBKEYTYPE&quot;),</span>
+<span class="fc" id="L63">    SCRIPT_ERR_CLEANSTACK(&quot;CLEANSTACK&quot;),</span>
+<span class="fc" id="L64">    SCRIPT_ERR_MINIMALIF(&quot;MINIMALIF&quot;),</span>
+<span class="fc" id="L65">    SCRIPT_ERR_SIG_NULLFAIL(&quot;NULLFAIL&quot;),</span>
+
+    /* softfork safeness */
+<span class="fc" id="L68">    SCRIPT_ERR_DISCOURAGE_UPGRADABLE_NOPS(&quot;DISCOURAGE_UPGRADABLE_NOPS&quot;),</span>
+<span class="fc" id="L69">    SCRIPT_ERR_DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM(&quot;DISCOURAGE_UPGRADABLE_WITNESS_PROGRAM&quot;),</span>
+
+    /* segregated witness */
+<span class="fc" id="L72">    SCRIPT_ERR_WITNESS_PROGRAM_WRONG_LENGTH(&quot;WITNESS_PROGRAM_WRONG_LENGTH&quot;),</span>
+<span class="fc" id="L73">    SCRIPT_ERR_WITNESS_PROGRAM_WITNESS_EMPTY(&quot;WITNESS_PROGRAM_WITNESS_EMPTY&quot;),</span>
+<span class="fc" id="L74">    SCRIPT_ERR_WITNESS_PROGRAM_MISMATCH(&quot;WITNESS_PROGRAM_MISMATCH&quot;),</span>
+<span class="fc" id="L75">    SCRIPT_ERR_WITNESS_MALLEATED(&quot;WITNESS_MALLEATED&quot;),</span>
+<span class="fc" id="L76">    SCRIPT_ERR_WITNESS_MALLEATED_P2SH(&quot;WITNESS_MALLEATED_P2SH&quot;),</span>
+<span class="fc" id="L77">    SCRIPT_ERR_WITNESS_UNEXPECTED(&quot;WITNESS_UNEXPECTED&quot;),</span>
+<span class="fc" id="L78">    SCRIPT_ERR_WITNESS_PUBKEYTYPE(&quot;WITNESS_PUBKEYTYPE&quot;),</span>
+
+<span class="fc" id="L80">    SCRIPT_ERR_ERROR_COUNT(&quot;ERROR_COUNT&quot;);</span>
+
+    private final String mnemonic;
+    private static final Map&lt;String, ScriptError&gt; mnemonicToScriptErrorMap;
+
+<span class="fc" id="L85">    private ScriptError(String name) {</span>
+<span class="fc" id="L86">        this.mnemonic = name;</span>
+<span class="fc" id="L87">    }</span>
+
+    static {
+<span class="fc" id="L90">        mnemonicToScriptErrorMap = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L91" title="All 2 branches covered.">        for (ScriptError err : ScriptError.values()) {</span>
+<span class="fc" id="L92">            mnemonicToScriptErrorMap.put(err.getMnemonic(), err);</span>
+        }
+<span class="fc" id="L94">    }</span>
+
+    public String getMnemonic() {
+<span class="fc" id="L97">        return mnemonic;</span>
+    }
+
+    public static ScriptError fromMnemonic(String name) {
+<span class="fc" id="L101">        ScriptError err = mnemonicToScriptErrorMap.get(name);</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">        if (err == null)</span>
+<span class="nc" id="L103">            throw new IllegalArgumentException(name + &quot; is not a valid name&quot;);</span>
+<span class="fc" id="L104">        return err;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

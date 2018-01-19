@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>LevelDBBlockStore.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.store</a> &gt; <span class="el_source">LevelDBBlockStore.java</span></div><h1>LevelDBBlockStore.java</h1><pre class="source lang-java linenums">/*
+ * Copyright by the original author or authors.
+ * 
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.store;
+
+import org.bitcoinj.core.*;
+import org.fusesource.leveldbjni.*;
+import org.iq80.leveldb.*;
+
+import javax.annotation.*;
+import java.io.*;
+import java.nio.*;
+
+/**
+ * An SPV block store that writes every header it sees to a &lt;a href=&quot;https://github.com/fusesource/leveldbjni&quot;&gt;LevelDB&lt;/a&gt;.
+ * This allows for fast lookup of block headers by block hash at the expense of more costly inserts and higher disk
+ * usage than the {@link SPVBlockStore}. If all you want is a regular wallet you don't need this class: it exists for
+ * specialised applications where you need to quickly verify a standalone SPV proof.
+ */
+public class LevelDBBlockStore implements BlockStore {
+<span class="fc" id="L34">    private static final byte[] CHAIN_HEAD_KEY = &quot;chainhead&quot;.getBytes();</span>
+
+    private final Context context;
+    private DB db;
+<span class="fc" id="L38">    private final ByteBuffer buffer = ByteBuffer.allocate(StoredBlock.COMPACT_SERIALIZED_SIZE);</span>
+    private final File path;
+
+    /** Creates a LevelDB SPV block store using the JNI/C++ version of LevelDB. */
+    public LevelDBBlockStore(Context context, File directory) throws BlockStoreException {
+<span class="fc" id="L43">        this(context, directory, JniDBFactory.factory);</span>
+<span class="fc" id="L44">    }</span>
+
+    /** Creates a LevelDB SPV block store using the given factory, which is useful if you want a pure Java version. */
+<span class="fc" id="L47">    public LevelDBBlockStore(Context context, File directory, DBFactory dbFactory) throws BlockStoreException {</span>
+<span class="fc" id="L48">        this.context = context;</span>
+<span class="fc" id="L49">        this.path = directory;</span>
+<span class="fc" id="L50">        Options options = new Options();</span>
+<span class="fc" id="L51">        options.createIfMissing();</span>
+
+        try {
+<span class="fc" id="L54">            tryOpen(directory, dbFactory, options);</span>
+<span class="nc" id="L55">        } catch (IOException e) {</span>
+            try {
+<span class="nc" id="L57">                dbFactory.repair(directory, options);</span>
+<span class="nc" id="L58">                tryOpen(directory, dbFactory, options);</span>
+<span class="nc" id="L59">            } catch (IOException e1) {</span>
+<span class="nc" id="L60">                throw new BlockStoreException(e1);</span>
+<span class="nc" id="L61">            }</span>
+<span class="fc" id="L62">        }</span>
+<span class="fc" id="L63">    }</span>
+
+    private synchronized void tryOpen(File directory, DBFactory dbFactory, Options options) throws IOException, BlockStoreException {
+<span class="fc" id="L66">        db = dbFactory.open(directory, options);</span>
+<span class="fc" id="L67">        initStoreIfNeeded();</span>
+<span class="fc" id="L68">    }</span>
+
+    private synchronized void initStoreIfNeeded() throws BlockStoreException {
+<span class="fc bfc" id="L71" title="All 2 branches covered.">        if (db.get(CHAIN_HEAD_KEY) != null)</span>
+<span class="fc" id="L72">            return;   // Already initialised.</span>
+<span class="fc" id="L73">        Block genesis = context.getParams().getGenesisBlock().cloneAsHeader();</span>
+<span class="fc" id="L74">        StoredBlock storedGenesis = new StoredBlock(genesis, genesis.getWork(), 0);</span>
+<span class="fc" id="L75">        put(storedGenesis);</span>
+<span class="fc" id="L76">        setChainHead(storedGenesis);</span>
+<span class="fc" id="L77">    }</span>
+
+    @Override
+    public synchronized void put(StoredBlock block) throws BlockStoreException {
+<span class="fc" id="L81">        buffer.clear();</span>
+<span class="fc" id="L82">        block.serializeCompact(buffer);</span>
+<span class="fc" id="L83">        db.put(block.getHeader().getHash().getBytes(), buffer.array());</span>
+<span class="fc" id="L84">    }</span>
+
+    @Override @Nullable
+    public synchronized StoredBlock get(Sha256Hash hash) throws BlockStoreException {
+<span class="fc" id="L88">        byte[] bits = db.get(hash.getBytes());</span>
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">        if (bits == null)</span>
+<span class="nc" id="L90">            return null;</span>
+<span class="fc" id="L91">        return StoredBlock.deserializeCompact(context.getParams(), ByteBuffer.wrap(bits));</span>
+    }
+
+    @Override
+    public synchronized StoredBlock getChainHead() throws BlockStoreException {
+<span class="fc" id="L96">        return get(Sha256Hash.wrap(db.get(CHAIN_HEAD_KEY)));</span>
+    }
+
+    @Override
+    public synchronized void setChainHead(StoredBlock chainHead) throws BlockStoreException {
+<span class="fc" id="L101">        db.put(CHAIN_HEAD_KEY, chainHead.getHeader().getHash().getBytes());</span>
+<span class="fc" id="L102">    }</span>
+
+    @Override
+    public synchronized void close() throws BlockStoreException {
+        try {
+<span class="fc" id="L107">            db.close();</span>
+<span class="nc" id="L108">        } catch (IOException e) {</span>
+<span class="nc" id="L109">            throw new BlockStoreException(e);</span>
+<span class="fc" id="L110">        }</span>
+<span class="fc" id="L111">    }</span>
+
+    /** Erases the contents of the database (but NOT the underlying files themselves) and then reinitialises with the genesis block. */
+    public synchronized void reset() throws BlockStoreException {
+        try {
+<span class="fc" id="L116">            WriteBatch batch = db.createWriteBatch();</span>
+            try {
+<span class="fc" id="L118">                DBIterator it = db.iterator();</span>
+                try {
+<span class="fc" id="L120">                    it.seekToFirst();</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">                    while (it.hasNext())</span>
+<span class="fc" id="L122">                        batch.delete(it.next().getKey());</span>
+<span class="fc" id="L123">                    db.write(batch);</span>
+                } finally {
+<span class="pc" id="L125">                    it.close();</span>
+<span class="fc" id="L126">                }</span>
+            } finally {
+<span class="pc" id="L128">                batch.close();</span>
+<span class="fc" id="L129">            }</span>
+<span class="fc" id="L130">            initStoreIfNeeded();</span>
+<span class="nc" id="L131">        } catch (IOException e) {</span>
+<span class="nc" id="L132">            throw new BlockStoreException(e);</span>
+<span class="fc" id="L133">        }</span>
+<span class="fc" id="L134">    }</span>
+
+    public synchronized void destroy() throws IOException {
+<span class="fc" id="L137">        JniDBFactory.factory.destroy(path, new Options());</span>
+<span class="fc" id="L138">    }</span>
+
+    @Override
+    public NetworkParameters getParams() {
+<span class="nc" id="L142">        return context.getParams();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

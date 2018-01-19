@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>GetDataMessage.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">GetDataMessage.java</span></div><h1>GetDataMessage.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+/**
+ * &lt;p&gt;Represents the &quot;getdata&quot; P2P network message, which requests the contents of blocks or transactions given their
+ * hashes.&lt;/p&gt;
+ * 
+ * &lt;p&gt;Instances of this class are not safe for use by multiple threads.&lt;/p&gt;
+ */
+public class GetDataMessage extends ListMessage {
+
+    public GetDataMessage(NetworkParameters params, byte[] payloadBytes) throws ProtocolException {
+<span class="nc" id="L28">        super(params, payloadBytes);</span>
+<span class="nc" id="L29">    }</span>
+
+    /**
+     * Deserializes a 'getdata' message.
+     * @param params NetworkParameters object.
+     * @param payload Bitcoin protocol formatted byte array containing message content.
+     * @param serializer the serializer to use for this message.
+     * @param length The length of message if known.  Usually this is provided when deserializing of the wire
+     * as the length will be provided as part of the header.  If unknown then set to Message.UNKNOWN_LENGTH
+     * @throws ProtocolException
+     */
+    public GetDataMessage(NetworkParameters params, byte[] payload, MessageSerializer serializer, int length)
+            throws ProtocolException {
+<span class="fc" id="L42">        super(params, payload, serializer, length);</span>
+<span class="fc" id="L43">    }</span>
+
+    public GetDataMessage(NetworkParameters params) {
+<span class="fc" id="L46">        super(params);</span>
+<span class="fc" id="L47">    }</span>
+
+    public void addTransaction(Sha256Hash hash) {
+<span class="fc" id="L50">        addItem(new InventoryItem(InventoryItem.Type.Transaction, hash));</span>
+<span class="fc" id="L51">    }</span>
+
+    public void addBlock(Sha256Hash hash) {
+<span class="fc" id="L54">        addItem(new InventoryItem(InventoryItem.Type.Block, hash));</span>
+<span class="fc" id="L55">    }</span>
+
+    public void addFilteredBlock(Sha256Hash hash) {
+<span class="fc" id="L58">        addItem(new InventoryItem(InventoryItem.Type.FilteredBlock, hash));</span>
+<span class="fc" id="L59">    }</span>
+
+    public Sha256Hash getHashOf(int i) {
+<span class="fc" id="L62">        return getItems().get(i).hash;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

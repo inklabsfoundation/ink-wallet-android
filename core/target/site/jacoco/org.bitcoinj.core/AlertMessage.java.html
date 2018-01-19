@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>AlertMessage.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.core</a> &gt; <span class="el_source">AlertMessage.java</span></div><h1>AlertMessage.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2011 Google Inc.
+ * Copyright 2015 Andreas Schildbach
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.core;
+
+import java.util.Date;
+import java.util.HashSet;
+import java.util.Set;
+
+/**
+ * Alerts are signed messages that are broadcast on the peer-to-peer network if they match a hard-coded signing key.
+ * The private keys are held by a small group of core Bitcoin developers, and alerts may be broadcast in the event of
+ * an available upgrade or a serious network problem. Alerts have an expiration time, data that specifies what
+ * set of software versions it matches and the ability to cancel them by broadcasting another type of alert.&lt;p&gt;
+ *
+ * The right course of action on receiving an alert is usually to either ensure a human will see it (display on screen,
+ * log, email), or if you decide to use alerts for notifications that are specific to your app in some way, to parse it.
+ * For example, you could treat it as an upgrade notification specific to your app. Satoshi designed alerts to ensure
+ * that software upgrades could be distributed independently of a hard-coded website, in order to allow everything to
+ * be purely peer-to-peer. You don't have to use this of course, and indeed it often makes more sense not to.&lt;p&gt;
+ *     
+ * &lt;p&gt;Before doing anything with an alert, you should check {@link AlertMessage#isSignatureValid()}.&lt;/p&gt;
+ * 
+ * &lt;p&gt;Instances of this class are not safe for use by multiple threads.&lt;/p&gt;
+ */
+public class AlertMessage extends Message {
+    private byte[] content;
+    private byte[] signature;
+
+    // See the getters for documentation of what each field means.
+<span class="fc" id="L45">    private long version = 1;</span>
+    private Date relayUntil;
+    private Date expiration;
+    private long id;
+    private long cancel;
+    private long minVer, maxVer;
+    private long priority;
+    private String comment, statusBar, reserved;
+
+    // Chosen arbitrarily to avoid memory blowups.
+    private static final long MAX_SET_SIZE = 100;
+
+    public AlertMessage(NetworkParameters params, byte[] payloadBytes) throws ProtocolException {
+<span class="fc" id="L58">        super(params, payloadBytes, 0);</span>
+<span class="fc" id="L59">    }</span>
+
+    @Override
+    public String toString() {
+<span class="nc" id="L63">        return &quot;ALERT: &quot; + getStatusBar();</span>
+    }
+
+    @Override
+    protected void parse() throws ProtocolException {
+        // Alerts are formatted in two levels. The top level contains two byte arrays: a signature, and a serialized
+        // data structure containing the actual alert data.
+<span class="fc" id="L70">        int startPos = cursor;</span>
+<span class="fc" id="L71">        content = readByteArray();</span>
+<span class="fc" id="L72">        signature = readByteArray();</span>
+        // Now we need to parse out the contents of the embedded structure. Rewind back to the start of the message.
+<span class="fc" id="L74">        cursor = startPos;</span>
+<span class="fc" id="L75">        readVarInt();  // Skip the length field on the content array.</span>
+        // We're inside the embedded structure.
+<span class="fc" id="L77">        version = readUint32();</span>
+        // Read the timestamps. Bitcoin uses seconds since the epoch.
+<span class="fc" id="L79">        relayUntil = new Date(readUint64().longValue() * 1000);</span>
+<span class="fc" id="L80">        expiration = new Date(readUint64().longValue() * 1000);</span>
+<span class="fc" id="L81">        id = readUint32();</span>
+<span class="fc" id="L82">        cancel = readUint32();</span>
+        // Sets are serialized as &lt;len&gt;&lt;item&gt;&lt;item&gt;&lt;item&gt;....
+<span class="fc" id="L84">        long cancelSetSize = readVarInt();</span>
+<span class="pc bpc" id="L85" title="2 of 4 branches missed.">        if (cancelSetSize &lt; 0 || cancelSetSize &gt; MAX_SET_SIZE) {</span>
+<span class="nc" id="L86">            throw new ProtocolException(&quot;Bad cancel set size: &quot; + cancelSetSize);</span>
+        }
+        // Using a hashset here is very inefficient given that this will normally be only one item. But Java doesn't
+        // make it easy to do better. What we really want is just an array-backed set.
+<span class="fc" id="L90">        Set&lt;Long&gt; cancelSet = new HashSet&lt;&gt;((int) cancelSetSize);</span>
+<span class="pc bpc" id="L91" title="1 of 2 branches missed.">        for (long i = 0; i &lt; cancelSetSize; i++) {</span>
+<span class="nc" id="L92">            cancelSet.add(readUint32());</span>
+        }
+<span class="fc" id="L94">        minVer = readUint32();</span>
+<span class="fc" id="L95">        maxVer = readUint32();</span>
+        // Read the subver matching set.
+<span class="fc" id="L97">        long subverSetSize = readVarInt();</span>
+<span class="pc bpc" id="L98" title="2 of 4 branches missed.">        if (subverSetSize &lt; 0 || subverSetSize &gt; MAX_SET_SIZE) {</span>
+<span class="nc" id="L99">            throw new ProtocolException(&quot;Bad subver set size: &quot; + subverSetSize);</span>
+        }
+<span class="fc" id="L101">        Set&lt;String&gt; matchingSubVers = new HashSet&lt;&gt;((int) subverSetSize);</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">        for (long i = 0; i &lt; subverSetSize; i++) {</span>
+<span class="nc" id="L103">            matchingSubVers.add(readStr());</span>
+        }
+<span class="fc" id="L105">        priority = readUint32();</span>
+<span class="fc" id="L106">        comment = readStr();</span>
+<span class="fc" id="L107">        statusBar = readStr();</span>
+<span class="fc" id="L108">        reserved = readStr();</span>
+
+<span class="fc" id="L110">        length = cursor - offset;</span>
+<span class="fc" id="L111">    }</span>
+
+    /**
+     * Returns true if the digital signature attached to the message verifies. Don't do anything with the alert if it
+     * doesn't verify, because that would allow arbitrary attackers to spam your users.
+     */
+    public boolean isSignatureValid() {
+<span class="fc" id="L118">        return ECKey.verify(Sha256Hash.hashTwice(content), signature, params.getAlertSigningKey());</span>
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //  Field accessors.
+
+    /**
+     * The time at which the alert should stop being broadcast across the network. Note that you can still receive
+     * the alert after this time from other nodes if the alert still applies to them or to you.
+     */
+    public Date getRelayUntil() {
+<span class="fc" id="L129">        return relayUntil;</span>
+    }
+
+    public void setRelayUntil(Date relayUntil) {
+<span class="nc" id="L133">        this.relayUntil = relayUntil;</span>
+<span class="nc" id="L134">    }</span>
+
+    /**
+     * The time at which the alert ceases to be relevant. It should not be presented to the user or app administrator
+     * after this time.
+     */
+    public Date getExpiration() {
+<span class="fc" id="L141">        return expiration;</span>
+    }
+
+    public void setExpiration(Date expiration) {
+<span class="nc" id="L145">        this.expiration = expiration;</span>
+<span class="nc" id="L146">    }</span>
+
+    /**
+     * The numeric identifier of this alert. Each alert should have a unique ID, but the signer can choose any number.
+     * If an alert is broadcast with a cancel field higher than this ID, this alert is considered cancelled.
+     * @return uint32
+     */
+    public long getId() {
+<span class="fc" id="L154">        return id;</span>
+    }
+
+    public void setId(long id) {
+<span class="nc" id="L158">        this.id = id;</span>
+<span class="nc" id="L159">    }</span>
+
+    /**
+     * A marker that results in any alerts with an ID lower than this value to be considered cancelled.
+     * @return uint32
+     */
+    public long getCancel() {
+<span class="fc" id="L166">        return cancel;</span>
+    }
+
+    public void setCancel(long cancel) {
+<span class="nc" id="L170">        this.cancel = cancel;</span>
+<span class="nc" id="L171">    }</span>
+
+    /**
+     * The inclusive lower bound on software versions that are considered for the purposes of this alert. Bitcoin Core
+     * compares this against a protocol version field, but as long as the subVer field is used to restrict it your
+     * alerts could use any version numbers.
+     * @return uint32
+     */
+    public long getMinVer() {
+<span class="fc" id="L180">        return minVer;</span>
+    }
+
+    public void setMinVer(long minVer) {
+<span class="nc" id="L184">        this.minVer = minVer;</span>
+<span class="nc" id="L185">    }</span>
+
+    /**
+     * The inclusive upper bound on software versions considered for the purposes of this alert. Bitcoin Core
+     * compares this against a protocol version field, but as long as the subVer field is used to restrict it your
+     * alerts could use any version numbers.
+     */
+    public long getMaxVer() {
+<span class="fc" id="L193">        return maxVer;</span>
+    }
+
+    public void setMaxVer(long maxVer) {
+<span class="nc" id="L197">        this.maxVer = maxVer;</span>
+<span class="nc" id="L198">    }</span>
+
+    /**
+     * Provides an integer ordering amongst simultaneously active alerts.
+     * @return uint32
+     */
+    public long getPriority() {
+<span class="fc" id="L205">        return priority;</span>
+    }
+
+    public void setPriority(long priority) {
+<span class="nc" id="L209">        this.priority = priority;</span>
+<span class="nc" id="L210">    }</span>
+
+    /**
+     * This field is unused. It is presumably intended for the author of the alert to provide a justification for it
+     * visible to protocol developers but not users.
+     */
+    public String getComment() {
+<span class="nc" id="L217">        return comment;</span>
+    }
+
+    public void setComment(String comment) {
+<span class="nc" id="L221">        this.comment = comment;</span>
+<span class="nc" id="L222">    }</span>
+
+    /**
+     * A string that is intended to display in the status bar of Bitcoin Core's GUI client. It contains the user-visible
+     * message. English only.
+     */
+    public String getStatusBar() {
+<span class="fc" id="L229">        return statusBar;</span>
+    }
+
+    public void setStatusBar(String statusBar) {
+<span class="nc" id="L233">        this.statusBar = statusBar;</span>
+<span class="nc" id="L234">    }</span>
+
+    /**
+     * This field is never used.
+     */
+    public String getReserved() {
+<span class="nc" id="L240">        return reserved;</span>
+    }
+
+    public void setReserved(String reserved) {
+<span class="nc" id="L244">        this.reserved = reserved;</span>
+<span class="nc" id="L245">    }</span>
+    
+    public long getVersion() {
+<span class="nc" id="L248">        return version;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>

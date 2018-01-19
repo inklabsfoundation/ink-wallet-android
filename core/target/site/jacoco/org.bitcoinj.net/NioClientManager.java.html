@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../.resources/report.css" type="text/css"/><link rel="shortcut icon" href="../.resources/report.gif" type="image/gif"/><title>NioClientManager.java</title><link rel="stylesheet" href="../.resources/prettify.css" type="text/css"/><script type="text/javascript" src="../.resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../.sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">bitcoinj</a> &gt; <a href="index.source.html" class="el_package">org.bitcoinj.net</a> &gt; <span class="el_source">NioClientManager.java</span></div><h1>NioClientManager.java</h1><pre class="source lang-java linenums">/*
+ * Copyright 2013 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.bitcoinj.net;
+
+import com.google.common.base.Throwables;
+import com.google.common.util.concurrent.*;
+import org.bitcoinj.utils.*;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.net.ConnectException;
+import java.net.SocketAddress;
+import java.nio.channels.*;
+import java.nio.channels.spi.SelectorProvider;
+import java.util.*;
+import java.util.concurrent.*;
+
+/**
+ * A class which manages a set of client connections. Uses Java NIO to select network events and processes them in a
+ * single network processing thread.
+ */
+public class NioClientManager extends AbstractExecutionThreadService implements ClientConnectionManager {
+<span class="fc" id="L37">    private static final org.slf4j.Logger log = LoggerFactory.getLogger(NioClientManager.class);</span>
+
+    private final Selector selector;
+
+    class PendingConnect {
+        SocketChannel sc;
+        StreamConnection connection;
+        SocketAddress address;
+<span class="fc" id="L45">        SettableFuture&lt;SocketAddress&gt; future = SettableFuture.create();</span>
+
+<span class="fc" id="L47">        PendingConnect(SocketChannel sc, StreamConnection connection, SocketAddress address) { this.sc = sc; this.connection = connection; this.address = address; }</span>
+    }
+<span class="fc" id="L49">    final Queue&lt;PendingConnect&gt; newConnectionChannels = new LinkedBlockingQueue&lt;&gt;();</span>
+
+    // Added to/removed from by the individual ConnectionHandler's, thus must by synchronized on its own.
+<span class="fc" id="L52">    private final Set&lt;ConnectionHandler&gt; connectedHandlers = Collections.synchronizedSet(new HashSet&lt;ConnectionHandler&gt;());</span>
+
+    // Handle a SelectionKey which was selected
+    private void handleKey(SelectionKey key) throws IOException {
+        // We could have a !isValid() key here if the connection is already closed at this point
+<span class="pc bpc" id="L57" title="1 of 4 branches missed.">        if (key.isValid() &amp;&amp; key.isConnectable()) { // ie a client connection which has finished the initial connect process</span>
+            // Create a ConnectionHandler and hook everything together
+<span class="fc" id="L59">            PendingConnect data = (PendingConnect) key.attachment();</span>
+<span class="fc" id="L60">            StreamConnection connection = data.connection;</span>
+<span class="fc" id="L61">            SocketChannel sc = (SocketChannel) key.channel();</span>
+<span class="fc" id="L62">            ConnectionHandler handler = new ConnectionHandler(connection, key, connectedHandlers);</span>
+            try {
+<span class="pc bpc" id="L64" title="1 of 2 branches missed.">                if (sc.finishConnect()) {</span>
+<span class="fc" id="L65">                    log.info(&quot;Connected to {}&quot;, sc.socket().getRemoteSocketAddress());</span>
+<span class="fc" id="L66">                    key.interestOps((key.interestOps() | SelectionKey.OP_READ) &amp; ~SelectionKey.OP_CONNECT).attach(handler);</span>
+<span class="fc" id="L67">                    connection.connectionOpened();</span>
+<span class="fc" id="L68">                    data.future.set(data.address);</span>
+                } else {
+<span class="nc" id="L70">                    log.warn(&quot;Failed to connect to {}&quot;, sc.socket().getRemoteSocketAddress());</span>
+<span class="nc" id="L71">                    handler.closeConnection(); // Failed to connect for some reason</span>
+<span class="nc" id="L72">                    data.future.setException(new ConnectException(&quot;Unknown reason&quot;));</span>
+<span class="nc" id="L73">                    data.future = null;</span>
+                }
+<span class="nc" id="L75">            } catch (Exception e) {</span>
+                // If e is a CancelledKeyException, there is a race to get to interestOps after finishConnect() which
+                // may cause this. Otherwise it may be any arbitrary kind of connection failure.
+                // Calling sc.socket().getRemoteSocketAddress() here throws an exception, so we can only log the error itself
+<span class="nc" id="L79">                Throwable cause = Throwables.getRootCause(e);</span>
+<span class="nc" id="L80">                log.warn(&quot;Failed to connect with exception: {}: {}&quot;, cause.getClass().getName(), cause.getMessage(), e);</span>
+<span class="nc" id="L81">                handler.closeConnection();</span>
+<span class="nc" id="L82">                data.future.setException(cause);</span>
+<span class="nc" id="L83">                data.future = null;</span>
+<span class="fc" id="L84">            }</span>
+<span class="fc" id="L85">        } else // Process bytes read</span>
+<span class="fc" id="L86">            ConnectionHandler.handleKey(key);</span>
+<span class="fc" id="L87">    }</span>
+
+    /**
+     * Creates a new client manager which uses Java NIO for socket management. Uses a single thread to handle all select
+     * calls.
+     */
+<span class="fc" id="L93">    public NioClientManager() {</span>
+        try {
+<span class="fc" id="L95">            selector = SelectorProvider.provider().openSelector();</span>
+<span class="nc" id="L96">        } catch (IOException e) {</span>
+<span class="nc" id="L97">            throw new RuntimeException(e); // Shouldn't ever happen</span>
+<span class="fc" id="L98">        }</span>
+<span class="fc" id="L99">    }</span>
+
+    @Override
+    public void run() {
+        try {
+<span class="fc" id="L104">            Thread.currentThread().setPriority(Thread.MIN_PRIORITY);</span>
+<span class="fc bfc" id="L105" title="All 2 branches covered.">            while (isRunning()) {</span>
+                PendingConnect conn;
+<span class="fc bfc" id="L107" title="All 2 branches covered.">                while ((conn = newConnectionChannels.poll()) != null) {</span>
+                    try {
+<span class="fc" id="L109">                        SelectionKey key = conn.sc.register(selector, SelectionKey.OP_CONNECT);</span>
+<span class="fc" id="L110">                        key.attach(conn);</span>
+<span class="nc" id="L111">                    } catch (ClosedChannelException e) {</span>
+<span class="nc" id="L112">                        log.warn(&quot;SocketChannel was closed before it could be registered&quot;);</span>
+<span class="pc" id="L113">                    }</span>
+                }
+
+<span class="fc" id="L116">                selector.select();</span>
+
+<span class="fc" id="L118">                Iterator&lt;SelectionKey&gt; keyIterator = selector.selectedKeys().iterator();</span>
+<span class="fc bfc" id="L119" title="All 2 branches covered.">                while (keyIterator.hasNext()) {</span>
+<span class="fc" id="L120">                    SelectionKey key = keyIterator.next();</span>
+<span class="fc" id="L121">                    keyIterator.remove();</span>
+<span class="fc" id="L122">                    handleKey(key);</span>
+<span class="fc" id="L123">                }</span>
+<span class="fc" id="L124">            }</span>
+<span class="nc" id="L125">        } catch (Exception e) {</span>
+<span class="nc" id="L126">            log.warn(&quot;Error trying to open/read from connection: &quot;, e);</span>
+        } finally {
+            // Go through and close everything, without letting IOExceptions get in our way
+<span class="pc bpc" id="L129" title="4 of 6 branches missed.">            for (SelectionKey key : selector.keys()) {</span>
+                try {
+<span class="pc" id="L131">                    key.channel().close();</span>
+<span class="nc" id="L132">                } catch (IOException e) {</span>
+<span class="nc" id="L133">                    log.warn(&quot;Error closing channel&quot;, e);</span>
+<span class="pc" id="L134">                }</span>
+<span class="pc" id="L135">                key.cancel();</span>
+<span class="pc bpc" id="L136" title="5 of 6 branches missed.">                if (key.attachment() instanceof ConnectionHandler)</span>
+<span class="pc" id="L137">                    ConnectionHandler.handleKey(key); // Close connection if relevant</span>
+<span class="pc" id="L138">            }</span>
+            try {
+<span class="pc" id="L140">                selector.close();</span>
+<span class="nc" id="L141">            } catch (IOException e) {</span>
+<span class="nc" id="L142">                log.warn(&quot;Error closing client manager selector&quot;, e);</span>
+<span class="pc" id="L143">            }</span>
+<span class="nc" id="L144">        }</span>
+<span class="fc" id="L145">    }</span>
+
+    @Override
+    public ListenableFuture&lt;SocketAddress&gt; openConnection(SocketAddress serverAddress, StreamConnection connection) {
+<span class="pc bpc" id="L149" title="1 of 2 branches missed.">        if (!isRunning())</span>
+<span class="nc" id="L150">            throw new IllegalStateException();</span>
+        // Create a new connection, give it a connection as an attachment
+        try {
+<span class="fc" id="L153">            SocketChannel sc = SocketChannel.open();</span>
+<span class="fc" id="L154">            sc.configureBlocking(false);</span>
+<span class="fc" id="L155">            sc.connect(serverAddress);</span>
+<span class="fc" id="L156">            PendingConnect data = new PendingConnect(sc, connection, serverAddress);</span>
+<span class="fc" id="L157">            newConnectionChannels.offer(data);</span>
+<span class="fc" id="L158">            selector.wakeup();</span>
+<span class="fc" id="L159">            return data.future;</span>
+<span class="nc" id="L160">        } catch (Throwable e) {</span>
+<span class="nc" id="L161">            return Futures.immediateFailedFuture(e);</span>
+        }
+    }
+
+    @Override
+    public void triggerShutdown() {
+<span class="fc" id="L167">        selector.wakeup();</span>
+<span class="fc" id="L168">    }</span>
+
+    @Override
+    public int getConnectedClientCount() {
+<span class="nc" id="L172">        return connectedHandlers.size();</span>
+    }
+
+    @Override
+    public void closeConnections(int n) {
+<span class="nc bnc" id="L177" title="All 2 branches missed.">        while (n-- &gt; 0) {</span>
+            ConnectionHandler handler;
+<span class="nc" id="L179">            synchronized (connectedHandlers) {</span>
+<span class="nc" id="L180">                handler = connectedHandlers.iterator().next();</span>
+<span class="nc" id="L181">            }</span>
+<span class="nc bnc" id="L182" title="All 2 branches missed.">            if (handler != null)</span>
+<span class="nc" id="L183">                handler.closeConnection(); // Removes handler from connectedHandlers before returning</span>
+<span class="nc" id="L184">        }</span>
+<span class="nc" id="L185">    }</span>
+
+    @Override
+    protected Executor executor() {
+<span class="fc" id="L189">        return new Executor() {</span>
+            @Override
+            public void execute(Runnable command) {
+<span class="fc" id="L192">                new ContextPropagatingThreadFactory(&quot;NioClientManager&quot;).newThread(command).start();</span>
+<span class="fc" id="L193">            }</span>
+        };
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.5.201505241946</span></div></body></html>
