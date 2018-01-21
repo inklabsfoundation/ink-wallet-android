@@ -7,4 +7,10 @@
         <attr name="frame_color" format="color" />
     </declare-styleable>
 
+    <declare-styleable name="PinCodeLayout">
+        <attr name="pinCodeMarginLeftRight" format="dimension"/>
+        <attr name="pinCodeMarginBottom" format="dimension"/>
+        <attr name="pinCodeMaxCount" format="integer"/>
+    </declare-styleable>
+
 </resources>
