@@ -20,7 +20,6 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,7 +46,7 @@ public class PinCodeLayout extends LinearLayout {
     private List<EditText> editTextList = new ArrayList<>();
 
     public interface OnPinCodeListener {
-        void onTextChanged(String text);
+        void pinCodeCreated(String pin);
     }
 
     public PinCodeLayout(Context context, AttributeSet attrs, int defStyle) {
@@ -96,7 +95,6 @@ public class PinCodeLayout extends LinearLayout {
         setOrientation(LinearLayout.VERTICAL);
 
         pinCodeLayout = new LinearLayout(context);
-//        pinCodeLayout.setId(R.id.pin_header);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         p.bottomMargin = pinCodeMarginBottom;
         p.leftMargin = pinCodeLeftRight;
@@ -113,21 +111,16 @@ public class PinCodeLayout extends LinearLayout {
         RelativeLayout.LayoutParams giParam = new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
 
-//        giParam.addRule(RelativeLayout.BELOW, R.id.pin_header);
-
         addView(pinCodeLayout);
 
+        editTextList.get(0).requestFocus();
+        editTextList.get(0).performClick();
         KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(0));
-//        addView(getWarningView());
-//        addView(guardaInputLayout);
 
-//        setOnClickListener(new OnClickListener() {
-//            @Override
-//            public void onClick(View view) {
-//                clearAll();
-//                KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(0));
-//            }
-//        });
+    }
+
+    public void setFocus() {
+        KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(0));
     }
 
     private void setEditTextListeners() {
@@ -144,7 +137,6 @@ public class PinCodeLayout extends LinearLayout {
                     int currentPosition = getCurrentEtPosition(et);
                     if (charSequence.toString().length() == 0) {
                         editTextList.contains(et);
-                        Log.d("!!!!!", "editTextList.contains(et) " + editTextList.contains(et) + " pos = " + currentPosition);
                         if (currentPosition != 0) {
                             KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(currentPosition - 1));
                         }
@@ -153,7 +145,7 @@ public class PinCodeLayout extends LinearLayout {
                             KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(currentPosition + 1));
                         } else if (currentPosition == editTextList.size() - 1) {
                             pinText = getPinCodeText();
-                            Toast.makeText(getContext(), pinText, Toast.LENGTH_LONG).show();
+                            listener.pinCodeCreated(pinText);
                         }
                     }
                 }
@@ -164,31 +156,47 @@ public class PinCodeLayout extends LinearLayout {
                 }
             });
 
-            et.setOnClickListener(new OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    clearAll();
-                    KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(0));
-                }
-            });
-
             et.setOnKeyListener(new OnKeyListener() {
                 @Override
                 public boolean onKey(View v, int keyCode, KeyEvent event) {
-                    //You can identify which key pressed buy checking keyCode value with KeyEvent.KEYCODE_
                     if (keyCode == KeyEvent.KEYCODE_DEL) {
                         //this is for backspace
                         int currentPosition = getCurrentEtPosition(et);
                         if (TextUtils.isEmpty(et.getText().toString())) {
-                            editTextList.get(currentPosition - 1).setText("");
-                            KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(currentPosition - 1));
+                            if (currentPosition != 0) {
+                                if (currentPosition == editTextList.size() - 1) {
+                                    editTextList.get(currentPosition - 1).setText("");
+                                } else {
+                                    editTextList.get(currentPosition - 1).setText("");
+                                    KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(currentPosition - 1));
+                                }
+                            }
                         }
                     }
                     return false;
                 }
             });
+
+            et.setOnFocusChangeListener(new OnFocusChangeListener() {
+                @Override
+                public void onFocusChange(View view, boolean b) {
+                    if (b) {
+                        setFocusToLastFillEt();
+                    }
+                }
+            });
         }
 
+    }
+
+    private void setFocusToLastFillEt() {
+        for (EditText et : editTextList) {
+            if (et.getText().toString().isEmpty()) {
+                KeyboardManager.setFocusAndOpenKeyboard(getContext(), et);
+                return;
+            }
+        }
+        KeyboardManager.setFocusAndOpenKeyboard(getContext(), editTextList.get(editTextList.size() - 1));
     }
 
     private String getPinCodeText() {
@@ -201,14 +209,16 @@ public class PinCodeLayout extends LinearLayout {
 
     private int getCurrentEtPosition(EditText et) {
         for (int i = 0; i < editTextList.size(); i++) {
-            if (editTextList.get(i).equals(et)) {
+//            if (editTextList.get(i).equals(et)) {
+            if (editTextList.get(i).hasFocus()) {
                 return i;
             }
         }
-        return -1;
+
+        return editTextList.size() - 1;
     }
 
-    private void clearAll() {
+    public void clearAll() {
         for (int i = 0; i < editTextList.size(); i++) {
             editTextList.get(i).setText("");
         }
@@ -219,36 +229,6 @@ public class PinCodeLayout extends LinearLayout {
             pinCodeLayout.addView(et);
         }
     }
-
-//    private View getWarningView() {
-//        warningView = LayoutInflater.from(context).inflate(R.layout.pin_code_warning_layout, null);
-//        warningText = (TextView) warningView.findViewById(R.id.tv_warning_text);
-//        warningView.setVisibility(INVISIBLE);
-//        return warningView;
-//    }
-
-//    private void checkPinCodeImg(int colCheckedPin) {
-//        for (int i = 0; i < maxCount; i++) {
-//            ImageView pinImageView = (ImageView) pinCodeLayout.getChildAt(i);
-//            if (i < colCheckedPin) {
-//                pinImageView.setImageResource(R.drawable.ic_pin_code_fill);
-//            } else {
-//                pinImageView.setImageResource(R.drawable.ic_pin_code);
-//            }
-//        }
-//        invalidate();
-//    }
-
-//    private View getPinImageView(Context context) {
-//        ImageView imageView = new ImageView(context);
-//        imageView.setImageResource(R.drawable.ic_pin_code);
-//
-//        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-//        p.weight = 1;
-//        imageView.setLayoutParams(p);
-//
-//        return imageView;
-//    }
 
     private EditText getPinEditText(Context context) {
         EditText editText = new EditText(context);
@@ -263,9 +243,8 @@ public class PinCodeLayout extends LinearLayout {
         editText.setGravity(Gravity.CENTER | Gravity.CENTER_HORIZONTAL | Gravity.CENTER_VERTICAL);
         editText.setTextSize(16);
         editText.setPadding(0, 0, 0, 0);
-//        editText.setEnabled(false);
 
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(70, 100);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(90, 110);
         p.leftMargin = 25;
         p.rightMargin = 25;
         editText.setLayoutParams(p);
@@ -279,7 +258,7 @@ public class PinCodeLayout extends LinearLayout {
         new Handler().postDelayed(new Runnable() {
             @Override
             public void run() {
-//                guardaInputLayout.clearText();
+                clearAll();
             }
         }, VIBRATE_ERROR_TIME);
 

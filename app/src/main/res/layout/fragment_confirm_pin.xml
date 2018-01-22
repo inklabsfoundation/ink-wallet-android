@@ -62,7 +62,7 @@
                 android:focusable="true"
                 android:focusableInTouchMode="true"
                 android:gravity="center"
-                android:text="@string/set_your_pin"
+                android:text="@string/confirm_your_pin"
                 android:textColor="@color/dark_gray_text_color"
                 android:textStyle="bold"
                 app:layout_constraintEnd_toEndOf="parent"
