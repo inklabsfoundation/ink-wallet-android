@@ -13,7 +13,9 @@ import butterknife.BindView;
 import butterknife.ButterKnife;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.utils.Coders;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 import ink.qtum.org.views.fragments.ConfirmPinFragment;
 import ink.qtum.org.views.fragments.CreatePinFragment;
@@ -35,6 +37,9 @@ ConfirmPinFragment.OnPinConfirmedListener{
 
     @Inject
     WalletManager walletManager;
+
+    @Inject
+    SharedManager sharedManager;
 
     private String mSeed;
     private String mPin;
@@ -90,7 +95,7 @@ ConfirmPinFragment.OnPinConfirmedListener{
 
     @Override
     public void onConfirmed(String pin) {
-        // todo save pin
+        sharedManager.setPinCode(Coders.getSha1Hex(pin));
         showWalletFragment();
     }
 

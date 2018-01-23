@@ -10,6 +10,10 @@
     <declare-styleable name="PinCodeLayout">
         <attr name="pinCodeMarginLeftRight" format="dimension"/>
         <attr name="pinCodeMarginBottom" format="dimension"/>
+        <attr name="pinCellWidth" format="dimension"/>
+        <attr name="pinCellHeight" format="dimension"/>
+        <attr name="pinCellMarginLeft" format="dimension"/>
+        <attr name="pinCellMarginRight" format="dimension"/>
         <attr name="pinCodeMaxCount" format="integer"/>
     </declare-styleable>
 

@@ -99,4 +99,6 @@
     </string>
     <string name="ink">INK</string>
     <string name="confirm_your_pin">Confirm your PIN</string>
+    <string name="input_pin_to_unlock">Input your PIN to unlock</string>
+    <string name="input_pin_to_backup">Input your PIN to backup</string>
 </resources>

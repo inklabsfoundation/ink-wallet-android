@@ -33,6 +33,10 @@ public class PinCodeLayout extends LinearLayout {
     private int pinCodeLeftRight = 24;
     private int pinCodeMarginBottom = 24;
     private Integer maxCount = 6;
+    private int cellWidth = 90;
+    private int cellHeight = 110;
+    private int cellMarginLeft = 25;
+    private int cellMarginRight = 25;
 
     private final int VIBRATE_ERROR_TIME = 400;
 
@@ -85,6 +89,10 @@ public class PinCodeLayout extends LinearLayout {
             TypedArray a = getContext().obtainStyledAttributes(attrs, R.styleable.PinCodeLayout);
             pinCodeLeftRight = a.getDimensionPixelSize(R.styleable.PinCodeLayout_pinCodeMarginLeftRight, pinCodeLeftRight);
             pinCodeMarginBottom = a.getDimensionPixelSize(R.styleable.PinCodeLayout_pinCodeMarginBottom, pinCodeMarginBottom);
+            cellWidth = a.getDimensionPixelSize(R.styleable.PinCodeLayout_pinCellWidth, cellWidth);
+            cellHeight = a.getDimensionPixelSize(R.styleable.PinCodeLayout_pinCellHeight, cellHeight);
+            cellMarginLeft = a.getDimensionPixelSize(R.styleable.PinCodeLayout_pinCellMarginLeft, cellMarginLeft);
+            cellMarginRight = a.getDimensionPixelSize(R.styleable.PinCodeLayout_pinCellMarginRight, cellMarginRight);
             maxCount = a.getInt(R.styleable.PinCodeLayout_pinCodeMaxCount, maxCount);
         }
     }
@@ -244,9 +252,9 @@ public class PinCodeLayout extends LinearLayout {
         editText.setTextSize(16);
         editText.setPadding(0, 0, 0, 0);
 
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(90, 110);
-        p.leftMargin = 25;
-        p.rightMargin = 25;
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(cellWidth, cellHeight);
+        p.leftMargin = cellMarginLeft;
+        p.rightMargin = cellMarginRight;
         editText.setLayoutParams(p);
 
         return editText;
