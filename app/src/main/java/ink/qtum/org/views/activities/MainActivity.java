@@ -76,11 +76,11 @@ public class MainActivity extends BaseActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (TextUtils.isEmpty(sharedManager.getPinCode())) {
-            logOut();
-        }
+//        if (TextUtils.isEmpty(sharedManager.getPinCode())) {
+//            logOut();
+//        }
 
-        if (!QtumApp.isIsAccessAllowed()) {
+        if (!QtumApp.isIsAccessAllowed() && !TextUtils.isEmpty(sharedManager.getPinCode())) {
             DialogManager.showPinCodeDialog(this, sharedManager.getPinCode(), getString(R.string.input_pin_to_unlock),
                     false, new DialogManager.DialogListener() {
                         @Override

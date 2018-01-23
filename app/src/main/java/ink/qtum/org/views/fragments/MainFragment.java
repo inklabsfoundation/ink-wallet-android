@@ -3,6 +3,7 @@ package ink.qtum.org.views.fragments;
 import android.content.Intent;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -218,15 +219,19 @@ public class MainFragment extends BaseFragment {
 
     @OnClick(R.id.cl_backup)
     public void onBackupClick() {
-        DialogManager.showPinCodeDialog(getContext(), sharedManager.getPinCode(), getString(R.string.input_pin_to_backup),
-                true, new DialogManager.DialogListener() {
-                    @Override
-                    public void onPositiveButtonClick() {
-                        super.onPositiveButtonClick();
-                        startActivity(new Intent(getActivity(), BackupActivity.class));
-                    }
+        if (!TextUtils.isEmpty(sharedManager.getPinCode())) {
+            DialogManager.showPinCodeDialog(getContext(), sharedManager.getPinCode(), getString(R.string.input_pin_to_backup),
+                    true, new DialogManager.DialogListener() {
+                        @Override
+                        public void onPositiveButtonClick() {
+                            super.onPositiveButtonClick();
+                            startActivity(new Intent(getActivity(), BackupActivity.class));
+                        }
 
-                });
+                    });
+        } else {
+            startActivity(new Intent(getActivity(), BackupActivity.class));
+        }
     }
 
     @OnClick(R.id.rl_receive)
