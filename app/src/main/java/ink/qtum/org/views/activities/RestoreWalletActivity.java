@@ -10,17 +10,28 @@ import javax.inject.Inject;
 import autodagger.AutoInjector;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.managers.WalletCreationCallback;
 import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.utils.Coders;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 import ink.qtum.org.views.fragments.InputMnemonicFragment;
+import ink.qtum.org.views.fragments.RestoreWalletConfirmPinFragment;
+import ink.qtum.org.views.fragments.RestoreWalletPinFragment;
 
 
 @AutoInjector(QtumApp.class)
-public class RestoreWalletActivity extends AToolbarActivity implements InputMnemonicFragment.OnMnemonicFragmentInteractionListener {
+public class RestoreWalletActivity extends AToolbarActivity implements InputMnemonicFragment.OnMnemonicFragmentInteractionListener,
+        RestoreWalletPinFragment.OnPinFragmentInteractionListener,
+        RestoreWalletConfirmPinFragment.OnPinConfirmedListener {
 
     @Inject
     WalletManager walletManager;
+
+    @Inject
+    SharedManager sharedManager;
+
+    private String mnemonic;
 
     @Override
     protected void init(Bundle savedInstanceState) {
@@ -40,7 +51,19 @@ public class RestoreWalletActivity extends AToolbarActivity implements InputMnem
     }
 
     private void restoreWallet(String mnemonics) {
-        walletManager.restoreWallet(mnemonics, new WalletCreationCallback() {
+        mnemonic = mnemonics;
+        showPinFragment();
+    }
+
+    @Override
+    public void onPinEntered(String pin) {
+        showConfirmPinFragment(pin);
+    }
+
+    @Override
+    public void onConfirmed(String pin) {
+        sharedManager.setPinCode(Coders.getSha1Hex(pin));
+        walletManager.restoreWallet(mnemonic, new WalletCreationCallback() {
             @Override
             public void onWalletCreated(Wallet wallet) {
                 openMainActivity();
@@ -55,4 +78,17 @@ public class RestoreWalletActivity extends AToolbarActivity implements InputMnem
                 .commit();
     }
 
+    private void showPinFragment() {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.beginTransaction()
+                .replace(R.id.fl_fragment_container, RestoreWalletPinFragment.newInstance())
+                .commit();
+    }
+
+    private void showConfirmPinFragment(String pin) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.beginTransaction()
+                .replace(R.id.fl_fragment_container, RestoreWalletConfirmPinFragment.newInstance(pin))
+                .commit();
+    }
 }

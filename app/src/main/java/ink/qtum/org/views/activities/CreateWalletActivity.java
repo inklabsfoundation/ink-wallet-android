@@ -17,8 +17,8 @@ import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.utils.Coders;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
-import ink.qtum.org.views.fragments.ConfirmPinFragment;
-import ink.qtum.org.views.fragments.CreatePinFragment;
+import ink.qtum.org.views.fragments.CreateWalletConfirmPinFragment;
+import ink.qtum.org.views.fragments.CreateWalletPinFragment;
 import ink.qtum.org.views.fragments.CreateSeedFragment;
 import ink.qtum.org.views.fragments.CreateWalletFragment;
 
@@ -28,9 +28,9 @@ import ink.qtum.org.views.fragments.CreateWalletFragment;
 
 @AutoInjector(QtumApp.class)
 public class CreateWalletActivity extends AToolbarActivity implements CreateSeedFragment.OnSeedFragmentInteractionListener,
-        CreatePinFragment.OnPinFragmentInteractionListener,
         CreateWalletFragment.OnWalletFragmentInteractionListener,
-ConfirmPinFragment.OnPinConfirmedListener{
+        CreateWalletPinFragment.OnPinFragmentInteractionListener,
+        CreateWalletConfirmPinFragment.OnPinConfirmedListener {
 
     @BindView(R.id.pb_create_progress)
     ProgressBar pbCreateProgress;
@@ -42,7 +42,6 @@ ConfirmPinFragment.OnPinConfirmedListener{
     SharedManager sharedManager;
 
     private String mSeed;
-    private String mPin;
 
     @Override
     protected void init(Bundle savedInstanceState) {
@@ -83,14 +82,13 @@ ConfirmPinFragment.OnPinConfirmedListener{
         setCreateProgress(2);
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
-                .replace(R.id.fl_fragment_container, CreatePinFragment.newInstance())
+                .replace(R.id.fl_fragment_container, CreateWalletPinFragment.newInstance())
                 .commit();
     }
 
     @Override
     public void onPinEntered(String pin) {
-        mPin = pin;
-       showConfirmPinFragment(pin);
+        showConfirmPinFragment(pin);
     }
 
     @Override
@@ -110,7 +108,7 @@ ConfirmPinFragment.OnPinConfirmedListener{
     private void showConfirmPinFragment(String pin) {
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
-                .replace(R.id.fl_fragment_container, ConfirmPinFragment.newInstance(pin))
+                .replace(R.id.fl_fragment_container, CreateWalletConfirmPinFragment.newInstance(pin))
                 .commit();
     }
 

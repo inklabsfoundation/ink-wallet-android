@@ -18,8 +18,8 @@
     And you have not been to remember it. Be aware that you can not get the same address even though
      input the same seeds here.</string>
     <string name="set_your_pin">Set your PIN</string>
-    <string name="about_the_pin">About the PIN:\nPIN is a six-digit-number to unlock your ink wallet
-     app. Each time when you log out, you have to reset it.</string>
+    <string name="about_the_pin">About the PIN:\nPIN is a six-digit-number used to unlock this wallet address for INK wallet
+     app. It is not related with your web-wallet-PIN. Each time when you log out, you have to reset it.</string>
     <string name="here_is_your_wallet_address">Here is your wallet address and mnemonics</string>
     <string name="wallet_address_is_the_identity_of_your_wallet">Wallet address is the identity of your wallet.
     You can tell it to others.
@@ -101,4 +101,5 @@
     <string name="confirm_your_pin">Confirm your PIN</string>
     <string name="input_pin_to_unlock">Input your PIN to unlock</string>
     <string name="input_pin_to_backup">Input your PIN to backup</string>
+    <string name="btn_done">Done</string>
 </resources>

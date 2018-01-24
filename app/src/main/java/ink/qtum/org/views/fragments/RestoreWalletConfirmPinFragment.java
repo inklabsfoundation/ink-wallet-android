@@ -1,9 +1,10 @@
 package ink.qtum.org.views.fragments;
 
 import android.content.Context;
-import android.support.v7.widget.AppCompatButton;
 import android.view.View;
+import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.Toast;
 
 import butterknife.BindView;
 import butterknife.OnClick;
@@ -12,31 +13,33 @@ import ink.qtum.org.views.custom.PinCodeLayout;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 
 
-public class CreatePinFragment extends BaseFragment {
+public class RestoreWalletConfirmPinFragment extends BaseFragment {
 
-
-    @BindView(R.id.btn_next)
-    AppCompatButton btnNext;
+    @BindView(R.id.btn_restore_pin_done)
+    Button btnPinDone;
 
     @BindView(R.id.ib_close)
     ImageView ivClose;
     @BindView(R.id.pin_code_layout)
     PinCodeLayout pinCode;
 
-    private String pinStr;
-    private OnPinFragmentInteractionListener mListener;
+    private static String firstPin;
+    private static String secondPin;
 
-    public CreatePinFragment() {
+    private OnPinConfirmedListener mListener;
+
+    public RestoreWalletConfirmPinFragment() {
         // Required empty public constructor
     }
 
-    public static CreatePinFragment newInstance() {
-        return new CreatePinFragment();
+    public static RestoreWalletConfirmPinFragment newInstance(String pin) {
+        firstPin = pin;
+        return new RestoreWalletConfirmPinFragment();
     }
 
     @Override
     protected int getLayout() {
-        return R.layout.fragment_create_pin;
+        return R.layout.fragment_restore_wallet_confirm_pin;
     }
 
     @Override
@@ -45,12 +48,14 @@ public class CreatePinFragment extends BaseFragment {
         pinCode.setInputListener(new PinCodeLayout.OnPinCodeListener() {
             @Override
             public void pinCodeCreated(String pin) {
-                pinStr = pin;
+                btnPinDone.setEnabled(true);
+                secondPin = pin;
             }
         });
     }
 
     private void initViews() {
+        btnPinDone.setEnabled(false);
         ivClose.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -62,8 +67,8 @@ public class CreatePinFragment extends BaseFragment {
     @Override
     public void onAttach(Context context) {
         super.onAttach(context);
-        if (context instanceof OnPinFragmentInteractionListener) {
-            mListener = (OnPinFragmentInteractionListener) context;
+        if (context instanceof OnPinConfirmedListener) {
+            mListener = (OnPinConfirmedListener) context;
         } else {
             throw new RuntimeException(context.toString()
                     + " must implement OnSeedFragmentInteractionListener");
@@ -76,10 +81,13 @@ public class CreatePinFragment extends BaseFragment {
         mListener = null;
     }
 
-    @OnClick(R.id.btn_next)
+    @OnClick(R.id.btn_restore_pin_done)
     void onNextClick() {
-        if (!android.text.TextUtils.isEmpty(pinStr)){
-            mListener.onPinEntered(pinStr);
+        if (firstPin.equalsIgnoreCase(secondPin)) {
+            mListener.onConfirmed(secondPin);
+        } else {
+            Toast.makeText(getContext(), "Pin code is not match", Toast.LENGTH_LONG).show();
+            pinCode.callError();
         }
     }
 
@@ -89,7 +97,7 @@ public class CreatePinFragment extends BaseFragment {
         pinCode.clearAll();
     }
 
-    public interface OnPinFragmentInteractionListener {
-        void onPinEntered(String pin);
+    public interface OnPinConfirmedListener {
+        void onConfirmed(String pin);
     }
 }

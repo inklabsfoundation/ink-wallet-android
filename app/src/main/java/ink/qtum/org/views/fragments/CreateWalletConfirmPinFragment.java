@@ -1,7 +1,6 @@
 package ink.qtum.org.views.fragments;
 
 import android.content.Context;
-import android.support.v7.widget.AppCompatButton;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.Toast;
@@ -13,11 +12,8 @@ import ink.qtum.org.views.custom.PinCodeLayout;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 
 
-public class ConfirmPinFragment extends BaseFragment {
+public class CreateWalletConfirmPinFragment extends BaseFragment {
 
-
-    @BindView(R.id.btn_next)
-    AppCompatButton btnNext;
 
     @BindView(R.id.ib_close)
     ImageView ivClose;
@@ -28,18 +24,18 @@ public class ConfirmPinFragment extends BaseFragment {
 
     private OnPinConfirmedListener mListener;
 
-    public ConfirmPinFragment() {
+    public CreateWalletConfirmPinFragment() {
         // Required empty public constructor
     }
 
-    public static ConfirmPinFragment newInstance(String pin) {
+    public static CreateWalletConfirmPinFragment newInstance(String pin) {
         firstPin = pin;
-        return new ConfirmPinFragment();
+        return new CreateWalletConfirmPinFragment();
     }
 
     @Override
     protected int getLayout() {
-        return R.layout.fragment_confirm_pin;
+        return R.layout.fragment_create_wallet_confirm_pin;
     }
 
     @Override
