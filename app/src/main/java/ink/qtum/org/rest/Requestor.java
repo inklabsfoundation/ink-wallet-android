@@ -29,6 +29,12 @@ public class Requestor {
         ApiMethods.makeRequest(call, listener);
     }
 
+    public static void getUTXOListForToken(String address, ApiMethods.RequestListener listener) {
+        Call call = ApiMethods.createInsightApi().getUTXOByAddressForToken(address);
+        Log.d("Request", "path " + call.request());
+        ApiMethods.makeRequest(call, listener);
+    }
+
     public static void sendRawTx(String rawTx, ApiMethods.RequestListener listener){
         Call call = ApiMethods.createInsightApi().sendRawTx(rawTx);
         Log.d("Request", "path " + call.request());

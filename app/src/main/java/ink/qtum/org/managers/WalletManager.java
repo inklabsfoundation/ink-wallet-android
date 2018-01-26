@@ -1,6 +1,7 @@
 package ink.qtum.org.managers;
 
 import android.content.Context;
+import android.util.Log;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -16,12 +17,15 @@ import org.bitcoinj.core.UTXO;
 import org.bitcoinj.core.UTXOProvider;
 import org.bitcoinj.core.UTXOProviderException;
 import org.bitcoinj.params.QtumMainNetParams;
+import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.wallet.DeterministicSeed;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
 import org.spongycastle.util.encoders.Hex;
 
+import java.math.BigDecimal;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -30,9 +34,12 @@ import javax.inject.Inject;
 
 import autodagger.AutoInjector;
 import ink.qtum.org.QtumApp;
+import ink.qtum.org.models.contract.ContractMethodParameter;
+import ink.qtum.org.models.contract.UnspentOutput;
 import ink.qtum.org.models.response.UtxoItemResponse;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
+import ink.qtum.org.utils.ContractBuilder;
 import ink.qtum.org.utils.CryptoUtils;
 import ink.qtum.org.utils.FileUtils;
 
@@ -198,6 +205,68 @@ public class WalletManager {
 
     public Coin getQtumBalance(){
         return walletQtumBalance;
+    }
+
+    public void sendTokens(String addressTo, String resultAmount, final String tokenAddress,
+                           final ApiMethods.RequestListener listener){
+
+        for (Address address : wallet.getIssuedReceiveAddresses()) {
+            Log.d("svcom", "watched addr - " + address.toBase58());
+        }
+
+        final int gasLimit = 300000;
+        final int gasPrice = 40;
+        final String fee = getValidatedFee(0.0002);
+        final String abiParams = createAbiMethodParams(addressTo, resultAmount);
+
+        Requestor.getUTXOListForToken(walletFriendlyAddress, new ApiMethods.RequestListener() {
+            @Override
+            public void onSuccess(Object response) {
+                List<UnspentOutput> unspentOutputs = (List<UnspentOutput>)response;
+                for (UnspentOutput output : unspentOutputs) {
+                    Log.d("svcom", "output - " + output);
+                }
+                if (unspentOutputs != null && !unspentOutputs.isEmpty()) {
+                    String tokenHexTx = createTokenHexTx(abiParams, tokenAddress, gasLimit,
+                            gasPrice, fee, unspentOutputs);
+                    Log.d("svcom", "tokenHexTx = " + tokenHexTx);
+                    sendTx(tokenHexTx, listener);
+                }
+            }
+
+            @Override
+            public void onFailure(String msg) {
+
+            }
+        });
+    }
+
+    private String createTokenHexTx(String abiParams, String tokenAddress, int gasLimit, int gasPrice,
+                                    String fee, List<UnspentOutput> unspentOutputs) {
+
+        ContractBuilder contractBuilder = new ContractBuilder();
+        Script script = contractBuilder.createMethodScript(abiParams, gasLimit, gasPrice, tokenAddress);
+
+        return contractBuilder.createTransactionHash(script, unspentOutputs, gasLimit, gasPrice,
+                BigDecimal.valueOf(0.0001), fee,
+                context, params, walletAddress, wallet);
+    }
+
+    private String createAbiMethodParams(String address, String resultAmount){
+        ContractBuilder contractBuilder = new ContractBuilder();
+        List<ContractMethodParameter> contractMethodParameterList = new ArrayList<>();
+        ContractMethodParameter contractMethodParameterAddress = new ContractMethodParameter("_to", "address", address);
+
+        ContractMethodParameter contractMethodParameterAmount = new ContractMethodParameter("_value", "uint256", resultAmount);
+        contractMethodParameterList.add(contractMethodParameterAddress);
+        contractMethodParameterList.add(contractMethodParameterAmount);
+        return contractBuilder.createAbiMethodParams("transfer", contractMethodParameterList);
+    }
+
+    private String getValidatedFee(Double fee) {
+        String pattern = "##0.00000000";
+        DecimalFormat decimalFormat = new DecimalFormat(pattern);
+        return decimalFormat.format(fee);
     }
 
 }

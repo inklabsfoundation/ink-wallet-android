@@ -21,6 +21,8 @@ import ink.qtum.org.models.response.SendTxResponse;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 
+import static ink.qtum.org.models.Constants.INK_CONTRACT_ADDRESS_BASE58;
+import static ink.qtum.org.models.Constants.INK_CONTRACT_ADDRESS_HEX;
 import static ink.qtum.org.models.Extras.AMOUNT_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
 import static ink.qtum.org.models.Extras.FEE_EXTRA;
@@ -87,7 +89,35 @@ public class SendConfirmActivity extends AToolbarActivity {
     @OnClick(R.id.btn_confirm_sending_tx)
     public void sendTransaction() {
 
-        walletManager.sendTx(txHex, new ApiMethods.RequestListener() {
+//        walletManager.sendTx(txHex, new ApiMethods.RequestListener() {
+//            @Override
+//            public void onSuccess(Object response) {
+//                Log.d("svcom", "onSuccess");
+//                SendTxResponse txResponse = (SendTxResponse) response;
+//                Log.d("svcom", txResponse.getTxid());
+//                DialogManager.showSucceedDialog(SendConfirmActivity.this, new DialogInterface.OnDismissListener() {
+//                    @Override
+//                    public void onDismiss(DialogInterface dialogInterface) {
+//                        openMainActivity();
+//                    }
+//                });
+//
+//            }
+//
+//            @Override
+//            public void onFailure(String msg) {
+//                DialogManager.showTransferFailDialog(SendConfirmActivity.this, new DialogInterface.OnDismissListener() {
+//                    @Override
+//                    public void onDismiss(DialogInterface dialogInterface) {
+//                        openMainActivity();
+//                    }
+//                });
+//                Log.d("svcom", "onFailure " + msg);
+//            }
+//        });
+
+        walletManager.sendTokens("QXLyVq89U9B8zz4WT22GfxhcuwTGPqPw8M", "1",
+                INK_CONTRACT_ADDRESS_HEX, new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
                 Log.d("svcom", "onSuccess");
@@ -113,6 +143,7 @@ public class SendConfirmActivity extends AToolbarActivity {
                 Log.d("svcom", "onFailure " + msg);
             }
         });
+
 
     }
 }
