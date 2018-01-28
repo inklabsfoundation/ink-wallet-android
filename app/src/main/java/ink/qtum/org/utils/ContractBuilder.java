@@ -11,13 +11,13 @@ import org.bitcoinj.core.Address;
 
 import org.bitcoinj.core.Base58;
 import org.bitcoinj.core.Coin;
+import org.bitcoinj.core.ECKey;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.core.TransactionOutPoint;
 import org.bitcoinj.core.Utils;
-import org.bitcoinj.crypto.DeterministicKey;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptChunk;
 import org.bitcoinj.script.ScriptOpCodes;
@@ -37,7 +37,6 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import ink.qtum.org.datastorage.KeyStorage;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.models.contract.ContractMethodParameter;
 import ink.qtum.org.models.contract.UnspentOutput;
@@ -234,15 +233,19 @@ public class ContractBuilder {
         if (delivery.doubleValue() != 0.0) {
             transaction.addOutput(Coin.valueOf((long) (delivery.multiply(bitcoin).doubleValue())), ownAddress);
         }
-        KeyStorage keyStorage = KeyStorage.getInstance();
-        keyStorage.setWallet(wallet);
+
         for (UnspentOutput unspentOutput : unspentOutputs) {
-            for (DeterministicKey deterministicKey : keyStorage.getKeyList(netParams)) {
-                if (deterministicKey.toAddress(netParams).toString().equals(unspentOutput.getAddress())) {
+            for (ECKey ecKey : wallet.getIssuedReceiveKeys()) {
+                Log.d("svcom", "deterministicKey - " + ecKey.toAddress(netParams));
+                Log.d("svcom", "unspentOutput address - " + unspentOutput.getAddress());
+                if (ecKey.toAddress(netParams).toString().equals(unspentOutput.getAddress())) {
                     Sha256Hash sha256Hash = new Sha256Hash(Utils.parseAsHexOrBase58(unspentOutput.getTxHash()));
+                    Log.d("svcom", "sha256Hash - " + sha256Hash);
                     TransactionOutPoint outPoint = new TransactionOutPoint(netParams, unspentOutput.getVout(), sha256Hash);
+                    Log.d("svcom", "unspentOutput.getVout() - " + unspentOutput.getVout());
                     Script script2 = new Script(Utils.parseAsHexOrBase58(unspentOutput.getTxoutScriptPubKey()));
-                    transaction.addSignedInput(outPoint, script2, deterministicKey, Transaction.SigHash.ALL, true);
+                    Log.d("svcom", "unspentOutput.getTxoutScriptPubKey - " + unspentOutput.getTxoutScriptPubKey());
+                    transaction.addSignedInput(outPoint, script2, ecKey, Transaction.SigHash.ALL, true);
                     amountFromOutput = amountFromOutput.add(unspentOutput.getAmount());
                     break;
                 }
