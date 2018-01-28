@@ -21,9 +21,9 @@
             android:textStyle="bold" />
 
         <EditText
+            android:id="@+id/et_send_tx_address"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:id="@+id/et_send_tx_address"
             android:background="@drawable/gray_contour"
             android:hint="@string/send_title_address_hint_"
             android:inputType="text"
@@ -42,16 +42,16 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:orientation="horizontal"
             android:weightSum="10">
 
             <EditText
+                android:id="@+id/et_send_tx_amount"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginRight="5dp"
                 android:layout_weight="4"
-                android:id="@+id/et_send_tx_amount"
                 android:background="@drawable/gray_contour"
                 android:hint="@string/max_amount"
                 android:inputType="numberDecimal"
@@ -62,15 +62,16 @@
                 android:textColor="@color/black8TextColor"
                 android:textSize="14dp" />
 
-            <TextView
-                android:id="@+id/tv_coin_id"
+            <Spinner
+                android:id="@+id/sp_currency"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
                 android:layout_marginLeft="5dp"
+                android:layout_marginStart="5dp"
                 android:layout_weight="6"
-                android:enabled="false"
                 android:background="@drawable/gray_contour"
-                android:padding="10dp"
+                android:enabled="false"
+                android:entries="@array/currencies"
                 android:textColor="@color/black8TextColor"
                 android:textSize="14dp" />
 
@@ -86,10 +87,10 @@
             android:textStyle="bold" />
 
         <EditText
+            android:id="@+id/et_tx_description"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@drawable/gray_contour"
-            android:id="@+id/et_tx_description"
             android:inputType="textMultiLine"
             android:lines="6"
             android:padding="10dp"
@@ -110,19 +111,19 @@
             android:layout_height="wrap_content">
 
             <CheckBox
+                android:id="@+id/cb_tx_fees_standard"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checked="true"
-                android:id="@+id/cb_tx_fees_standard"
                 android:text="@string/send_checkbox_standard"
                 android:textColor="@color/black8TextColor"
                 android:textSize="16dp" />
 
             <CheckBox
+                android:id="@+id/cb_tx_fees_custom"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checked="false"
-                android:id="@+id/cb_tx_fees_custom"
                 android:text="@string/send_checkbox_custom"
                 android:textColor="@color/black8TextColor"
                 android:textSize="16dp" />
@@ -146,11 +147,11 @@
                 android:textSize="16dp" />
 
             <SeekBar
-                android:layout_width="wrap_content"
                 android:id="@+id/sb_tx_speed"
-                android:max="50"
+                android:layout_width="wrap_content"
                 android:layout_height="match_parent"
-                android:layout_weight="10" />
+                android:layout_weight="10"
+                android:max="50" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -165,8 +166,8 @@
         </LinearLayout>
 
         <TextView
-            android:layout_width="match_parent"
             android:id="@+id/tv_tx_speed_value"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="0.00 INK"
             android:textAlignment="center"
@@ -176,12 +177,12 @@
         <RelativeLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="10dp">
+            android:layout_marginBottom="10dp"
+            android:layout_marginTop="20dp">
 
             <android.support.v7.widget.AppCompatButton
-                style="@style/BtnStyle.Blue"
                 android:id="@+id/btn_next_step_of_send"
+                style="@style/BtnStyle.Blue"
                 android:layout_width="140dp"
                 android:layout_height="wrap_content"
                 android:layout_centerInParent="true"

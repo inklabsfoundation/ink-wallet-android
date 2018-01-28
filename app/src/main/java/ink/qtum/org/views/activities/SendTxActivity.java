@@ -14,11 +14,15 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.SeekBar;
+import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Transaction;
@@ -38,12 +42,14 @@ import ink.qtum.org.models.Extras;
 import ink.qtum.org.models.RequestCode;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
+import ink.qtum.org.utils.TransactionHistoryConverter;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 import okhttp3.ResponseBody;
 
 import static ink.qtum.org.models.Extras.AMOUNT_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
 import static ink.qtum.org.models.Extras.FEE_EXTRA;
+import static ink.qtum.org.models.Extras.INK_ID;
 import static ink.qtum.org.models.Extras.QTUM_ID;
 import static ink.qtum.org.models.Extras.WALLET_NUMBER_EXTRA;
 
@@ -66,8 +72,8 @@ public class SendTxActivity extends AToolbarActivity {
     TextView tvTxSpeedValue;
     @BindView(R.id.btn_next_step_of_send)
     Button btNext;
-    @BindView(R.id.tv_coin_id)
-    TextView tvCoinId;
+    @BindView(R.id.sp_currency)
+    Spinner spCurrency;
 
     @Inject
     WalletManager walletManager;
@@ -75,13 +81,15 @@ public class SendTxActivity extends AToolbarActivity {
     private Coin currentBalance;
     private long currentAmont;
     private long currentFee;
-
+    private String coinId;
     private final float maxFeesValue = 1f; // todo set correct value of max fee
 
     @Override
     protected void init(Bundle savedInstanceState) {
         QtumApp.getAppComponent().inject(this);
         setToolBarTitle(getString(R.string.toolbar_title_send));
+
+        initCurrency();
 
         if (getIntent().getExtras() != null) {
             String walletNumber = getIntent().getExtras().getString(WALLET_NUMBER_EXTRA, "");
@@ -92,9 +100,83 @@ public class SendTxActivity extends AToolbarActivity {
         setSeekBarListener();
         btNext.setEnabled(false);
         etAmount.setEnabled(false);
-        showBalance(QTUM_ID);
+        showBalance();
         initAddressField();
         initAmountField();
+    }
+
+    private void initCurrency() {
+        final String[] array = getResources().getStringArray(R.array.currencies);
+        coinId = array[0];
+        updateCoinId(coinId);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, R.layout.view_spinner_item, array);
+        spCurrency.setAdapter(adapter);
+
+        spCurrency.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parentView, View selectedItemView, int position, long id) {
+                String coinId = array[position];
+                updateCoinId(coinId);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parentView) {
+            }
+
+        });
+    }
+
+    private void updateCoinId(String coinId) {
+        if (coinId.equalsIgnoreCase(QTUM_ID)) {
+            getQtumBalance();
+        } else if (coinId.equalsIgnoreCase(INK_ID)) {
+            getInkBalance();
+        }
+    }
+
+    private void getQtumBalance() {
+        Requestor.getBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
+            @Override
+            public void onSuccess(Object response) {
+                try {
+                    Long balanceSatoshi = Long.parseLong(((ResponseBody) response).string());
+                    final Coin balance = Coin.valueOf(balanceSatoshi);
+                    Toast.makeText(getApplicationContext(), balance.toPlainString(), Toast.LENGTH_LONG).show();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+            }
+
+            @Override
+            public void onFailure(String msg) {
+                Log.e(BuildConfig.APPLICATION_ID, msg);
+            }
+        });
+    }
+
+    private void getInkBalance() {
+        Requestor.getInkBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
+            @Override
+            public void onSuccess(Object response) {
+                try {
+                    String inkBalanceStr = ((ResponseBody) response).string();
+                    final String balance = TransactionHistoryConverter.getFriendlyValueInk(inkBalanceStr);
+                    Toast.makeText(getApplicationContext(), balance, Toast.LENGTH_LONG).show();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            @Override
+            public void onFailure(String msg) {
+                Log.e(BuildConfig.APPLICATION_ID, msg);
+            }
+        });
+    }
+
+    private void setBalance(String s) {
+
     }
 
     private void initAddressField() {
@@ -104,12 +186,10 @@ public class SendTxActivity extends AToolbarActivity {
                 ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
 
                 if (clipboard != null && clipboard.hasPrimaryClip()) {
-
-                        ClipData.Item item = clipboard.getPrimaryClip().getItemAt(0);
-                        String pasteData = item.getText().toString();
-                        etAddress.setText(pasteData);
-                        checkAddress(pasteData);
-
+                    ClipData.Item item = clipboard.getPrimaryClip().getItemAt(0);
+                    String pasteData = item.getText().toString();
+                    etAddress.setText(pasteData);
+                    checkAddress(pasteData);
                 }
                 return false;
             }
@@ -118,11 +198,11 @@ public class SendTxActivity extends AToolbarActivity {
         etAddress.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View view, boolean b) {
-                if (b){
+                if (b) {
                     etAddress.setError(null);
                 } else {
                     String address = etAddress.getText().toString();
-                    if (TextUtils.isEmpty(address)){
+                    if (TextUtils.isEmpty(address)) {
                         btNext.setEnabled(false);
                     } else {
                         checkAddress(address);
@@ -133,7 +213,7 @@ public class SendTxActivity extends AToolbarActivity {
     }
 
     private void checkAddress(String pasteData) {
-        if (walletManager.isValidQtumAddress(pasteData)){
+        if (walletManager.isValidQtumAddress(pasteData)) {
             btNext.setEnabled(true);
             etAddress.setError(null);
         } else {
@@ -176,8 +256,7 @@ public class SendTxActivity extends AToolbarActivity {
         });
     }
 
-    private void showBalance(final String coinId) {
-        tvCoinId.setHint(coinId);
+    private void showBalance() {
         Requestor.getBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
@@ -220,7 +299,7 @@ public class SendTxActivity extends AToolbarActivity {
     }
 
     private void setSeekBarListener() {
-        if (cbStandard.isChecked()){
+        if (cbStandard.isChecked()) {
             sbTxSpeed.setEnabled(false);
         } else {
             sbTxSpeed.setEnabled(true);
