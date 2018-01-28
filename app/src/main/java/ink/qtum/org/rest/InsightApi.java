@@ -2,6 +2,7 @@ package ink.qtum.org.rest;
 
 import java.util.List;
 
+import ink.qtum.org.models.contract.UnspentOutput;
 import ink.qtum.org.models.response.TransactionsInkListResponse;
 import ink.qtum.org.models.response.TransactionsQtumListResponse;
 import ink.qtum.org.models.response.SendTxResponse;
@@ -29,6 +30,9 @@ public interface InsightApi {
 
     @GET("/insight-api/addr/{address}/utxo")
     Call<List<UtxoItemResponse>> getUTXOByAddress(@Path("address") String address);
+
+    @GET("/insight-api/addr/{address}/utxo")
+    Call<List<UnspentOutput>> getUTXOByAddressForToken(@Path("address") String address);
 
     @POST("/insight-api/tx/send")
     @FormUrlEncoded

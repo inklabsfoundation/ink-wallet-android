@@ -98,4 +98,5 @@
         ]]>
     </string>
     <string name="ink">INK</string>
+    <string name="insufficient_fee_lease_use_minimum_of">Insufficient fee. Please use minimum of</string>
 </resources>
