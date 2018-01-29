@@ -6,8 +6,6 @@ import android.support.v7.widget.AppCompatButton;
 import android.text.TextUtils;
 import android.widget.TextView;
 
-import org.w3c.dom.Text;
-
 import javax.inject.Inject;
 
 import autodagger.AutoInjector;
@@ -16,7 +14,6 @@ import butterknife.OnClick;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.SharedManager;
-import ink.qtum.org.utils.CryptoUtils;
 import ink.qtum.org.views.activities.base.BaseActivity;
 
 import static ink.qtum.org.models.Extras.ACTION_RESTORE_SAVED;
@@ -39,17 +36,17 @@ public class LoginActivity extends BaseActivity {
 
     @Override
     protected void init(Bundle savedInstanceState) {
-    }
-
-
-    @Override
-    protected int getLayout() {
         QtumApp.getAppComponent().inject(this);
         if (!TextUtils.isEmpty(sharedManager.getLastSyncedBlock())){
             Intent intent = new Intent(this, MainActivity.class);
             intent.setAction(ACTION_RESTORE_SAVED);
             startActivity(intent);
         }
+    }
+
+
+    @Override
+    protected int getLayout() {
         return R.layout.activity_login;
     }
 

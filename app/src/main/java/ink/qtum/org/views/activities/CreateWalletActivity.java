@@ -13,9 +13,12 @@ import butterknife.BindView;
 import butterknife.ButterKnife;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.utils.Coders;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
-import ink.qtum.org.views.fragments.CreatePinFragment;
+import ink.qtum.org.views.fragments.CreateWalletConfirmPinFragment;
+import ink.qtum.org.views.fragments.CreateWalletPinFragment;
 import ink.qtum.org.views.fragments.CreateSeedFragment;
 import ink.qtum.org.views.fragments.CreateWalletFragment;
 
@@ -25,8 +28,9 @@ import ink.qtum.org.views.fragments.CreateWalletFragment;
 
 @AutoInjector(QtumApp.class)
 public class CreateWalletActivity extends AToolbarActivity implements CreateSeedFragment.OnSeedFragmentInteractionListener,
-        CreatePinFragment.OnPinFragmentInteractionListener,
-        CreateWalletFragment.OnWalletFragmentInteractionListener {
+        CreateWalletFragment.OnWalletFragmentInteractionListener,
+        CreateWalletPinFragment.OnPinFragmentInteractionListener,
+        CreateWalletConfirmPinFragment.OnPinConfirmedListener {
 
     @BindView(R.id.pb_create_progress)
     ProgressBar pbCreateProgress;
@@ -34,8 +38,10 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
     @Inject
     WalletManager walletManager;
 
+    @Inject
+    SharedManager sharedManager;
+
     private String mSeed;
-    private String mPin;
 
     @Override
     protected void init(Bundle savedInstanceState) {
@@ -76,13 +82,18 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
         setCreateProgress(2);
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
-                .replace(R.id.fl_fragment_container, CreatePinFragment.newInstance())
+                .replace(R.id.fl_fragment_container, CreateWalletPinFragment.newInstance())
                 .commit();
     }
 
     @Override
     public void onPinEntered(String pin) {
-        mPin = pin;
+        showConfirmPinFragment(pin);
+    }
+
+    @Override
+    public void onConfirmed(String pin) {
+        sharedManager.setPinCode(Coders.getSha1Hex(pin));
         showWalletFragment();
     }
 
@@ -94,9 +105,15 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
                 .commit();
     }
 
+    private void showConfirmPinFragment(String pin) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.beginTransaction()
+                .replace(R.id.fl_fragment_container, CreateWalletConfirmPinFragment.newInstance(pin))
+                .commit();
+    }
+
     @Override
     public void onFinishCreateWallet() {
         startActivity(new Intent(CreateWalletActivity.this, MainActivity.class));
     }
-
 }

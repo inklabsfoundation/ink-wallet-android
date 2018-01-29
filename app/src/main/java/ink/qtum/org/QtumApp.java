@@ -21,6 +21,7 @@ public class QtumApp extends Application {
 
     private static QtumAppComponent appComponent;
     private static Context appContext;
+    private static boolean isAccessAllowed = false;
 
     @Override
     public void onCreate() {
@@ -41,5 +42,19 @@ public class QtumApp extends Application {
 
     public static Context getAppContext() {
         return appContext;
+    }
+
+    public static boolean isIsAccessAllowed() {
+        return isAccessAllowed;
+    }
+
+    public static void setIsAccessAllowed(boolean isAccessAllowed) {
+        QtumApp.isAccessAllowed = isAccessAllowed;
+    }
+
+    @Override
+    public void onTerminate() {
+        super.onTerminate();
+        setIsAccessAllowed(false);
     }
 }

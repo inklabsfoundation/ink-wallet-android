@@ -8,6 +8,7 @@ import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v7.widget.Toolbar;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -20,8 +21,8 @@ import butterknife.BindView;
 import butterknife.OnClick;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
-import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.managers.DialogManager;
+import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.models.Extras;
 import ink.qtum.org.models.RequestCode;
 import ink.qtum.org.views.activities.base.BaseActivity;
@@ -70,6 +71,31 @@ public class MainActivity extends BaseActivity {
     @Override
     protected int getLayout() {
         return R.layout.activity_main;
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+//        if (TextUtils.isEmpty(sharedManager.getPinCode())) {
+//            logOut();
+//        }
+
+        if (!QtumApp.isIsAccessAllowed() && !TextUtils.isEmpty(sharedManager.getPinCode())) {
+            DialogManager.showPinCodeDialog(this, sharedManager.getPinCode(), getString(R.string.input_pin_to_unlock),
+                    false, new DialogManager.DialogListener() {
+                        @Override
+                        public void onPositiveButtonClick() {
+                            super.onPositiveButtonClick();
+                            QtumApp.setIsAccessAllowed(true);
+                        }
+
+                        @Override
+                        public void onNegativeButtonClick() {
+                            super.onNegativeButtonClick();
+                            finishAffinity();
+                        }
+                    });
+        }
     }
 
     public void setupSideMenu() {
@@ -121,7 +147,7 @@ public class MainActivity extends BaseActivity {
         mToolbar.setTitleTextColor(getResources().getColor(R.color.toolbar_text_color));
     }
 
-    public void setToolbarTitle(String text){
+    public void setToolbarTitle(String text) {
         mToolbar.setTitle(text);
     }
 
@@ -146,7 +172,7 @@ public class MainActivity extends BaseActivity {
     }
 
     @OnClick(R.id.btn_log_out)
-    public void logOut() {
+    public void logOutBtnClick() {
         DialogManager.showLogOutDialog(this, new DialogManager.DialogListener() {
             @Override
             public void onPositiveButtonClick() {
@@ -158,11 +184,16 @@ public class MainActivity extends BaseActivity {
             @Override
             public void onNegativeButtonClick() {
                 super.onNegativeButtonClick();
-                sharedManager.clearLastSyncedBlock();
-                openLoginActivity();
-                finish();
+                logOut();
             }
         });
+    }
+
+    public void logOut() {
+        sharedManager.clearLastSyncedBlock();
+        sharedManager.clearPinCode();
+        openLoginActivity();
+        finish();
     }
 
     @Override

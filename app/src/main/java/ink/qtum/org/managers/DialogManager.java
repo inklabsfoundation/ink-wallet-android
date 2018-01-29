@@ -6,11 +6,14 @@ import android.content.DialogInterface;
 import android.support.annotation.Nullable;
 import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.afollestad.materialdialogs.MaterialDialog;
 
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
+import ink.qtum.org.utils.Coders;
+import ink.qtum.org.views.custom.PinCodeLayout;
 
 public class DialogManager {
 
@@ -40,7 +43,7 @@ public class DialogManager {
         builder.customView(R.layout.dialog_copy_succeed, false);
 
         final MaterialDialog dialog = builder.build();
-        ((TextView)dialog.findViewById(R.id.tv_succeed_text)).setText(R.string.copy_succeed);
+        ((TextView) dialog.findViewById(R.id.tv_succeed_text)).setText(R.string.copy_succeed);
         dialog.findViewById(R.id.iv_close).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -56,7 +59,7 @@ public class DialogManager {
         builder.customView(R.layout.dialog_copy_succeed, false);
 
         final MaterialDialog dialog = builder.build();
-        ((TextView)dialog.findViewById(R.id.tv_succeed_text)).setText(R.string.succeeded);
+        ((TextView) dialog.findViewById(R.id.tv_succeed_text)).setText(R.string.succeeded);
         dialog.findViewById(R.id.iv_close).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -83,6 +86,40 @@ public class DialogManager {
         });
 
         dialog.setOnDismissListener(listener);
+        dialog.show();
+    }
+
+    public static void showPinCodeDialog(final Context context, final String pinHash, String title,
+                                         final boolean cancelable, final DialogListener listener) {
+        MaterialDialog.Builder builder = getBaseDialog(context, null);
+        builder.customView(R.layout.dialog_pin, false);
+
+        final MaterialDialog dialog = builder.build();
+        dialog.setCancelable(cancelable);
+        ((TextView) dialog.findViewById(R.id.pin_dialog_title)).setText(title);
+        final PinCodeLayout pinLayout = (PinCodeLayout) dialog.findViewById(R.id.dialog_pin_layout);
+        pinLayout.setInputListener(new PinCodeLayout.OnPinCodeListener() {
+            @Override
+            public void pinCodeCreated(String pin) {
+                if (pinHash.equals(Coders.getSha1Hex(pin))) {
+                    listener.onPositiveButtonClick();
+                    dialog.dismiss();
+                } else {
+                    pinLayout.callError();
+                    Toast.makeText(context, "PIN code does not match", Toast.LENGTH_LONG).show();
+                }
+            }
+        });
+        dialog.findViewById(R.id.iv_close).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                listener.onNegativeButtonClick();
+                if (cancelable){
+                    dialog.dismiss();
+                }
+            }
+        });
+
         dialog.show();
     }
 

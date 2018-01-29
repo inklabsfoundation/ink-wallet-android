@@ -2,14 +2,12 @@ package ink.qtum.org.managers;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.widget.Toast;
 
 import javax.inject.Inject;
 
 import autodagger.AutoInjector;
 import de.adorsys.android.securestoragelibrary.SecurePreferences;
 import ink.qtum.org.QtumApp;
-import ink.qtum.org.inkqtum.R;
 
 import static ink.qtum.org.models.Constants.LAST_SYNCED_BLOCK;
 import static ink.qtum.org.models.Constants.QTUM_SHARED_PREFS;
@@ -19,6 +17,8 @@ import static ink.qtum.org.models.Constants.QTUM_SHARED_PREFS;
  */
 @AutoInjector(QtumApp.class)
 public class SharedManager {
+
+    private final String PIN_CODE = "pinCode";
 
     @Inject
     Context context;
@@ -48,5 +48,17 @@ public class SharedManager {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public String getPinCode() {
+        return settings.getString(PIN_CODE, "");
+    }
+
+    public void setPinCode(String pinCode) {
+        settings.edit().putString(PIN_CODE, pinCode).apply();
+    }
+
+    public void clearPinCode(){
+        setPinCode("");
     }
 }
