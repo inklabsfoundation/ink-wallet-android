@@ -94,7 +94,6 @@ public class ContractBuilder {
         Keccak keccak = new Keccak();
         String hashMethod = keccak.getHash(Hex.toHexString((methodName).getBytes()), Parameters.KECCAK_256).substring(0, 8);
         abiParams = hashMethod + abiParams;
-        Log.d("svcom", "abiParams = " + abiParams);
         return abiParams;
 
     }
@@ -229,22 +228,16 @@ public class ContractBuilder {
         }
         BigDecimal delivery = overFlow.subtract(totalAmount);
 
-        Log.d("svcom", "own address - " + ownAddress.toBase58());
         if (delivery.doubleValue() != 0.0) {
             transaction.addOutput(Coin.valueOf((long) (delivery.multiply(bitcoin).doubleValue())), ownAddress);
         }
 
         for (UnspentOutput unspentOutput : unspentOutputs) {
             for (ECKey ecKey : wallet.getIssuedReceiveKeys()) {
-                Log.d("svcom", "deterministicKey - " + ecKey.toAddress(netParams));
-                Log.d("svcom", "unspentOutput address - " + unspentOutput.getAddress());
                 if (ecKey.toAddress(netParams).toString().equals(unspentOutput.getAddress())) {
                     Sha256Hash sha256Hash = new Sha256Hash(Utils.parseAsHexOrBase58(unspentOutput.getTxHash()));
-                    Log.d("svcom", "sha256Hash - " + sha256Hash);
                     TransactionOutPoint outPoint = new TransactionOutPoint(netParams, unspentOutput.getVout(), sha256Hash);
-                    Log.d("svcom", "unspentOutput.getVout() - " + unspentOutput.getVout());
                     Script script2 = new Script(Utils.parseAsHexOrBase58(unspentOutput.getTxoutScriptPubKey()));
-                    Log.d("svcom", "unspentOutput.getTxoutScriptPubKey - " + unspentOutput.getTxoutScriptPubKey());
                     transaction.addSignedInput(outPoint, script2, ecKey, Transaction.SigHash.ALL, true);
                     amountFromOutput = amountFromOutput.add(unspentOutput.getAmount());
                     break;

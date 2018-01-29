@@ -1,5 +1,7 @@
 package ink.qtum.org.utils;
 
+import org.bitcoinj.core.Coin;
+
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.text.DecimalFormat;
@@ -55,39 +57,31 @@ public class TransactionHistoryConverter {
     public static List<TransactionHistory> convertInkToFriendlyList(TransactionsInkListResponse response, String ownAddres) {
         List<TransactionHistory> transactions = new ArrayList<>();
         for (TxInk tx : response.getTxs()) {
-//            calculateChangeInBalance(tx, ownAddres);
             TransactionHistory transaction = new TransactionHistory();
             transaction.setBlockHeight(tx.getBlockHeight());
             transaction.setFees(new BigDecimal(0));
             transaction.setTimestamp(System.currentTimeMillis());
             transaction.setTxHash(tx.getTxHash());
             transaction.setCoinId(INK_ID);
-//            if (isInTx(tx, ownAddres)) {
-//                transaction.setFromAddress(tx.getVin().get(0).getAddr());
-//                transaction.setToAddress(ownAddres);
-//                transaction.setIsInTx(true);
-//                transaction.setRawValue(getInTxValue(tx, ownAddres));
-//            } else {
-                transaction.setFromAddress(tx.getFromAddress());
-                transaction.setToAddress(tx.getToAddress());
-                transaction.setIsInTx(true);
-                transaction.setRawValue(new BigDecimal(tx.getValue()));
-                transaction.setDescription(" ");
-                transaction.setFriendlyValue(getFriendlyValueInk(tx.getValue()));
-//            }
+            transaction.setFromAddress(tx.getFromAddress());
+            transaction.setToAddress(tx.getToAddress());
+            transaction.setIsInTx(!tx.getFromAddress().equalsIgnoreCase(ownAddres));
+            transaction.setRawValue(new BigDecimal(tx.getValue()));
+            transaction.setDescription(" ");
+            transaction.setFriendlyValue(getFriendlyValueInkForHistory(tx.getValue()));
             transactions.add(transaction);
         }
         return transactions;
     }
 
-    public static String getFriendlyValueQtum(BigDecimal value){
+    private static String getFriendlyValueQtum(BigDecimal value) {
         DecimalFormatSymbols symbols = DecimalFormatSymbols.getInstance();
         symbols.setDecimalSeparator('.');
         DecimalFormat decimalFormat = new DecimalFormat(BALANCE_SHOW_PATTERN, symbols);
         return decimalFormat.format(value);
     }
 
-    public static String getFriendlyValueInk(String inkBalanceStr){
+    public static String getFriendlyValueInk(String inkBalanceStr) {
         Long balanceInkLong = Long.parseLong(inkBalanceStr);
         BigInteger value = new BigInteger(String.valueOf(balanceInkLong), 10);
         BigDecimal decimal = new BigDecimal(value);
@@ -95,9 +89,19 @@ public class TransactionHistoryConverter {
         return formatted.toString();
     }
 
+    private static String getFriendlyValueInkForHistory(String inkBalanceStr) {
+        Coin value = Coin.valueOf(TransactionHistoryConverter.inkBalanceToSatoshiLong(inkBalanceStr));
+        return value.toPlainString();
+    }
+
+    public static long inkBalanceToSatoshiLong(String inkBalanceStr) {
+        return Long.parseLong(inkBalanceStr) / 10;
+    }
+
+
     private static BigDecimal getInTxValue(Tx tx, String ownAddress) {
         for (Vout vout : tx.getVout()) {
-            if (vout.getAddress().equals(ownAddress)){
+            if (vout.getAddress().equals(ownAddress)) {
                 return vout.getValue();
             }
         }

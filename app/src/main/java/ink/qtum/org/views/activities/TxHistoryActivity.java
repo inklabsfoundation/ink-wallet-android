@@ -92,9 +92,6 @@ public class TxHistoryActivity extends AToolbarActivity {
                 closeProgress();
                 TransactionsQtumListResponse txList = (TransactionsQtumListResponse)response;
                 List<TransactionHistory> transactions = TransactionHistoryConverter.convertQtumToFriendlyList(txList, walletManager.getWalletFriendlyAddress());
-                for (TransactionHistory transaction : transactions) {
-                    Log.d("svcom", transaction.toString());
-                }
                 showTxList(transactions);
             }
 
@@ -114,11 +111,7 @@ public class TxHistoryActivity extends AToolbarActivity {
             public void onSuccess(Object response) {
                 closeProgress();
                 TransactionsInkListResponse txList = (TransactionsInkListResponse)response;
-                Log.d("!!!!!", txList.toString());
                 List<TransactionHistory> transactions = TransactionHistoryConverter.convertInkToFriendlyList(txList, walletManager.getWalletFriendlyAddress());
-                for (TransactionHistory transaction : transactions) {
-                    Log.d("svcom", transaction.toString());
-                }
                 showTxList(transactions);
             }
 

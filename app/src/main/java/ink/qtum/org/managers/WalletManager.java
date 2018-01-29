@@ -70,7 +70,7 @@ public class WalletManager {
         mBip39Words = FileUtils.readToSet(context, BIP_39_WORDLIST_ASSET);
     }
 
-    public void createWallet(String passphrase, WalletCreationCallback callback) {
+    public void createWallet(String startSeed, WalletCreationCallback callback) {
 
         wallet = new Wallet(params);
         DeterministicSeed seed = wallet.getKeyChainSeed();
@@ -108,11 +108,11 @@ public class WalletManager {
         updateWallet();
     }
 
-    public void updateWallet(){
+    public void updateWallet() {
         Requestor.getUTXOList(walletFriendlyAddress, new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
-                setUTXO((List<UtxoItemResponse>)response);
+                setUTXO((List<UtxoItemResponse>) response);
             }
 
             @Override
@@ -173,7 +173,6 @@ public class WalletManager {
         sendRequest.shuffleOutputs = false;
 
 
-
         Transaction trx = null;
         String hex = "";
         try {
@@ -190,69 +189,38 @@ public class WalletManager {
         return hex;
     }
 
-    public void sendTx(String rawTx, ApiMethods.RequestListener listener){
+    public void sendTx(String rawTx, ApiMethods.RequestListener listener) {
         Requestor.sendRawTx(rawTx, listener);
     }
 
-    public boolean isValidQtumAddress(String address){
+    public boolean isValidQtumAddress(String address) {
         try {
             Address.fromBase58(params, address);
             return true;
-        } catch (AddressFormatException e){
+        } catch (AddressFormatException e) {
             return false;
         }
     }
 
-    public Coin getQtumBalance(){
+    public Coin getQtumBalance() {
         return walletQtumBalance;
     }
 
-    public void sendTokens(String addressTo, String resultAmount, final String tokenAddress,
-                           final ApiMethods.RequestListener listener){
-
-        for (Address address : wallet.getIssuedReceiveAddresses()) {
-            Log.d("svcom", "watched addr - " + address.toBase58());
-        }
+    public String createTokenHexTx(String abiParams, String tokenAddress,
+                                   String fee, BigDecimal feePerKb, List<UnspentOutput> unspentOutputs) {
 
         final int gasLimit = 300000;
         final int gasPrice = 40;
-        final String fee = getValidatedFee(0.0002);
-        final String abiParams = createAbiMethodParams(addressTo, resultAmount);
-
-        Requestor.getUTXOListForToken(walletFriendlyAddress, new ApiMethods.RequestListener() {
-            @Override
-            public void onSuccess(Object response) {
-                List<UnspentOutput> unspentOutputs = (List<UnspentOutput>)response;
-                for (UnspentOutput output : unspentOutputs) {
-                    Log.d("svcom", "output - " + output);
-                }
-                if (unspentOutputs != null && !unspentOutputs.isEmpty()) {
-                    String tokenHexTx = createTokenHexTx(abiParams, tokenAddress, gasLimit,
-                            gasPrice, fee, unspentOutputs);
-                    Log.d("svcom", "tokenHexTx = " + tokenHexTx);
-                    sendTx(tokenHexTx, listener);
-                }
-            }
-
-            @Override
-            public void onFailure(String msg) {
-
-            }
-        });
-    }
-
-    private String createTokenHexTx(String abiParams, String tokenAddress, int gasLimit, int gasPrice,
-                                    String fee, List<UnspentOutput> unspentOutputs) {
 
         ContractBuilder contractBuilder = new ContractBuilder();
         Script script = contractBuilder.createMethodScript(abiParams, gasLimit, gasPrice, tokenAddress);
 
         return contractBuilder.createTransactionHash(script, unspentOutputs, gasLimit, gasPrice,
-                BigDecimal.valueOf(0.0001), fee,
+                feePerKb, fee,
                 context, params, walletAddress, wallet);
     }
 
-    private String createAbiMethodParams(String address, String resultAmount){
+    public String createAbiMethodParams(String address, String resultAmount) {
         ContractBuilder contractBuilder = new ContractBuilder();
         List<ContractMethodParameter> contractMethodParameterList = new ArrayList<>();
         ContractMethodParameter contractMethodParameterAddress = new ContractMethodParameter("_to", "address", address);
@@ -263,7 +231,7 @@ public class WalletManager {
         return contractBuilder.createAbiMethodParams("transfer", contractMethodParameterList);
     }
 
-    private String getValidatedFee(Double fee) {
+    public String getValidatedFee(Double fee) {
         String pattern = "##0.00000000";
         DecimalFormat decimalFormat = new DecimalFormat(pattern);
         return decimalFormat.format(fee);

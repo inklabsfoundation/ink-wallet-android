@@ -8,6 +8,9 @@ import android.widget.TextView;
 
 import org.bitcoinj.core.Coin;
 
+import java.math.BigDecimal;
+import java.util.List;
+
 import javax.inject.Inject;
 
 import autodagger.AutoInjector;
@@ -17,8 +20,10 @@ import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.DialogManager;
 import ink.qtum.org.managers.WalletManager;
+import ink.qtum.org.models.contract.UnspentOutput;
 import ink.qtum.org.models.response.SendTxResponse;
 import ink.qtum.org.rest.ApiMethods;
+import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 
 import static ink.qtum.org.models.Constants.INK_CONTRACT_ADDRESS_BASE58;
@@ -26,6 +31,8 @@ import static ink.qtum.org.models.Constants.INK_CONTRACT_ADDRESS_HEX;
 import static ink.qtum.org.models.Extras.AMOUNT_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
 import static ink.qtum.org.models.Extras.FEE_EXTRA;
+import static ink.qtum.org.models.Extras.INK_ID;
+import static ink.qtum.org.models.Extras.QTUM_ID;
 import static ink.qtum.org.models.Extras.WALLET_NUMBER_EXTRA;
 
 @AutoInjector(QtumApp.class)
@@ -68,17 +75,50 @@ public class SendConfirmActivity extends AToolbarActivity {
     }
 
     private void generateRawTx() {
+        switch (coinId){
+            case QTUM_ID:
+                generateQtumRawTx();
+                break;
+            case INK_ID:
+                generateInkRawTx();
+                break;
+        }
+    }
+
+    private void generateQtumRawTx(){
         txHex = walletManager.generateQtumHexTx(address, amount, feePerKb);
         txSizeBytes = txHex.length() / 2;
-        Log.d("svcom", "lenght str - " + txSizeBytes);
         updateViews();
+    }
+
+    private void generateInkRawTx(){
+        final String abiParams = walletManager.createAbiMethodParams(address, Long.toString(amount));
+        final double feeBerKb = Double.parseDouble(Coin.valueOf(feePerKb).toPlainString());
+        final String fee = walletManager.getValidatedFee(feeBerKb);
+        Requestor.getUTXOListForToken(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
+            @Override
+            public void onSuccess(Object response) {
+                List<UnspentOutput> unspentOutputs = (List<UnspentOutput>)response;
+
+                if (unspentOutputs != null && !unspentOutputs.isEmpty()) {
+                    txHex = walletManager.createTokenHexTx(abiParams, INK_CONTRACT_ADDRESS_HEX, fee, BigDecimal.valueOf(feeBerKb), unspentOutputs);
+                    txSizeBytes = txHex.length() / 2;
+                    updateViews();
+                }
+            }
+
+            @Override
+            public void onFailure(String msg) {
+
+            }
+        });
     }
 
     private void updateViews() {
         tvReceiverAddress.setText(address);
         tvSendingAmount.setText(String.format("%s %s", Coin.valueOf(amount).toPlainString(), coinId));
         long txFee = feePerKb / 1024 * txSizeBytes;
-        tvFeesSum.setText(String.format("%s %s", Coin.valueOf(txFee).toPlainString(), coinId));
+        tvFeesSum.setText(String.format("%s %s", Coin.valueOf(txFee).toPlainString(), QTUM_ID));
     }
 
     @Override
@@ -89,40 +129,10 @@ public class SendConfirmActivity extends AToolbarActivity {
     @OnClick(R.id.btn_confirm_sending_tx)
     public void sendTransaction() {
 
-//        walletManager.sendTx(txHex, new ApiMethods.RequestListener() {
-//            @Override
-//            public void onSuccess(Object response) {
-//                Log.d("svcom", "onSuccess");
-//                SendTxResponse txResponse = (SendTxResponse) response;
-//                Log.d("svcom", txResponse.getTxid());
-//                DialogManager.showSucceedDialog(SendConfirmActivity.this, new DialogInterface.OnDismissListener() {
-//                    @Override
-//                    public void onDismiss(DialogInterface dialogInterface) {
-//                        openMainActivity();
-//                    }
-//                });
-//
-//            }
-//
-//            @Override
-//            public void onFailure(String msg) {
-//                DialogManager.showTransferFailDialog(SendConfirmActivity.this, new DialogInterface.OnDismissListener() {
-//                    @Override
-//                    public void onDismiss(DialogInterface dialogInterface) {
-//                        openMainActivity();
-//                    }
-//                });
-//                Log.d("svcom", "onFailure " + msg);
-//            }
-//        });
-
-        walletManager.sendTokens("QXLyVq89U9B8zz4WT22GfxhcuwTGPqPw8M", "1",
-                INK_CONTRACT_ADDRESS_HEX, new ApiMethods.RequestListener() {
+        walletManager.sendTx(txHex, new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
-                Log.d("svcom", "onSuccess");
                 SendTxResponse txResponse = (SendTxResponse) response;
-                Log.d("svcom", txResponse.getTxid());
                 DialogManager.showSucceedDialog(SendConfirmActivity.this, new DialogInterface.OnDismissListener() {
                     @Override
                     public void onDismiss(DialogInterface dialogInterface) {
@@ -143,7 +153,6 @@ public class SendConfirmActivity extends AToolbarActivity {
                 Log.d("svcom", "onFailure " + msg);
             }
         });
-
 
     }
 }

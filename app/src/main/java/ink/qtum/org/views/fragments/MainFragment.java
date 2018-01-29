@@ -109,7 +109,6 @@ public class MainFragment extends BaseFragment {
             mAddress.setText(walletManager.getWalletFriendlyAddress());
             initQtum();
             initINK();
-            initList();
         }
     }
 
@@ -119,23 +118,6 @@ public class MainFragment extends BaseFragment {
 
     private void initINK() {
         getInkBalance();
-    }
-
-    private void initList() {
-        adapter = new TokensAdapter(getDemoList());
-        final LinearLayoutManager layoutManager = new LinearLayoutManager(getContext());
-        layoutManager.setOrientation(LinearLayoutManager.VERTICAL);
-
-        adapter.setItemClickListener(new TokensAdapter.OnItemClickListener() {
-            @Override
-            public void OnItemClick(int position) {
-                Intent intent = new Intent(getActivity(), TxHistoryActivity.class);
-                startActivity(intent);
-            }
-        });
-
-        mRecycler.setLayoutManager(layoutManager);
-        mRecycler.setAdapter(adapter);
     }
 
     private void getQtumBalance() {

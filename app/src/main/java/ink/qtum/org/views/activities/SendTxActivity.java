@@ -22,7 +22,6 @@ import android.widget.EditText;
 import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Transaction;
@@ -98,11 +97,28 @@ public class SendTxActivity extends AToolbarActivity {
         }
 
         setSeekBarListener();
-        btNext.setEnabled(false);
-        etAmount.setEnabled(false);
-        showBalance();
         initAddressField();
         initAmountField();
+        disableControls();
+    }
+
+    private void enableControls() {
+        setControlsEnable(true);
+    }
+
+    private void disableControls() {
+        setControlsEnable(false);
+    }
+
+    private void setControlsEnable(boolean enable) {
+        etAddress.setEnabled(enable);
+        etAmount.setEnabled(enable);
+        etDescription.setEnabled(enable);
+        cbStandard.setEnabled(enable);
+        cbCustom.setEnabled(enable);
+        sbTxSpeed.setEnabled(enable);
+        tvTxSpeedValue.setEnabled(enable);
+        btNext.setEnabled(enable);
     }
 
     private void initCurrency() {
@@ -135,13 +151,15 @@ public class SendTxActivity extends AToolbarActivity {
     }
 
     private void getQtumBalance() {
+        clearCurrentBalance();
         Requestor.getBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
                 try {
                     Long balanceSatoshi = Long.parseLong(((ResponseBody) response).string());
-                    final Coin balance = Coin.valueOf(balanceSatoshi);
-                    Toast.makeText(getApplicationContext(), balance.toPlainString(), Toast.LENGTH_LONG).show();
+                    currentBalance = Coin.valueOf(balanceSatoshi);
+                    showCurrentBalance();
+                    enableControls();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -156,13 +174,15 @@ public class SendTxActivity extends AToolbarActivity {
     }
 
     private void getInkBalance() {
+        clearCurrentBalance();
         Requestor.getInkBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
                 try {
                     String inkBalanceStr = ((ResponseBody) response).string();
-                    final String balance = TransactionHistoryConverter.getFriendlyValueInk(inkBalanceStr);
-                    Toast.makeText(getApplicationContext(), balance, Toast.LENGTH_LONG).show();
+                    currentBalance = Coin.valueOf(TransactionHistoryConverter.inkBalanceToSatoshiLong(inkBalanceStr));
+                    showCurrentBalance();
+                    enableControls();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -175,8 +195,14 @@ public class SendTxActivity extends AToolbarActivity {
         });
     }
 
-    private void setBalance(String s) {
+    private void showCurrentBalance() {
+        String maxAmount = String.format("%s %s", getString(R.string.max_amount), currentBalance.toPlainString());
+        etAmount.setHint(maxAmount);
+    }
 
+    private void clearCurrentBalance() {
+        String maxAmount = String.format("%s --.--", getString(R.string.max_amount));
+        etAmount.setHint(maxAmount);
     }
 
     private void initAddressField() {
@@ -240,8 +266,6 @@ public class SendTxActivity extends AToolbarActivity {
 
                     Coin amount = Coin.parseCoin(editable.toString());
                     long amountSatoshi = amount.getValue();
-                    Log.d("svcom", "balance long - " + currentBalance.getValue());
-                    Log.d("svcom", "amount long - " + amountSatoshi);
                     if (amountSatoshi < currentBalance.longValue()) {
                         currentAmont = amountSatoshi;
                         btNext.setEnabled(true);
@@ -256,30 +280,11 @@ public class SendTxActivity extends AToolbarActivity {
         });
     }
 
-    private void showBalance() {
-        Requestor.getBalance(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
-            @Override
-            public void onSuccess(Object response) {
-                try {
-                    Long balanceSatoshi = Long.parseLong(((ResponseBody) response).string());
-                    currentBalance = Coin.valueOf(balanceSatoshi);
-                    btNext.setEnabled(true);
-                    etAmount.setEnabled(true);
-                    String maxAmount = String.format("%s %s", getString(R.string.max_amount), currentBalance.toPlainString());
-                    etAmount.setHint(maxAmount);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-
-            }
-
-            @Override
-            public void onFailure(String msg) {
-                Log.e(BuildConfig.APPLICATION_ID, msg);
-            }
-        });
+    private boolean amountLessBalance() {
+        Coin amount = Coin.parseCoin(etAmount.getText().toString());
+        long amountSatoshi = amount.getValue();
+        return amountSatoshi < currentBalance.longValue();
     }
-
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -347,19 +352,40 @@ public class SendTxActivity extends AToolbarActivity {
         }
     }
 
+    private String getCurrentSelectedCoinId() {
+        switch (spCurrency.getSelectedItemPosition()) {
+            case 0:
+                return QTUM_ID;
+            case 1:
+                return INK_ID;
+            default:
+                return null;
+        }
+    }
+
     @OnClick(R.id.btn_next_step_of_send)
     public void goToSendConfirm() {
-        Intent intent = new Intent(this, SendConfirmActivity.class);
-        intent.putExtra(COIN_ID_EXTRA, QTUM_ID);
-        intent.putExtra(WALLET_NUMBER_EXTRA, etAddress.getText().toString());
-        intent.putExtra(AMOUNT_EXTRA, currentAmont);
-        if (cbStandard.isChecked()) {
-            intent.putExtra(FEE_EXTRA, Transaction.REFERENCE_DEFAULT_MIN_TX_FEE.getValue());
-        } else {
-            intent.putExtra(FEE_EXTRA, currentFee);
-        }
+        if (!etAddress.getText().toString().isEmpty()
+                && walletManager.isValidQtumAddress(etAddress.getText().toString())) {
+            if (!etAmount.getText().toString().isEmpty()
+                    && amountLessBalance()) {
+                Intent intent = new Intent(this, SendConfirmActivity.class);
+                intent.putExtra(COIN_ID_EXTRA, getCurrentSelectedCoinId());
+                intent.putExtra(WALLET_NUMBER_EXTRA, etAddress.getText().toString());
+                intent.putExtra(AMOUNT_EXTRA, currentAmont);
+                if (cbStandard.isChecked()) {
+                    intent.putExtra(FEE_EXTRA, Transaction.REFERENCE_DEFAULT_MIN_TX_FEE.getValue());
+                } else {
+                    intent.putExtra(FEE_EXTRA, currentFee);
+                }
 
-        startActivity(intent);
+                startActivity(intent);
+            } else {
+                etAmount.setError(getString(R.string.amout_cant_be_more_balance));
+            }
+        } else {
+            etAddress.setError(getString(R.string.wrong_qtum_address));
+        }
     }
 
     @Override
