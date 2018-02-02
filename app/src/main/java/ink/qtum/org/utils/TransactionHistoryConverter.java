@@ -1,13 +1,21 @@
 package ink.qtum.org.utils;
 
+import android.util.Log;
+
 import org.bitcoinj.core.Coin;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.text.DateFormat;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 import ink.qtum.org.models.TransactionHistory;
 import ink.qtum.org.models.response.TransactionsInkListResponse;
@@ -33,6 +41,7 @@ public class TransactionHistoryConverter {
             TransactionHistory transaction = new TransactionHistory();
             transaction.setBlockHeight(tx.getBlockheight());
             transaction.setFees(tx.getFees());
+            Log.d("svcom", "date qtum - " + tx.getTime());
             transaction.setTimestamp(tx.getTime() * 1000L);
             transaction.setTxHash(tx.getTxid());
             transaction.setCoinId(QTUM_ID);
@@ -60,7 +69,7 @@ public class TransactionHistoryConverter {
             TransactionHistory transaction = new TransactionHistory();
             transaction.setBlockHeight(tx.getBlockHeight());
             transaction.setFees(new BigDecimal(0));
-            transaction.setTimestamp(System.currentTimeMillis());
+            transaction.setTimestamp(DateUtils.convertUtc(tx.getTimestamp()));
             transaction.setTxHash(tx.getTxHash());
             transaction.setCoinId(INK_ID);
             transaction.setFromAddress(tx.getFromAddress());

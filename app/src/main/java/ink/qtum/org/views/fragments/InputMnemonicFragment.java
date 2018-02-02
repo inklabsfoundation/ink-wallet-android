@@ -68,7 +68,6 @@ public class InputMnemonicFragment extends BaseFragment {
 
             }
         });
-
         ivClose.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {

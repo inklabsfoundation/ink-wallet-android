@@ -191,14 +191,6 @@ public class MainFragment extends BaseFragment {
         tvInkBalance.setText(balance);
     }
 
-    private List<Integer> getDemoList() {
-        List<Integer> list = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            list.add(i);
-        }
-        return list;
-    }
-
     @OnClick(R.id.cl_backup)
     public void onBackupClick() {
         if (!TextUtils.isEmpty(sharedManager.getPinCode())) {

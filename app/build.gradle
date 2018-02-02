@@ -1,6 +1,14 @@
 apply plugin: 'com.android.application'
 
 android {
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'x86', 'armeabi-v7a'
+            universalApk true
+        }
+    }
     compileSdkVersion 26
     defaultConfig {
         applicationId "ink.qtum.org.inkqtum"
@@ -24,6 +32,20 @@ android {
         }
         debug{
             minifyEnabled false
+        }
+
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            def project = "ink-wallet"
+            def SEP = "-"
+            def buildType = variant.variantData.variantConfiguration.buildType.name
+            def version = variant.versionName
+            def date = new Date();
+            def formattedDate = date.format('ddMMyy')
+
+            outputFileName = project + SEP + buildType + SEP + version + SEP + formattedDate + ".apk"
         }
     }
 }
