@@ -9,3 +9,4 @@
 /builds
 /captures
 .externalNativeBuild
+/app/release
