@@ -72,12 +72,12 @@
             <TextView
                 android:id="@+id/tv_address"
                 android:layout_width="0dp"
-                android:padding="@dimen/dimen_8dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="24dp"
                 android:layout_marginStart="24dp"
                 android:layout_marginTop="16dp"
                 android:background="@drawable/edit_text_border"
+                android:padding="@dimen/dimen_8dp"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@+id/textView3" />
@@ -119,7 +119,7 @@
                 android:layout_marginBottom="8dp"
                 android:layout_marginEnd="8dp"
                 android:layout_marginStart="8dp"
-                android:text="@string/copy_mnemonics"
+                android:text="@string/btn_copy_mnemonics"
                 android:textAllCaps="false"
                 app:layout_constraintBottom_toTopOf="@+id/tv_start_wallet"
                 app:layout_constraintEnd_toEndOf="parent"
@@ -127,14 +127,14 @@
 
             <TextView
                 android:id="@+id/tv_start_wallet"
-                android:text="@string/start_my_ink_wallet"
-                android:textColor="@color/blueTextColor"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/dimen_16dp"
+                android:text="@string/start_my_ink_wallet"
+                android:textColor="@color/blueTextColor"
+                app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintBottom_toBottomOf="parent"/>
+                app:layout_constraintStart_toStartOf="parent" />
 
         </android.support.constraint.ConstraintLayout>
 

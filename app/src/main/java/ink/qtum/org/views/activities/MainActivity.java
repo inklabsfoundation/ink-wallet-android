@@ -27,7 +27,6 @@ import ink.qtum.org.models.Extras;
 import ink.qtum.org.models.RequestCode;
 import ink.qtum.org.views.activities.base.BaseActivity;
 import ink.qtum.org.views.fragments.FeedbackFragment;
-import ink.qtum.org.views.fragments.LanguageFragment;
 import ink.qtum.org.views.fragments.MainFragment;
 import ink.qtum.org.views.fragments.QandAFragment;
 import ink.qtum.org.views.fragments.TermsOfUsageFragment;
@@ -108,9 +107,6 @@ public class MainActivity extends BaseActivity {
                 switch (menuItem.getItemId()) {
                     case R.id.menu_main:
                         fragment = new MainFragment();
-                        break;
-                    case R.id.menu_lang:
-                        fragment = new LanguageFragment();
                         break;
                     case R.id.menu_qa:
                         fragment = new QandAFragment();
