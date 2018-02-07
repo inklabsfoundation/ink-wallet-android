@@ -236,6 +236,7 @@ public class SendTxActivity extends AToolbarActivity {
                 }
             }
         });
+
     }
 
     private void checkAddress(String pasteData) {
