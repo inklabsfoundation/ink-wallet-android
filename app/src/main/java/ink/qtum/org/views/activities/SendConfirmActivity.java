@@ -5,6 +5,7 @@ import android.content.DialogInterface;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.bitcoinj.core.Coin;
 
@@ -86,9 +87,13 @@ public class SendConfirmActivity extends AToolbarActivity {
     }
 
     private void generateQtumRawTx(){
-        txHex = walletManager.generateQtumHexTx(address, amount, feePerKb);
-        txSizeBytes = txHex.length() / 2;
-        updateViews();
+        try {
+            txHex = walletManager.generateQtumHexTx(address, amount, feePerKb);
+            txSizeBytes = txHex.length() / 2;
+            updateViews();
+        } catch (Exception e){
+            Toast.makeText(this, e.toString(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private void generateInkRawTx(){

@@ -9,7 +9,6 @@ import com.google.common.base.Splitter;
 import org.bitcoinj.core.Address;
 import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Coin;
-import org.bitcoinj.core.ECKey;
 import org.bitcoinj.core.InsufficientMoneyException;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Sha256Hash;
@@ -17,11 +16,12 @@ import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.UTXO;
 import org.bitcoinj.core.UTXOProvider;
 import org.bitcoinj.core.UTXOProviderException;
-import org.bitcoinj.crypto.ChildNumber;
+import org.bitcoinj.crypto.DeterministicKey;
 import org.bitcoinj.params.QtumMainNetParams;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.wallet.DeterministicSeed;
+import org.bitcoinj.wallet.KeyChain;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
 import org.spongycastle.util.encoders.Hex;
@@ -79,8 +79,7 @@ public class WalletManager {
 
         mnemonicKey = Joiner.on(" ").join(seed.getMnemonicCode());
         sharedManager.setLastSyncedBlock(CryptoUtils.encodeBase64(mnemonicKey));
-        walletAddress = wallet.currentReceiveAddress();
-        walletFriendlyAddress = wallet.currentReceiveAddress().toString();
+        updateMainAddress();
         callback.onWalletCreated(wallet);
 
     }
@@ -103,11 +102,16 @@ public class WalletManager {
         wallet = Wallet.fromSeed(params, seed);
         mnemonicKey = Joiner.on(" ").join(seed.getMnemonicCode());
         sharedManager.setLastSyncedBlock(CryptoUtils.encodeBase64(mnemonicKey));
-        walletAddress = wallet.currentReceiveAddress();
-        walletFriendlyAddress = wallet.currentReceiveAddress().toString();
 
+        updateMainAddress();
         callback.onWalletCreated(wallet);
         updateWallet();
+    }
+
+    private void updateMainAddress(){
+        DeterministicKey key = wallet.getActiveKeyChain().getKey(KeyChain.KeyPurpose.RECEIVE_FUNDS);
+        walletAddress = key.toAddress(params);
+        walletFriendlyAddress = walletAddress.toBase58();
     }
 
     public void updateWallet() {
@@ -180,7 +184,6 @@ public class WalletManager {
         try {
             trx = wallet.sendCoinsOffline(sendRequest);
             hex = Hex.toHexString(trx.bitcoinSerialize());
-
         } catch (InsufficientMoneyException e) {
             e.printStackTrace();
             return NOT_ENOUGH_MONEY;
