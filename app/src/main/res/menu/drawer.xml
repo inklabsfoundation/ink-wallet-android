@@ -7,11 +7,6 @@
     </group>
     <group>
         <item
-            android:id="@+id/menu_lang"
-            android:title="@string/menu_title_language" />
-    </group>
-    <group>
-        <item
             android:id="@+id/menu_qa"
             android:title="@string/menu_title_qa" />
     </group>

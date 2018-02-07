@@ -16,7 +16,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_centerInParent="true"
-            android:src="@drawable/ic_backup_exclamation_point" />
+            app:srcCompat="@drawable/ic_backup_exclamation_point" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -74,7 +74,7 @@
             android:layout_marginEnd="8dp"
             android:layout_centerInParent="true"
             android:layout_marginStart="8dp"
-            android:text="@string/copy_mnemonics"
+            android:text="@string/btn_copy_mnemonics"
             android:textAllCaps="false" />
 
     </RelativeLayout>

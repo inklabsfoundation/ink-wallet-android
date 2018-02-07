@@ -270,7 +270,7 @@ public class SendTxActivity extends AToolbarActivity {
                         currentAmont = amountSatoshi;
                         btNext.setEnabled(true);
                     } else {
-                        etAmount.setError(getString(R.string.amout_cant_be_more_balance));
+                        etAmount.setError(getString(R.string.amount_cant_be_more_balance));
                         btNext.setEnabled(false);
                     }
                 } catch (NumberFormatException e) {
@@ -381,7 +381,7 @@ public class SendTxActivity extends AToolbarActivity {
 
                 startActivity(intent);
             } else {
-                etAmount.setError(getString(R.string.amout_cant_be_more_balance));
+                etAmount.setError(getString(R.string.amount_cant_be_more_balance));
             }
         } else {
             etAddress.setError(getString(R.string.wrong_qtum_address));
