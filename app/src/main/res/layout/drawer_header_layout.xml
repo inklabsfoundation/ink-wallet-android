@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/drawer_header_layout"
     android:layout_width="match_parent"
     android:layout_height="150dp"
@@ -12,6 +13,6 @@
         android:adjustViewBounds="true"
         android:layout_centerInParent="true"
         android:layout_height="wrap_content"
-        android:src="@drawable/ic_white_logo_leftside_menu" />
+        app:srcCompat="@drawable/ic_ink_logo_menu" />
 
 </RelativeLayout>

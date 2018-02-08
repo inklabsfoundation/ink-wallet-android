@@ -93,12 +93,4 @@
     <string name="input_pin_to_backup">Input your PIN to backup</string>
 
 
-    <!-- no need to translate. Fake text. -->
-    <string name="terms_of_usage_text">
-        <![CDATA[
-        <p><strong>1. Who May Use the Services</strong><br/>You may use the Services only if you agree to form a binding contract with Twitter and are not a person barred from receiving services under the laws of the applicable jurisdiction. In any case, you must be at least 13 years old to use the Services. If you are accepting these Terms and using the Services on behalf of a company, organization, government, of other legal entity, you represent and warrant that you are authorized to do so.</p>
-        <p><strong>2. Privacy</strong><br/>You may use the Services only if you agree to form a binding contract with Twitter and are not a person barred from receiving services under the laws of the applicable jurisdiction. In any case, you must be at least 13 years old to use the Services</p>
-        <p><strong>3. Content on the Services</strong><br/>You are responsible for your use of the Services and for any Content you provide, including compliance with applicable laws, rules.</p>
-        ]]>
-    </string>
 </resources>
