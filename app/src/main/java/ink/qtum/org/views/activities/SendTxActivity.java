@@ -27,6 +27,9 @@ import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Transaction;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.math.BigInteger;
+import java.nio.charset.Charset;
 
 import javax.inject.Inject;
 
@@ -47,6 +50,7 @@ import okhttp3.ResponseBody;
 
 import static ink.qtum.org.models.Extras.AMOUNT_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
+import static ink.qtum.org.models.Extras.DESCRIPTION_EXTRA;
 import static ink.qtum.org.models.Extras.FEE_EXTRA;
 import static ink.qtum.org.models.Extras.INK_ID;
 import static ink.qtum.org.models.Extras.QTUM_ID;
@@ -96,10 +100,42 @@ public class SendTxActivity extends AToolbarActivity {
             checkAddress(walletNumber);
         }
 
+        etAddress.setText("QenyjNzwZqC3GhHXeeARY5gMxMdGQ596ZL");
+
         setSeekBarListener();
         initAddressField();
         initAmountField();
+        initDescriptionField();
         disableControls();
+    }
+
+    private void initDescriptionField() {
+        etDescription.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) {
+
+            }
+
+            @Override
+            public void onTextChanged(CharSequence charSequence, int i, int i1, int i2) {
+
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {
+                try {
+                    if (etDescription.getText().toString().getBytes("UTF-8").length > 70){
+                        etDescription.setError(getString(R.string.text_length_more_descriprion_limit));
+                        btNext.setEnabled(false);
+                    } else {
+                        btNext.setEnabled(true);
+                    }
+                } catch (UnsupportedEncodingException e) {
+                    e.printStackTrace();
+                }
+
+            }
+        });
     }
 
     private void enableControls() {
@@ -374,6 +410,15 @@ public class SendTxActivity extends AToolbarActivity {
                 intent.putExtra(COIN_ID_EXTRA, getCurrentSelectedCoinId());
                 intent.putExtra(WALLET_NUMBER_EXTRA, etAddress.getText().toString());
                 intent.putExtra(AMOUNT_EXTRA, currentAmont);
+                intent.putExtra(DESCRIPTION_EXTRA, etDescription.getText().toString());
+
+                try {
+                    byte[] descr = etDescription.getText().toString().getBytes("UTF-8");
+                    Log.d("svcom", "descr size = " + descr.length);
+                } catch (UnsupportedEncodingException e) {
+                    e.printStackTrace();
+                }
+
                 if (cbStandard.isChecked()) {
                     intent.putExtra(FEE_EXTRA, Transaction.REFERENCE_DEFAULT_MIN_TX_FEE.getValue());
                 } else {

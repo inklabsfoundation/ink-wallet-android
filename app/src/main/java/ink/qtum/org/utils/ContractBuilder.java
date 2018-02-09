@@ -19,6 +19,7 @@ import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.core.TransactionOutPoint;
 import org.bitcoinj.core.Utils;
 import org.bitcoinj.script.Script;
+import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.script.ScriptChunk;
 import org.bitcoinj.script.ScriptOpCodes;
 import org.bitcoinj.wallet.Wallet;
@@ -26,6 +27,7 @@ import org.spongycastle.util.encoders.Hex;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.MathContext;
@@ -204,9 +206,26 @@ public class ContractBuilder {
     public String createTransactionHash(Script script, List<UnspentOutput> unspentOutputs,
                                         int gasLimit, int gasPrice, BigDecimal feePerKb,
                                         String feeString, Context context,
-                                        NetworkParameters netParams, Address ownAddress, Wallet wallet) {
+                                        NetworkParameters netParams, Address ownAddress, Wallet wallet,
+                                        String description)  throws Exception{
 
         Transaction transaction = new Transaction(netParams);
+
+        /*add description*/
+        if (!android.text.TextUtils.isEmpty(description)){
+            try {
+                byte[] descriptionsBytes = description.getBytes("UTF-8");
+
+                /*OP_RETURN with  message limit is 80 bytes*/
+                if (descriptionsBytes.length <= 70) {
+                    transaction.addOutput(Coin.ZERO,
+                            ScriptBuilder.createOpReturnScript(descriptionsBytes));
+                }
+
+            } catch (UnsupportedEncodingException e) {
+                e.printStackTrace();
+            }
+        }
 
         BigDecimal fee = new BigDecimal(feeString);
         BigDecimal gasFee = (new BigDecimal(gasLimit)).multiply(new BigDecimal(gasPrice)).divide(new BigDecimal(100000000), MathContext.DECIMAL128);

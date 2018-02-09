@@ -6,6 +6,7 @@ import ink.qtum.org.models.contract.UnspentOutput;
 import ink.qtum.org.models.response.TransactionsInkListResponse;
 import ink.qtum.org.models.response.TransactionsQtumListResponse;
 import ink.qtum.org.models.response.SendTxResponse;
+import ink.qtum.org.models.response.Tx;
 import ink.qtum.org.models.response.UtxoItemResponse;
 import okhttp3.ResponseBody;
 import retrofit2.Call;
@@ -43,4 +44,8 @@ public interface InsightApi {
 
     @GET("/insight-api/tokens/{token}/transactions")
     Call <TransactionsInkListResponse> getTokenTransactions(@Path("token") String token, @Query("addresses") String... addresses);
+
+    @GET("insight-api/tx/{txid}")
+    Call<Tx> getTxById(@Path("txid") String txid);
+
 }

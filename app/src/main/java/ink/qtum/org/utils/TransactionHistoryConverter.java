@@ -1,21 +1,17 @@
 package ink.qtum.org.utils;
 
+import android.text.*;
 import android.util.Log;
 
 import org.bitcoinj.core.Coin;
 
+import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.text.DateFormat;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 
 import ink.qtum.org.models.TransactionHistory;
 import ink.qtum.org.models.response.TransactionsInkListResponse;
@@ -26,6 +22,7 @@ import ink.qtum.org.models.response.Vin;
 import ink.qtum.org.models.response.Vout;
 
 import static ink.qtum.org.models.Constants.BALANCE_SHOW_PATTERN;
+import static ink.qtum.org.models.Constants.OP_RETURN;
 import static ink.qtum.org.models.Extras.INK_ID;
 import static ink.qtum.org.models.Extras.QTUM_ID;
 
@@ -41,10 +38,10 @@ public class TransactionHistoryConverter {
             TransactionHistory transaction = new TransactionHistory();
             transaction.setBlockHeight(tx.getBlockheight());
             transaction.setFees(tx.getFees());
-            Log.d("svcom", "date qtum - " + tx.getTime());
             transaction.setTimestamp(tx.getTime() * 1000L);
             transaction.setTxHash(tx.getTxid());
             transaction.setCoinId(QTUM_ID);
+
             if (isInTx(tx, ownAddres)) {
                 transaction.setFromAddress(tx.getVin().get(0).getAddr());
                 transaction.setToAddress(ownAddres);
@@ -58,9 +55,36 @@ public class TransactionHistoryConverter {
                 transaction.setRawValue(tx.getValueOut());
                 transaction.setFriendlyValue(getFriendlyValueQtum(tx.getValueOut()));
             }
+
+            String description = getQtumDescription(tx);
+            transaction.setDescription(description);
             transactions.add(transaction);
         }
         return transactions;
+    }
+
+    public static String getQtumDescription(Tx tx) {
+        String description = "";
+
+        for (Vout vout : tx.getVout()) {
+            if (vout.getScriptPubKey() != null){
+                if (!android.text.TextUtils.isEmpty(vout.getScriptPubKey().getAsm())){
+                    String asm = vout.getScriptPubKey().getAsm();
+                    if (asm.contains(OP_RETURN)){
+                    String[] asmWords = asm.split(" ");
+                    if (asmWords.length >= 2){
+                        byte[] descrBytes = new BigInteger(asmWords[1], 16).toByteArray();
+                        try {
+                            description = new String(descrBytes, "UTF-8");
+                        } catch (UnsupportedEncodingException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                    }
+                }
+            }
+        }
+        return description;
     }
 
     public static List<TransactionHistory> convertInkToFriendlyList(TransactionsInkListResponse response, String ownAddres) {
