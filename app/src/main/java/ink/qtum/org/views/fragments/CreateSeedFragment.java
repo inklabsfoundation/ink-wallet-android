@@ -15,6 +15,7 @@ import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 
 
+@Deprecated
 public class CreateSeedFragment extends BaseFragment {
 
     @BindView(R.id.et_seed)

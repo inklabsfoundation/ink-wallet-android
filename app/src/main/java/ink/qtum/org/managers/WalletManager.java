@@ -1,7 +1,6 @@
 package ink.qtum.org.managers;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -75,7 +74,7 @@ public class WalletManager {
         mBip39Words = FileUtils.readToSet(context, BIP_39_WORDLIST_ASSET);
     }
 
-    public void createWallet(String startSeed, WalletCreationCallback callback) {
+    public void createWallet(WalletCreationCallback callback) {
 
         wallet = new Wallet(params);
         DeterministicSeed seed = wallet.getKeyChainSeed();

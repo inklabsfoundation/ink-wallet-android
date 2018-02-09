@@ -45,7 +45,7 @@
                 android:layout_marginEnd="8dp"
                 android:layout_marginStart="8dp"
                 android:layout_marginTop="8dp"
-                android:text="2/3"
+                android:text="1/2"
                 android:textColor="@color/dark_gray_text_color"
                 android:textSize="20sp"
                 app:layout_constraintEnd_toEndOf="parent"

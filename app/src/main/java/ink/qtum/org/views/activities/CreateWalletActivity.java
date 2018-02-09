@@ -41,14 +41,15 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
     @Inject
     SharedManager sharedManager;
 
-    private String mSeed;
+//    private String mSeed;
 
     @Override
     protected void init(Bundle savedInstanceState) {
         QtumApp.getAppComponent().inject(this);
         ButterKnife.bind(this);
         setToolBarTitle(getString(R.string.btn_create_ink_wallet));
-        showSeedFragment();
+//        showSeedFragment();
+        showPinFragment();
     }
 
     private void setCreateProgress(int progress) {
@@ -64,22 +65,23 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
         return R.layout.activity_create_new;
     }
 
-    private void showSeedFragment() {
-        setCreateProgress(1);
-        FragmentManager fragmentManager = getSupportFragmentManager();
-        fragmentManager.beginTransaction()
-                .replace(R.id.fl_fragment_container, CreateSeedFragment.newInstance())
-                .commit();
-    }
+//    private void showSeedFragment() {
+//        setCreateProgress(1);
+//        FragmentManager fragmentManager = getSupportFragmentManager();
+//        fragmentManager.beginTransaction()
+//                .replace(R.id.fl_fragment_container, CreateSeedFragment.newInstance())
+//                .commit();
+//    }
 
+    @Deprecated
     @Override
     public void onSeedEntered(String seed) {
-        mSeed = seed;
-        showPinFragment();
+//        mSeed = seed;
+//        showPinFragment();
     }
 
     private void showPinFragment() {
-        setCreateProgress(2);
+        setCreateProgress(1);
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
                 .replace(R.id.fl_fragment_container, CreateWalletPinFragment.newInstance())
@@ -98,10 +100,10 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
     }
 
     private void showWalletFragment() {
-        setCreateProgress(3);
+        setCreateProgress(2);
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
-                .replace(R.id.fl_fragment_container, CreateWalletFragment.newInstance(mSeed))
+                .replace(R.id.fl_fragment_container, CreateWalletFragment.newInstance())
                 .commit();
     }
 

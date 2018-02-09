@@ -31,7 +31,6 @@ public class CreateWalletFragment extends BaseFragment {
     @BindView(R.id.ib_close)
     ImageView ivClose;
 
-    private static String passPhrase;
 
     @Inject
     WalletManager walletManager;
@@ -42,8 +41,7 @@ public class CreateWalletFragment extends BaseFragment {
         // Required empty public constructor
     }
 
-    public static CreateWalletFragment newInstance(String seed) {
-        passPhrase = seed;
+    public static CreateWalletFragment newInstance() {
         return new CreateWalletFragment();
     }
 
@@ -69,7 +67,7 @@ public class CreateWalletFragment extends BaseFragment {
     }
 
     private void generateWallet() {
-        walletManager.createWallet(passPhrase, new WalletCreationCallback() {
+        walletManager.createWallet(new WalletCreationCallback() {
             @Override
             public void onWalletCreated(Wallet wallet) {
                 tvAddress.setText(walletManager.getWalletFriendlyAddress());

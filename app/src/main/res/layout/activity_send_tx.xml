@@ -92,6 +92,7 @@
             android:layout_height="wrap_content"
             android:background="@drawable/gray_contour"
             android:inputType="textMultiLine"
+            android:gravity="start|top"
             android:lines="6"
             android:padding="10dp"
             android:textColor="@color/black8TextColor"
