@@ -17,6 +17,12 @@ public class Requestor {
         ApiMethods.makeRequest(call, listener);
     }
 
+    public static void getTxById(String txid, ApiMethods.RequestListener listener) {
+        Call call = ApiMethods.createInsightApi().getTxById(txid);
+        Log.d("svcom", "path " + call.request());
+        ApiMethods.makeRequest(call, listener);
+    }
+
     public static void getTransactions(String address, ApiMethods.RequestListener listener) {
         Call call = ApiMethods.createInsightApi().getTransactions(address);
         Log.d("svcom", "path " + call.request());

@@ -92,5 +92,5 @@
     <string name="input_pin_to_unlock">Input your PIN to unlock</string>
     <string name="input_pin_to_backup">Input your PIN to backup</string>
 
-
+    <string name="text_length_more_descriprion_limit">Text length is more than description limit</string>
 </resources>

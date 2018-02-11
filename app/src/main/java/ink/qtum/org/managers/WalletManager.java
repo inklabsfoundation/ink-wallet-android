@@ -25,11 +25,14 @@ import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
 import org.spongycastle.util.encoders.Hex;
 
+import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 
 import javax.inject.Inject;
 
@@ -161,7 +164,9 @@ public class WalletManager {
     private final static String SMALL_SENDING = "insufficientMoney";
     private final static String NOT_ENOUGH_MONEY = "notEnough";
 
-    public String generateQtumHexTx(String toAddress, long sumInSatoshi, long feeInSatoshi) {
+    public String generateQtumHexTx(String toAddress, long sumInSatoshi, long feeInSatoshi,
+                                    String description) {
+
         Address RECEIVER = Address.fromBase58(params, toAddress);
 
         Coin AMOUNT = Coin.valueOf(sumInSatoshi);
@@ -177,6 +182,20 @@ public class WalletManager {
         sendRequest.feePerKb = FEE;
         sendRequest.shuffleOutputs = false;
 
+        if (sendRequest.tx != null && !android.text.TextUtils.isEmpty(description)){
+            try {
+                byte[] descriptionsBytes = description.getBytes("UTF-8");
+
+                /*OP_RETURN with  message limit is 80 bytes*/
+                if (descriptionsBytes.length <= 70) {
+                    sendRequest.tx.addOutput(Coin.ZERO,
+                            ScriptBuilder.createOpReturnScript(descriptionsBytes));
+                }
+
+            } catch (UnsupportedEncodingException e) {
+                e.printStackTrace();
+            }
+        }
 
         Transaction trx = null;
         String hex = "";
@@ -211,7 +230,8 @@ public class WalletManager {
     }
 
     public String createTokenHexTx(String abiParams, String tokenAddress,
-                                   String fee, BigDecimal feePerKb, List<UnspentOutput> unspentOutputs) {
+                                   String fee, BigDecimal feePerKb, List<UnspentOutput> unspentOutputs,
+                                   String description) throws Exception {
 
         final int gasLimit = 300000;
         final int gasPrice = 40;
@@ -221,7 +241,7 @@ public class WalletManager {
 
         return contractBuilder.createTransactionHash(script, unspentOutputs, gasLimit, gasPrice,
                 feePerKb, fee,
-                context, params, walletAddress, wallet);
+                context, params, walletAddress, wallet, description);
     }
 
     public String createAbiMethodParams(String address, String resultAmount) {
@@ -236,8 +256,10 @@ public class WalletManager {
     }
 
     public String getValidatedFee(Double fee) {
+        DecimalFormatSymbols formatSymbols = new DecimalFormatSymbols(Locale.ENGLISH);
+        formatSymbols.setDecimalSeparator('.');
         String pattern = "##0.00000000";
-        DecimalFormat decimalFormat = new DecimalFormat(pattern);
+        DecimalFormat decimalFormat = new DecimalFormat(pattern, formatSymbols);
         return decimalFormat.format(fee);
     }
 

@@ -68,6 +68,7 @@ public class InputMnemonicFragment extends BaseFragment {
 
             }
         });
+        etMnemonics.setText("pact garage fee oyster never chase inherit fish alarm motion silver vague");
         ivClose.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {

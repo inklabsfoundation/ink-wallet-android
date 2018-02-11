@@ -15,5 +15,7 @@ public interface Extras {
     String WALLET_NUMBER_EXTRA = "walletNumber";
     String AMOUNT_EXTRA = "AMOUNT_EXTRA";
     String FEE_EXTRA = "FEE_EXTRA";
+    String DESCRIPTION_EXTRA = "DESCRIPTION_EXTRA";
+
     String ACTION_RESTORE_SAVED = "ACTION_RESTORE_SAVED";
 }

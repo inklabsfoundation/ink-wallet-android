@@ -4,9 +4,11 @@ import android.os.Bundle;
 import android.support.design.widget.TextInputEditText;
 import android.support.v7.widget.AppCompatImageView;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
 
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -14,7 +16,12 @@ import java.util.Locale;
 import butterknife.BindView;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.models.TransactionHistory;
+import ink.qtum.org.models.response.Tx;
+import ink.qtum.org.rest.ApiMethods;
+import ink.qtum.org.rest.Requestor;
+import ink.qtum.org.utils.TransactionHistoryConverter;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
+import okhttp3.ResponseBody;
 
 import static ink.qtum.org.models.Extras.INK_ID;
 import static ink.qtum.org.models.Extras.QTUM_ID;
@@ -53,7 +60,7 @@ public class TxDetailsActivity extends AToolbarActivity {
     @Override
     protected void init(Bundle savedInstanceState) {
         setToolBarTitle(getString(R.string.toolbar_title_details));
-        txHistoryItem = (TransactionHistory)getIntent().getSerializableExtra(TX_HISTORY_EXTRA);
+        txHistoryItem = (TransactionHistory) getIntent().getSerializableExtra(TX_HISTORY_EXTRA);
         if (txHistoryItem != null) {
             showTxInfo();
         }
@@ -66,18 +73,36 @@ public class TxDetailsActivity extends AToolbarActivity {
         mAddressFrom.setText(txHistoryItem.getFromAddress());
         mAddressTo.setText(txHistoryItem.getToAddress());
         mFees.setText(txHistoryItem.getFees().toPlainString());
-        if (TextUtils.equals(txHistoryItem.getCoinId(), QTUM_ID) || TextUtils.equals(txHistoryItem.getCoinId(), INK_ID)){
-            mDescription.setVisibility(View.INVISIBLE);
-        }
         mTxHash.setText(txHistoryItem.getTxHash());
         mBlockHeight.setText(String.format("%s", txHistoryItem.getBlockHeight()));
 
         SimpleDateFormat dateFormat = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss Z", Locale.getDefault());
         mTimeStamp.setText(dateFormat.format(new Date(txHistoryItem.getTimestamp())));
+
+        mDescription.setText(txHistoryItem.getDescription());
+        if (txHistoryItem.getCoinId().equals(INK_ID)) {
+            updateDescription(txHistoryItem.getTxHash());
+        }
+    }
+
+    private void updateDescription(final String txHash) {
+        Requestor.getTxById(txHash, new ApiMethods.RequestListener() {
+            @Override
+            public void onSuccess(Object response) {
+                String description = TransactionHistoryConverter.getQtumDescription((Tx)response);
+                if (!TextUtils.isEmpty(description)) {
+                    mDescription.setText(description);
+                }
+            }
+
+            @Override
+            public void onFailure(String msg) {
+            }
+        });
     }
 
     private void showIcon(String coinId) {
-        switch (coinId){
+        switch (coinId) {
             case QTUM_ID:
                 ivCoinLogo.setImageResource(R.drawable.vec_icon_qtum);
                 break;

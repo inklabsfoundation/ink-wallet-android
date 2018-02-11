@@ -16,6 +16,10 @@ public class ScriptPubKey {
     @Expose
     private List<String> addresses = null;
 
+    @SerializedName("asm")
+    @Expose
+    private String asm;
+
 
     public List<String> getAddresses() {
         return addresses;
@@ -25,4 +29,7 @@ public class ScriptPubKey {
         this.addresses = addresses;
     }
 
+    public String getAsm() {
+        return asm;
+    }
 }

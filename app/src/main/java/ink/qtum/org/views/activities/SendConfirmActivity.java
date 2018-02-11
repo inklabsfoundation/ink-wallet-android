@@ -9,6 +9,7 @@ import android.widget.Toast;
 
 import org.bitcoinj.core.Coin;
 
+import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -31,6 +32,7 @@ import ink.qtum.org.views.activities.base.AToolbarActivity;
 import static ink.qtum.org.models.Constants.INK_CONTRACT_ADDRESS_HEX;
 import static ink.qtum.org.models.Extras.AMOUNT_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
+import static ink.qtum.org.models.Extras.DESCRIPTION_EXTRA;
 import static ink.qtum.org.models.Extras.FEE_EXTRA;
 import static ink.qtum.org.models.Extras.INK_ID;
 import static ink.qtum.org.models.Extras.QTUM_ID;
@@ -59,6 +61,7 @@ public class SendConfirmActivity extends AToolbarActivity {
     private String txHex;
     private String coinId;
     private int txSizeBytes;
+    private String description;
 
 
     @Override
@@ -70,6 +73,7 @@ public class SendConfirmActivity extends AToolbarActivity {
             address = getIntent().getExtras().getString(WALLET_NUMBER_EXTRA, "");
             amount = getIntent().getExtras().getLong(AMOUNT_EXTRA);
             feePerKb = getIntent().getExtras().getLong(FEE_EXTRA);
+            description = getIntent().getExtras().getString(DESCRIPTION_EXTRA);
         }
 
         generateRawTx();
@@ -90,7 +94,7 @@ public class SendConfirmActivity extends AToolbarActivity {
 
     private void generateQtumRawTx() {
         try {
-            txHex = walletManager.generateQtumHexTx(address, amount, feePerKb);
+            txHex = walletManager.generateQtumHexTx(address, amount, feePerKb, description);
             txSizeBytes = txHex.length() / 2;
             updateViews();
         } catch (Exception e) {
@@ -108,9 +112,16 @@ public class SendConfirmActivity extends AToolbarActivity {
                 List<UnspentOutput> unspentOutputs = (List<UnspentOutput>) response;
 
                 if (unspentOutputs != null && !unspentOutputs.isEmpty()) {
-                    txHex = walletManager.createTokenHexTx(abiParams, INK_CONTRACT_ADDRESS_HEX, fee, BigDecimal.valueOf(feeBerKb), unspentOutputs);
-                    txSizeBytes = txHex.length() / 2;
-                    updateViews();
+                    try {
+                        txHex = walletManager.createTokenHexTx(abiParams, INK_CONTRACT_ADDRESS_HEX,
+                                fee, BigDecimal.valueOf(feeBerKb), unspentOutputs, description);
+                        txSizeBytes = txHex.length() / 2;
+                        updateViews();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        Toast.makeText(SendConfirmActivity.this, e.toString(), Toast.LENGTH_LONG).show();
+                    }
+
                 }
             }
 
@@ -126,6 +137,7 @@ public class SendConfirmActivity extends AToolbarActivity {
         tvSendingAmount.setText(String.format("%s %s", Coin.valueOf(amount).toPlainString(), coinId));
         long txFee = feePerKb / 1024 * txSizeBytes;
         tvFeesSum.setText(String.format("%s %s", Coin.valueOf(txFee).toPlainString(), QTUM_ID));
+        tvDescription.setText(description);
     }
 
     @Override

@@ -16,4 +16,6 @@ public class Constants {
     public static final String LAST_SYNCED_BLOCK = "LAST_SYNCED_BLOCK";
     public static final String QTUM_SHARED_PREFS = "QTUM_SHARED_PREFS";
 
+    public static final String OP_RETURN = "OP_RETURN";
+
 }
