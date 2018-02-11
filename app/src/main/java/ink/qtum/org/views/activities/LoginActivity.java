@@ -1,7 +1,6 @@
 package ink.qtum.org.views.activities;
 
 import android.content.Intent;
-import android.os.Build;
 import android.os.Bundle;
 import android.support.v7.widget.AppCompatButton;
 import android.text.TextUtils;
@@ -29,10 +28,8 @@ public class LoginActivity extends BaseActivity {
 
     @BindView(R.id.btn_restore)
     AppCompatButton btnRestore;
-
     @BindView(R.id.tv_create_new)
     TextView btnCreateNew;
-
     @BindView(R.id.tv_version_number)
     TextView tvVersionNumber;
 
@@ -43,12 +40,11 @@ public class LoginActivity extends BaseActivity {
     protected void init(Bundle savedInstanceState) {
         QtumApp.getAppComponent().inject(this);
         tvVersionNumber.setText(String.format("v %s", BuildConfig.VERSION_NAME));
-        if (!TextUtils.isEmpty(sharedManager.getLastSyncedBlock())){
+        if (!TextUtils.isEmpty(sharedManager.getLastSyncedBlock())) {
             Intent intent = new Intent(this, MainActivity.class);
             intent.setAction(ACTION_RESTORE_SAVED);
             startActivity(intent);
         }
-
 
     }
 
@@ -70,4 +66,8 @@ public class LoginActivity extends BaseActivity {
         startActivity(intent);
     }
 
+    @OnClick(R.id.tv_term_of_use_link)
+    public void showTermOfUse(){
+        startActivity(new Intent(this, TermsOfUsageActivity.class));
+    }
 }

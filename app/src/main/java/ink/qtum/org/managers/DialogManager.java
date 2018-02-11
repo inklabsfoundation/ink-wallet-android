@@ -20,18 +20,17 @@ public class DialogManager {
     public static void showCopyMnemonicsDialog(Context context, final DialogListener listener) {
         MaterialDialog.Builder builder = getBaseDialog(context, listener);
         builder.content(R.string.copy_mnemonics_attention_content)
-                .positiveText(R.string.btn_still_copy)
-                .negativeText(R.string.btn_give_up)
+                .positiveText(R.string.btn_give_up)
+                .negativeText(R.string.btn_still_copy)
                 .positiveColor(QtumApp.getAppContext().getResources().getColor(R.color.btnBlueTextColor))
                 .negativeColor(QtumApp.getAppContext().getResources().getColor(R.color.lightGrayTextColor))
                 .callback(new MaterialDialog.ButtonCallback() {
-
                     @Override
-                    public void onPositive(MaterialDialog dialog) {
-                        listener.onPositiveButtonClick();
-
-                        super.onPositive(dialog);
+                    public void onNegative(MaterialDialog dialog) {
+                        super.onNegative(dialog);
+                        listener.onNegativeButtonClick();
                     }
+
                 });
         MaterialDialog dialog = builder.build();
         dialog.getContentView().setTextAlignment(View.TEXT_ALIGNMENT_CENTER);

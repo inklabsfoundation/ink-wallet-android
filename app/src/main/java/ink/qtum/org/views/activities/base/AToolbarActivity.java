@@ -47,7 +47,7 @@ public abstract class AToolbarActivity extends BaseActivity {
         toolBar = (Toolbar) findViewById(R.id.toolbar_main);
         if (toolBar != null) {
             title = (TextView) findViewById(R.id.tv_toolbar_title);
-toolBar.setTitle("");
+            toolBar.setTitle("");
             setSupportActionBar(toolBar);
 
             initBackButton();

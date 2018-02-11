@@ -67,8 +67,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="10dp"
-            android:layout_marginStart="10dp"
+            android:layout_marginEnd="5dp"
             android:text="Address:"
             android:textColor="@color/lightGrayTextColor" />
 
@@ -78,6 +77,7 @@
             android:layout_height="wrap_content"
             android:text="SLDfkj34lkfe5l5kfj3l34ggj"
             android:textColor="@color/black8TextColor"
+            android:textSize="13dp"
             android:textStyle="bold" />
     </LinearLayout>
 
@@ -157,7 +157,7 @@
                 android:textSize="16dp"
                 android:layout_marginRight="10dp"
                 android:gravity="center_vertical|end"
-                android:text="--.--" />
+                android:text="0" />
         </LinearLayout>
 
         <View
@@ -206,7 +206,7 @@
                 android:textSize="16dp"
                 android:layout_marginRight="10dp"
                 android:gravity="center_vertical|end"
-                android:text="--.--" />
+                android:text="0" />
         </LinearLayout>
 
         <View

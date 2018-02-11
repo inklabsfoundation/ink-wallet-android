@@ -67,11 +67,13 @@ public class CreateWalletFragment extends BaseFragment {
     }
 
     private void generateWallet() {
+        showProgress();
         walletManager.createWallet(new WalletCreationCallback() {
             @Override
             public void onWalletCreated(Wallet wallet) {
                 tvAddress.setText(walletManager.getWalletFriendlyAddress());
                 tvMnemonics.setText(walletManager.getMnemonic());
+                closeProgress();
             }
         });
     }
@@ -104,18 +106,19 @@ public class CreateWalletFragment extends BaseFragment {
     }
 
     @OnClick(R.id.btn_copy_mnemonics)
-    public void copyMnemonics(){
+    public void copyMnemonics() {
         DialogManager.showCopyMnemonicsDialog(getContext(), new DialogManager.DialogListener() {
             @Override
-            public void onPositiveButtonClick() {
-                super.onPositiveButtonClick();
+            public void onNegativeButtonClick() {
+                super.onNegativeButtonClick();
                 ClipboardUtils.copyToClipBoard(QtumApp.getAppContext(), tvMnemonics.getText().toString());
             }
+
         });
     }
 
     @OnClick(R.id.tv_start_wallet)
-    public void goToMainActivity(){
+    public void goToMainActivity() {
         mListener.onFinishCreateWallet();
     }
 }

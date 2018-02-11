@@ -6,7 +6,6 @@ import android.widget.TextView;
 
 import butterknife.BindView;
 import ink.qtum.org.inkqtum.R;
-import ink.qtum.org.views.activities.MainActivity;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 
 public class TermsOfUsageFragment extends BaseFragment {
@@ -21,13 +20,9 @@ public class TermsOfUsageFragment extends BaseFragment {
 
     @Override
     protected void init() {
+        setHasOptionsMenu(false);
         Spanned htmlAsSpanned = Html.fromHtml(getString(R.string.terms_of_usage_text));
         tvTermOfUsage.setText(htmlAsSpanned);
     }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-        ((MainActivity) getActivity()).setToolbarTitle(getString(R.string.toolbar_title_terms_of_usage));
-    }
 }

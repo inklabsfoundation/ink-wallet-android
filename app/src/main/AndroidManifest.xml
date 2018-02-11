@@ -21,7 +21,7 @@
         <activity
             android:name="ink.qtum.org.views.activities.LoginActivity"
             android:screenOrientation="portrait"
-            android:noHistory="true"
+            android:noHistory="false"
             android:theme="@style/AppTheme.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -59,6 +59,9 @@
             android:screenOrientation="portrait" />
         <activity
             android:name="ink.qtum.org.views.activities.QrCodeScanActivity"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name="ink.qtum.org.views.activities.TermsOfUsageActivity"
             android:screenOrientation="portrait" />
     </application>
 

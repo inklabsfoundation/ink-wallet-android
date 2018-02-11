@@ -6,13 +6,15 @@ import android.os.Bundle;
 import android.support.design.widget.NavigationView;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
+import android.support.v4.view.GravityCompat;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v7.widget.Toolbar;
 import android.text.TextUtils;
 import android.view.Gravity;
-import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.widget.Button;
+import android.widget.TextView;
 
 import javax.inject.Inject;
 
@@ -43,6 +45,8 @@ public class MainActivity extends BaseActivity {
     NavigationView mNavigationView;
     @BindView(R.id.main_toolbar)
     Toolbar mToolbar;
+    @BindView(R.id.tv_toolbar_title)
+    TextView mToolbarTitle;
     @BindView(R.id.btn_log_out)
     Button btnLogOut;
 
@@ -56,6 +60,7 @@ public class MainActivity extends BaseActivity {
         initToolbar();
         String action = getIntent().getAction();
         if (action != null && action.equals(ACTION_RESTORE_SAVED)) {
+            setToolBarTitle(" ");
             MainFragment mainFragment = new MainFragment();
             Bundle args = new Bundle();
             args.putBoolean(ACTION_RESTORE_SAVED, true);
@@ -63,7 +68,7 @@ public class MainActivity extends BaseActivity {
             navigateToFragment(mainFragment);
 
         } else {
-            navigateToFragment(new MainFragment());
+            goToHomeFragment();
         }
     }
 
@@ -102,29 +107,51 @@ public class MainActivity extends BaseActivity {
             @Override
             public boolean onNavigationItemSelected(final MenuItem menuItem) {
                 mDrawerLayout.closeDrawers();
-                Fragment fragment = null;
-                Fragment currentFragment = getSupportFragmentManager().findFragmentById(R.id.fl_main_root);
                 switch (menuItem.getItemId()) {
                     case R.id.menu_main:
-                        fragment = new MainFragment();
+                        goToHomeFragment();
                         break;
                     case R.id.menu_qa:
-                        fragment = new QandAFragment();
+                        goToFAQ();
                         break;
                     case R.id.menu_feedback:
-                        fragment = new FeedbackFragment();
+                        goToFeedBack();
                         break;
                     case R.id.menu_terms_of_usage:
-                        fragment = new TermsOfUsageFragment();
+                        goToTermsOfUsage();
                         break;
                     case R.id.menu_version_inform:
-                        fragment = new VersionInformFragment();
+                        goToVersionInform();
                         break;
                 }
-                navigateToFragment(fragment);
                 return true;
             }
         });
+    }
+
+    private void goToHomeFragment() {
+        setToolBarTitle(" ");
+        navigateToFragment(new MainFragment());
+    }
+
+    private void goToFAQ() {
+        setToolBarTitle(getString(R.string.toolbar_title_q_and_a));
+        navigateToFragment(new QandAFragment());
+    }
+
+    private void goToFeedBack() {
+        setToolBarTitle(getString(R.string.toolbar_title_feedback));
+        navigateToFragment(new FeedbackFragment());
+    }
+
+    private void goToTermsOfUsage() {
+        setToolBarTitle(getString(R.string.toolbar_title_terms_of_usage));
+        navigateToFragment(new TermsOfUsageFragment());
+    }
+
+    private void goToVersionInform() {
+        setToolBarTitle(getString(R.string.toolbar_title_version_inform));
+        navigateToFragment(new VersionInformFragment());
     }
 
     private void navigateToFragment(Fragment fragment) {
@@ -139,18 +166,17 @@ public class MainActivity extends BaseActivity {
         getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         getSupportActionBar().setDisplayShowHomeEnabled(true);
         getSupportActionBar().setHomeAsUpIndicator(R.drawable.ic_menu_vec);
-        mToolbar.setTitle(" ");
+        getSupportActionBar().setDisplayShowTitleEnabled(false);
         mToolbar.setTitleTextColor(getResources().getColor(R.color.toolbar_text_color));
     }
 
-    public void setToolbarTitle(String text) {
-        mToolbar.setTitle(text);
-    }
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.toolbar_menu, menu);
-        return super.onCreateOptionsMenu(menu);
+    protected void setToolBarTitle(CharSequence title) {
+        if (mToolbarTitle != null) {
+            mToolbarTitle.setText(title);
+            if (TextUtils.isEmpty(title)) {
+                mToolbarTitle.setVisibility(View.GONE);
+            }
+        }
     }
 
     @Override
@@ -158,10 +184,6 @@ public class MainActivity extends BaseActivity {
         switch (item.getItemId()) {
             case android.R.id.home:
                 mDrawerLayout.openDrawer(Gravity.START);
-                break;
-            case R.id.toolbar_menu_qr_scan:
-                Intent intent = new Intent(this, QrCodeScanActivity.class);
-                startActivityForResult(intent, RequestCode.QR_CODE_REQUEST_CODE);
                 break;
         }
         return super.onOptionsItemSelected(item);
@@ -205,5 +227,21 @@ public class MainActivity extends BaseActivity {
         }
 
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (mDrawerLayout.isDrawerOpen(GravityCompat.START)) {
+            mDrawerLayout.closeDrawer(GravityCompat.START);
+        } else if (!isHomeFragmentOpen()) {
+            goToHomeFragment();
+        } else {
+            finishAffinity();
+        }
+    }
+
+    private boolean isHomeFragmentOpen() {
+        Fragment currentFragment = getSupportFragmentManager().findFragmentById(R.id.fl_main_root);
+        return currentFragment instanceof MainFragment;
     }
 }

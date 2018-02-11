@@ -20,6 +20,7 @@ import butterknife.OnClick;
 import ink.qtum.org.QtumApp;
 import ink.qtum.org.inkqtum.R;
 import ink.qtum.org.managers.DialogManager;
+import ink.qtum.org.managers.SharedManager;
 import ink.qtum.org.managers.WalletManager;
 import ink.qtum.org.models.contract.UnspentOutput;
 import ink.qtum.org.models.response.SendTxResponse;
@@ -27,7 +28,6 @@ import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 
-import static ink.qtum.org.models.Constants.INK_CONTRACT_ADDRESS_BASE58;
 import static ink.qtum.org.models.Constants.INK_CONTRACT_ADDRESS_HEX;
 import static ink.qtum.org.models.Extras.AMOUNT_EXTRA;
 import static ink.qtum.org.models.Extras.COIN_ID_EXTRA;
@@ -50,6 +50,8 @@ public class SendConfirmActivity extends AToolbarActivity {
 
     @Inject
     WalletManager walletManager;
+    @Inject
+    SharedManager sharedManager;
 
     private String address;
     private long amount;
@@ -76,7 +78,7 @@ public class SendConfirmActivity extends AToolbarActivity {
     }
 
     private void generateRawTx() {
-        switch (coinId){
+        switch (coinId) {
             case QTUM_ID:
                 generateQtumRawTx();
                 break;
@@ -86,24 +88,24 @@ public class SendConfirmActivity extends AToolbarActivity {
         }
     }
 
-    private void generateQtumRawTx(){
+    private void generateQtumRawTx() {
         try {
             txHex = walletManager.generateQtumHexTx(address, amount, feePerKb);
             txSizeBytes = txHex.length() / 2;
             updateViews();
-        } catch (Exception e){
+        } catch (Exception e) {
             Toast.makeText(this, e.toString(), Toast.LENGTH_LONG).show();
         }
     }
 
-    private void generateInkRawTx(){
+    private void generateInkRawTx() {
         final String abiParams = walletManager.createAbiMethodParams(address, Long.toString(amount));
         final double feeBerKb = Double.parseDouble(Coin.valueOf(feePerKb).toPlainString());
         final String fee = walletManager.getValidatedFee(feeBerKb);
         Requestor.getUTXOListForToken(walletManager.getWalletFriendlyAddress(), new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
-                List<UnspentOutput> unspentOutputs = (List<UnspentOutput>)response;
+                List<UnspentOutput> unspentOutputs = (List<UnspentOutput>) response;
 
                 if (unspentOutputs != null && !unspentOutputs.isEmpty()) {
                     txHex = walletManager.createTokenHexTx(abiParams, INK_CONTRACT_ADDRESS_HEX, fee, BigDecimal.valueOf(feeBerKb), unspentOutputs);
@@ -132,8 +134,19 @@ public class SendConfirmActivity extends AToolbarActivity {
     }
 
     @OnClick(R.id.btn_confirm_sending_tx)
-    public void sendTransaction() {
+    public void sendTxBtnClick() {
+        DialogManager.showPinCodeDialog(this, sharedManager.getPinCode(), getString(R.string.confirm_your_pin),
+                false, new DialogManager.DialogListener() {
+                    @Override
+                    public void onPositiveButtonClick() {
+                        super.onPositiveButtonClick();
+                        sendTransaction();
+                    }
+                });
 
+    }
+
+    private void sendTransaction(){
         walletManager.sendTx(txHex, new ApiMethods.RequestListener() {
             @Override
             public void onSuccess(Object response) {
@@ -158,6 +171,5 @@ public class SendConfirmActivity extends AToolbarActivity {
                 Log.d("svcom", "onFailure " + msg);
             }
         });
-
     }
 }

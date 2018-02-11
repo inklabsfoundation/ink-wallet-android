@@ -62,10 +62,12 @@ public class RestoreWalletActivity extends AToolbarActivity implements InputMnem
 
     @Override
     public void onConfirmed(String pin) {
+        showProgress();
         sharedManager.setPinCode(Coders.getSha1Hex(pin));
         walletManager.restoreWallet(mnemonic, new WalletCreationCallback() {
             @Override
             public void onWalletCreated(Wallet wallet) {
+                closeProgress();
                 openMainActivity();
             }
         });

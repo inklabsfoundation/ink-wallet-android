@@ -1,7 +1,6 @@
 package ink.qtum.org.views.fragments;
 
 import ink.qtum.org.inkqtum.R;
-import ink.qtum.org.views.activities.MainActivity;
 import ink.qtum.org.views.fragments.base.BaseFragment;
 
 public class QandAFragment extends BaseFragment {
@@ -13,12 +12,7 @@ public class QandAFragment extends BaseFragment {
 
     @Override
     protected void init() {
-
+        setHasOptionsMenu(false);
     }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-        ((MainActivity)getActivity()).setToolbarTitle(getString(R.string.toolbar_title_q_and_a));
-    }
 }

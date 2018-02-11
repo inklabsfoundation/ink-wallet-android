@@ -43,10 +43,10 @@
      app. It is not related with your web-wallet-PIN. Each time when you log out, you have to reset it.</string>
     <string name="here_is_your_wallet_address">Here is your wallet address and mnemonics</string>
     <string name="wallet_address_is_the_identity_of_your_wallet">Wallet address is the identity of your wallet.
-    You can tell it to others.
+    You can tell it to others.\n
     Mnemonics is used to restore your wallet in other devices ore in the case of logging out. Ink will
-     not save your mnemonics, so you can not re-get it after losing…\n
-    Do Remember Your Mnemonics and don\'t share them with anyone…</string>
+     not save your mnemonics, so you can not re-get it after losing.n
+    Do Remember Your Mnemonics and don\'t share them with anyone.</string>
     <string name="btn_copy_mnemonics">Copy Mnemonics</string>
     <string name="start_my_ink_wallet">Start My INK Wallet</string>
     <string name="backup">Backup</string>

@@ -80,14 +80,6 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
 //        showPinFragment();
     }
 
-    private void showPinFragment() {
-        setCreateProgress(1);
-        FragmentManager fragmentManager = getSupportFragmentManager();
-        fragmentManager.beginTransaction()
-                .replace(R.id.fl_fragment_container, CreateWalletPinFragment.newInstance())
-                .commit();
-    }
-
     @Override
     public void onPinEntered(String pin) {
         showConfirmPinFragment(pin);
@@ -99,11 +91,11 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
         showWalletFragment();
     }
 
-    private void showWalletFragment() {
-        setCreateProgress(2);
+    private void showPinFragment() {
+        setCreateProgress(1);
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
-                .replace(R.id.fl_fragment_container, CreateWalletFragment.newInstance())
+                .replace(R.id.fl_fragment_container, CreateWalletPinFragment.newInstance())
                 .commit();
     }
 
@@ -111,6 +103,14 @@ public class CreateWalletActivity extends AToolbarActivity implements CreateSeed
         FragmentManager fragmentManager = getSupportFragmentManager();
         fragmentManager.beginTransaction()
                 .replace(R.id.fl_fragment_container, CreateWalletConfirmPinFragment.newInstance(pin))
+                .commit();
+    }
+
+    private void showWalletFragment() {
+        setCreateProgress(2);
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.beginTransaction()
+                .replace(R.id.fl_fragment_container, CreateWalletFragment.newInstance())
                 .commit();
     }
 

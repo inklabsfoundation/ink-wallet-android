@@ -41,8 +41,8 @@ public class BackupActivity extends AToolbarActivity {
     public void copyMnemonic() {
         DialogManager.showCopyMnemonicsDialog(this, new DialogManager.DialogListener() {
             @Override
-            public void onPositiveButtonClick() {
-                super.onPositiveButtonClick();
+            public void onNegativeButtonClick() {
+                super.onNegativeButtonClick();
                 ClipboardUtils.copyToClipBoard(QtumApp.getAppContext(), tvMnemonics.getText().toString());
             }
         });

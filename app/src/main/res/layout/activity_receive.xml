@@ -13,7 +13,7 @@
         android:layout_centerHorizontal="true"
         android:layout_marginBottom="40dp"
         android:adjustViewBounds="true"
-        android:src="@drawable/vec_icon_qtum" />
+        app:srcCompat="@drawable/vec_icon_qtum" />
 
     <View
         android:id="@+id/center_divider"
@@ -34,11 +34,10 @@
         android:paddingLeft="15dp"
         android:paddingRight="15dp"
         android:paddingTop="5dp"
-        android:layout_marginRight="40dp"
-        android:layout_marginLeft="40dp"
+        android:layout_marginRight="20dp"
+        android:layout_marginLeft="20dp"
         android:textColor="@color/blackTextColor"
-        android:textSize="14dp"
-        android:text="QcSDghaT54jy54$yhREghsRGFWHveSDfgDFh56yuh4%^4tb" />
+        android:text="QcSDghaT54jy54$yhREghsRGFWHveSDfgDF" />
 
     <Button
         style="@style/BtnStyle.Blue"
