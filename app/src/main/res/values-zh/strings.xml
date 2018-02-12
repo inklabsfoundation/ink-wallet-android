@@ -1,0 +1,102 @@
+<resources>
+    <string name="app_name">INK钱包</string>
+
+    <string name="dialog_msg_please_wait">请稍候</string>
+    <string name="ink_wallet">Ink钱包</string>
+    <string name="welcome_to">欢迎来到</string>
+    <string name="copyright_ink_labs_foundation">Copyright@Ink labs Foundation</string>
+    <string name="terms_of_usage">用户协议</string>
+
+    <string name="menu_title_scan_code">扫描二维码</string>
+    <string name="menu_title_qa">常见问题</string>
+    <string name="menu_title_feedback">联系Ink</string>
+    <string name="menu_title_terms_of_usage">服务条款</string>
+    <string name="menu_title_version_inform">版本信息</string>
+    <string name="toolbar_title_details">详情</string>
+    <string name="toolbar_title_receive">接收</string>
+    <string name="toolbar_title_send">发送</string>
+    <string name="toolbar_title_feedback">联系Ink</string>
+    <string name="toolbar_title_q_and_a"><![CDATA[Q&A]]></string>
+    <string name="toolbar_title_terms_of_usage">服务条款</string>
+    <string name="toolbar_title_version_inform">版本信息</string>
+    <string name="btn_create_ink_wallet">创建新钱包</string>
+    <string name="btn_restore_ink_wallet">恢复钱包</string>
+    <string name="btn_restore_my_wallet">恢复钱包</string>
+    <string name="btn_create_new_wallet">创建新钱包</string>
+    <string name="btn_log_out">注销</string>
+    <string name="btn_receive">接收</string>
+    <string name="btn_send">发送</string>
+    <string name="btn_still_copy">继续复制</string>
+    <string name="btn_give_up">放弃</string>
+    <string name="btn_copy_address">复制地址</string>
+    <string name="btn_go_to_backup">去备份</string>
+    <string name="btn_next">下一步</string>
+    <string name="btn_confirm">确认</string>
+    <string name="btn_done">完成</string>
+
+    <string name="input_your_seeds">Input your seeds</string>
+    <string name="about_the_seeds">About the seeds:\nSeeds is a character string used to generate random address. You can input anything you like here.
+    And you have not been to remember it. Be aware that you can not get the same address even though
+     input the same seeds here.</string>
+    <string name="set_your_pin">设置PIN码</string>
+    <string name="about_the_pin">关于PIN码:\nPIN是在INk钱包移动端解锁钱包地址的六位数字。它与web端使用的INk钱包文件密码无关。每次注销后，您需要重设PIN码。</string>
+    <string name="here_is_your_wallet_address">您的钱包地址和记忆词</string>
+    <string name="wallet_address_is_the_identity_of_your_wallet">钱包地址用于接受转账，您可以将它告诉其他人。
+    记忆词用于在其他设备上，或在注销后恢复您的钱包. Ink不会
+     保存您的记忆词，所以如果丢失了记忆词，您将无法找回它们。\n
+    妥善保管您的记忆词，且在任何情况下都不要和他人分享。</string>
+    <string name="btn_copy_mnemonics">复制记忆词</string>
+    <string name="start_my_ink_wallet">开始使用</string>
+    <string name="backup">备份</string>
+    <string name="copied_to_clipboard">已复制</string>
+    <string name="address">地址</string>
+    <string name="input_your_mnemonics">输入您的记忆词以恢复钱包</string>
+    <string name="title_backup">备份</string>
+    <string name="mnemonics_backup_text">记忆词用于在其他设备上或在注销后恢复钱包。确保您没有把记忆词告诉任何人。</string>
+    <string name="copy_mnemonics_attention_content">复制记忆词并将其存在电子设备上可能会导致风险。\n\n我们建议您将它抄下来，而不是储存在任何电子设备或云端硬盘上。</string>
+    <string name="qtum">Qtum</string>
+    <string name="ink">INK</string>
+    <string name="transaction_history">交易记录</string>
+    <string name="et_hint_from">从:</string>
+    <string name="et_hint_to">到:</string>
+    <string name="et_hint_fees">手续费:</string>
+    <string name="et_hint_description">交易描述:</string>
+    <string name="et_hint_tx_hash">交易Hash:</string>
+    <string name="et_hint_block_height">区块高度:</string>
+    <string name="et_hint_time_stamp">时间戳:</string>
+    <string name="copy_succeed">复制成功!</string>
+    <string name="logout_dialog_content">如果您未记下记忆词，您将无法恢复该钱包。</string>
+    <string name="title_warning">警告</string>
+    <string name="send_title_address">地址:</string>
+    <string name="send_title_address_hint_">输入地址，长按可粘贴</string>
+    <string name="send_amount_title">金额:</string>
+    <string name="send_description_title">交易描述:</string>
+    <string name="send_fees_title">手续费:</string>
+    <string name="send_checkbox_standard">标准</string>
+    <string name="send_checkbox_custom">自定义</string>
+    <string name="send_tx_speed_slow">慢</string>
+    <string name="send_tx_speed_quick">快</string>
+    <string name="send_fees_receiver_address">对方地址:</string>
+    <string name="transfer_fail">交易失败!</string>
+    <string name="succeeded">成功!</string>
+    <string name="loading_transactions">交易记录加载中</string>
+    <string name="invalid_qtum_address">无效的Qtum地址</string>
+    <string name="max_amount">最大金额:</string>
+    <string name="amount_cant_be_more_balance">超过资产余额！</string>
+    <string name="wrong_qtum_address">无效的Qtum地址</string>
+    <string name="dust_transaction">Dust transaction</string>
+    <string name="insufficient_fee_lease_use_minimum_of">手续费过低</string>
+    <string name="confirm_your_pin">确认PIN码</string>
+    <string name="input_pin_to_unlock">输入PIN码以解锁</string>
+    <string name="input_pin_to_backup">输入PIN码以备份</string>
+
+
+    <!-- no need to translate. Fake text. -->
+    <string name="terms_of_usage_text">
+        <![CDATA[
+        <p><strong>1. Who May Use the Services</strong><br/>You may use the Services only if you agree to form a binding contract with Twitter and are not a person barred from receiving services under the laws of the applicable jurisdiction. In any case, you must be at least 13 years old to use the Services. If you are accepting these Terms and using the Services on behalf of a company, organization, government, of other legal entity, you represent and warrant that you are authorized to do so.</p>
+        <p><strong>2. Privacy</strong><br/>You may use the Services only if you agree to form a binding contract with Twitter and are not a person barred from receiving services under the laws of the applicable jurisdiction. In any case, you must be at least 13 years old to use the Services</p>
+        <p><strong>3. Content on the Services</strong><br/>You are responsible for your use of the Services and for any Content you provide, including compliance with applicable laws, rules.</p>
+        ]]>
+    </string>
+</resources>

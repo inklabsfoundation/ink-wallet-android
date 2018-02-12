@@ -1,0 +1,103 @@
+<resources>
+    <string name="app_name">INK Wallet</string>
+
+    <string name="dialog_msg_please_wait">Please wait</string>
+    <string name="ink_wallet">Ink wallet</string>
+    <string name="welcome_to">Welcome to</string>
+    <string name="copyright_ink_labs_foundation">Copyright@Ink labs Foundation</string>
+    <string name="terms_of_usage">利用規約</string>
+
+    <string name="menu_title_scan_code">Scan code</string>
+    <string name="menu_title_qa">よくある質問</string>
+    <string name="menu_title_feedback">Feedback</string>
+    <string name="menu_title_terms_of_usage">利用規約</string>
+    <string name="menu_title_version_inform">Version inform</string>
+    <string name="toolbar_title_details">Details</string>
+    <string name="toolbar_title_receive">受取</string>
+    <string name="toolbar_title_send">送付</string>
+    <string name="toolbar_title_feedback">Feedback</string>
+    <string name="toolbar_title_q_and_a"><![CDATA[Q&A]]></string>
+    <string name="toolbar_title_terms_of_usage">利用規約</string>
+    <string name="toolbar_title_version_inform">Version Inform</string>
+    <string name="btn_create_ink_wallet">新しいウォレットの作成</string>
+    <string name="btn_restore_ink_wallet">マイ・ウォレットの修復</string>
+    <string name="btn_restore_my_wallet">マイ・ウォレットの修復</string>
+    <string name="btn_create_new_wallet">新しいウォレットの作成</string>
+    <string name="btn_log_out">ログアウトする</string>
+    <string name="btn_receive">受取</string>
+    <string name="btn_send">送付</string>
+    <string name="btn_still_copy">Still copy</string>
+    <string name="btn_give_up">諦める</string>
+    <string name="btn_copy_address">Copy address</string>
+    <string name="btn_go_to_backup">バックアップ</string>
+    <string name="btn_next">次へ</string>
+    <string name="btn_confirm">確認</string>
+    <string name="btn_done">完成</string>
+
+    <string name="input_your_seeds">Input your seeds</string>
+    <string name="about_the_seeds">About the seeds:\nSeeds is a character string used to generate random address. You can input anything you like here.
+    And you have not been to remember it. Be aware that you can not get the same address even though
+     input the same seeds here.</string>
+    <string name="set_your_pin">Set your PIN</string>
+    <string name="about_the_pin">About the PIN:\nPIN is a six-digit-number used to unlock this wallet address for INK wallet
+     app. It is not related with your web-wallet-PIN. Each time when you log out, you have to reset it.</string>
+    <string name="here_is_your_wallet_address">Here is your wallet address and mnemonics</string>
+    <string name="wallet_address_is_the_identity_of_your_wallet">ウォレット・アドレスは、あなたのウオレットを特定するためのもので、他の人に伝えることが可能です。
+    Mnemonics is used to restore your wallet in other devices ore in the case of logging out. Ink will
+     not save your mnemonics, so you can not re-get it after losing…\n
+    …</string>
+    <string name="btn_copy_mnemonics">Copy Mnemonics</string>
+    <string name="start_my_ink_wallet">Start My INK Wallet</string>
+    <string name="backup">バックアップ</string>
+    <string name="copied_to_clipboard">Copied to clipboard</string>
+    <string name="address">アドレス</string>
+    <string name="input_your_mnemonics">二モニックを入力して下さい</string>
+    <string name="title_backup">バックアップ</string>
+    <string name="mnemonics_backup_text">Mnemonics are used to restore your wallet in other devices or when you log out. Be aware them just for yourself.</string>
+    <string name="copy_mnemonics_attention_content">Copy mnemonics and save them digitally may cause security risks.\n\nWe strongly suggest you write them down, without relying on any network service and digit devices.</string>
+    <string name="qtum">Qtum</string>
+    <string name="ink">INK</string>
+    <string name="transaction_history">Transaction history</string>
+    <string name="et_hint_from">から:</string>
+    <string name="et_hint_to">まで:</string>
+    <string name="et_hint_fees">手数料:</string>
+    <string name="et_hint_description">定義:</string>
+    <string name="et_hint_tx_hash">Tx hash:</string>
+    <string name="et_hint_block_height">Block height:</string>
+    <string name="et_hint_time_stamp">Time stamp:</string>
+    <string name="copy_succeed">Copy Succeed!</string>
+    <string name="logout_dialog_content">You can not access to this wallet if you don\'t write down your mnemonics.</string>
+    <string name="title_warning">警告</string>
+    <string name="send_title_address">アドレス:</string>
+    <string name="send_title_address_hint_">Input address, long press to paste</string>
+    <string name="send_amount_title">金額:</string>
+    <string name="send_description_title">定義:</string>
+    <string name="send_fees_title">手数料:</string>
+    <string name="send_checkbox_standard">水準</string>
+    <string name="send_checkbox_custom">カスタム</string>
+    <string name="send_tx_speed_slow">遅い</string>
+    <string name="send_tx_speed_quick">速い</string>
+    <string name="send_fees_receiver_address">Other party\'s address:</string>
+    <string name="transfer_fail">Transfer Fail!</string>
+    <string name="succeeded">成功しました！!</string>
+    <string name="loading_transactions">Loading transactions</string>
+    <string name="invalid_qtum_address">アドレスが無効です。</string>
+    <string name="max_amount">余力:</string>
+    <string name="amount_cant_be_more_balance">資産を超過しています</string>
+    <string name="wrong_qtum_address">アドレスが無効です。</string>
+    <string name="dust_transaction">Dust transaction</string>
+    <string name="insufficient_fee_lease_use_minimum_of">Insufficient fee. Please use minimum of</string>
+    <string name="confirm_your_pin">PINの確認</string>
+    <string name="input_pin_to_unlock">Input your PIN to unlock</string>
+    <string name="input_pin_to_backup">バックアップのためPINを入力</string>
+
+
+    <!-- no need to translate. Fake text. -->
+    <string name="terms_of_usage_text">
+        <![CDATA[
+        <p><strong>1. Who May Use the Services</strong><br/>You may use the Services only if you agree to form a binding contract with Twitter and are not a person barred from receiving services under the laws of the applicable jurisdiction. In any case, you must be at least 13 years old to use the Services. If you are accepting these Terms and using the Services on behalf of a company, organization, government, of other legal entity, you represent and warrant that you are authorized to do so.</p>
+        <p><strong>2. Privacy</strong><br/>You may use the Services only if you agree to form a binding contract with Twitter and are not a person barred from receiving services under the laws of the applicable jurisdiction. In any case, you must be at least 13 years old to use the Services</p>
+        <p><strong>3. Content on the Services</strong><br/>You are responsible for your use of the Services and for any Content you provide, including compliance with applicable laws, rules.</p>
+        ]]>
+    </string>
+</resources>
