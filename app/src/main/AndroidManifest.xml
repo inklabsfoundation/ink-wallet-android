@@ -63,6 +63,11 @@
         <activity
             android:name="ink.qtum.org.views.activities.TermsOfUsageActivity"
             android:screenOrientation="portrait" />
+
+        <meta-data
+            android:name="io.fabric.ApiKey"
+            android:value="716c16e4d94c8c73b3ab70d24928ee685c6e466f"
+            />
     </application>
 
 </manifest>

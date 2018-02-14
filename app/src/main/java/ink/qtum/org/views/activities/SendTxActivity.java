@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.InputFilter;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.Log;
@@ -44,6 +45,7 @@ import ink.qtum.org.models.Extras;
 import ink.qtum.org.models.RequestCode;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
+import ink.qtum.org.utils.DigitsInputFilter;
 import ink.qtum.org.utils.TransactionHistoryConverter;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
 import okhttp3.ResponseBody;
@@ -100,8 +102,8 @@ public class SendTxActivity extends AToolbarActivity {
             checkAddress(walletNumber);
         }
 
-        etAddress.setText("QenyjNzwZqC3GhHXeeARY5gMxMdGQ596ZL");
-
+//        etAddress.setText("QenyjNzwZqC3GhHXeeARY5gMxMdGQ596ZL");
+        etAmount.setFilters(new InputFilter[]{new DigitsInputFilter(20, 8, Float.POSITIVE_INFINITY)});
         setSeekBarListener();
         initAddressField();
         initAmountField();
@@ -310,7 +312,7 @@ public class SendTxActivity extends AToolbarActivity {
                         etAmount.setError(getString(R.string.amount_cant_be_more_balance));
                         btNext.setEnabled(false);
                     }
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException|ArithmeticException e) {
                     e.printStackTrace();
                 }
             }
@@ -318,9 +320,15 @@ public class SendTxActivity extends AToolbarActivity {
     }
 
     private boolean amountLessBalance() {
-        Coin amount = Coin.parseCoin(etAmount.getText().toString());
-        long amountSatoshi = amount.getValue();
-        return amountSatoshi < currentBalance.longValue();
+        try {
+            Coin amount = Coin.parseCoin(etAmount.getText().toString());
+            long amountSatoshi = amount.getValue();
+            return amountSatoshi < currentBalance.longValue();
+        } catch (NumberFormatException|ArithmeticException e){
+            e.printStackTrace();
+        }
+
+        return false;
     }
 
     @Override

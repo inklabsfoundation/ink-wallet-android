@@ -1,6 +1,7 @@
 package ink.qtum.org.views.activities;
 
 import android.os.Bundle;
+import android.os.Handler;
 import android.support.v4.app.FragmentManager;
 
 import org.bitcoinj.wallet.Wallet;
@@ -64,13 +65,27 @@ public class RestoreWalletActivity extends AToolbarActivity implements InputMnem
     public void onConfirmed(String pin) {
         showProgress();
         sharedManager.setPinCode(Coders.getSha1Hex(pin));
-        walletManager.restoreWallet(mnemonic, new WalletCreationCallback() {
+        showProgress(getString(R.string.generating_wallet));
+        final Handler handler = new Handler();
+        new Thread(new Runnable() {
             @Override
-            public void onWalletCreated(Wallet wallet) {
-                closeProgress();
-                openMainActivity();
+
+            public void run() {
+                walletManager.restoreWallet(mnemonic, new WalletCreationCallback() {
+                    @Override
+                    public void onWalletCreated() {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                closeProgress();
+                                openMainActivity();
+                            }
+                        });
+                    }
+                });
             }
-        });
+        }).start();
+
     }
 
     private void showMnemonicFragment() {

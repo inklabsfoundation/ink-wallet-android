@@ -1,6 +1,7 @@
 package ink.qtum.org.views.fragments;
 
 import android.content.Context;
+import android.os.Handler;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -67,15 +68,27 @@ public class CreateWalletFragment extends BaseFragment {
     }
 
     private void generateWallet() {
-        showProgress();
-        walletManager.createWallet(new WalletCreationCallback() {
+        showProgress(getString(R.string.generating_wallet));
+        final Handler handler = new Handler();
+        new Thread(new Runnable() {
             @Override
-            public void onWalletCreated(Wallet wallet) {
-                tvAddress.setText(walletManager.getWalletFriendlyAddress());
-                tvMnemonics.setText(walletManager.getMnemonic());
-                closeProgress();
+            public void run() {
+                walletManager.createWallet(new WalletCreationCallback() {
+                    @Override
+                    public void onWalletCreated() {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                tvAddress.setText(walletManager.getWalletFriendlyAddress());
+                                tvMnemonics.setText(walletManager.getMnemonic());
+                                closeProgress();
+                            }
+                        });
+                    }
+                });
             }
-        });
+        }).start();
+
     }
 
     @Override

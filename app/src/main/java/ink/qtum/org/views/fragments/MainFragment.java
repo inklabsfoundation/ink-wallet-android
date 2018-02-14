@@ -1,6 +1,7 @@
 package ink.qtum.org.views.fragments;
 
 import android.content.Intent;
+import android.os.Handler;
 import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.util.Log;
@@ -12,7 +13,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.bitcoinj.core.Coin;
-import org.bitcoinj.wallet.Wallet;
 
 import java.io.IOException;
 
@@ -116,12 +116,27 @@ public class MainFragment extends BaseFragment {
     }
 
     private void restoreSavedWallet() {
-        walletManager.restoreWallet(CryptoUtils.decodeBase64(sharedManager.getLastSyncedBlock()), new WalletCreationCallback() {
+
+        showProgress(getString(R.string.generating_wallet));
+        final Handler handler = new Handler();
+        new Thread(new Runnable() {
             @Override
-            public void onWalletCreated(Wallet wallet) {
-                initViews();
+            public void run() {
+                walletManager.restoreWallet(CryptoUtils.decodeBase64(sharedManager.getLastSyncedBlock()), new WalletCreationCallback() {
+                    @Override
+                    public void onWalletCreated() {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                closeProgress();
+                                initViews();
+                            }
+                        });
+                    }
+                });
             }
-        });
+        }).start();
+
     }
 
     private void initViews() {

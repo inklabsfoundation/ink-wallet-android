@@ -82,7 +82,7 @@ public class WalletManager {
         mnemonicKey = Joiner.on(" ").join(seed.getMnemonicCode());
         sharedManager.setLastSyncedBlock(CryptoUtils.encodeBase64(mnemonicKey));
         updateMainAddress();
-        callback.onWalletCreated(wallet);
+        callback.onWalletCreated();
 
     }
 
@@ -106,7 +106,7 @@ public class WalletManager {
         sharedManager.setLastSyncedBlock(CryptoUtils.encodeBase64(mnemonicKey));
 
         updateMainAddress();
-        callback.onWalletCreated(wallet);
+        callback.onWalletCreated();
         updateWallet();
     }
 

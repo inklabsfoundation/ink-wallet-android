@@ -7,5 +7,5 @@ import org.bitcoinj.wallet.Wallet;
  */
 
 public interface WalletCreationCallback {
-    void onWalletCreated(Wallet wallet);
+    void onWalletCreated();
 }

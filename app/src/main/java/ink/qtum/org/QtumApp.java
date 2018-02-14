@@ -3,10 +3,13 @@ package ink.qtum.org;
 import android.app.Application;
 import android.content.Context;
 
+import com.crashlytics.android.Crashlytics;
+
 import javax.inject.Singleton;
 
 import autodagger.AutoComponent;
 import ink.qtum.org.dependencies.AppModule;
+import io.fabric.sdk.android.Fabric;
 
 /**
  * Created by SV on 21.12.2017.
@@ -26,6 +29,7 @@ public class QtumApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        Fabric.with(this, new Crashlytics());
         appComponent = buildAppComponent();
         appContext = this;
     }
