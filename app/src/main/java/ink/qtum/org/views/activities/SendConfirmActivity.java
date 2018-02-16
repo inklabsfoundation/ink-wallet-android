@@ -7,9 +7,9 @@ import android.util.Log;
 import android.widget.TextView;
 import android.widget.Toast;
 
+
 import org.bitcoinj.core.Coin;
 
-import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -28,6 +28,7 @@ import ink.qtum.org.models.response.SendTxResponse;
 import ink.qtum.org.rest.ApiMethods;
 import ink.qtum.org.rest.Requestor;
 import ink.qtum.org.views.activities.base.AToolbarActivity;
+import okio.ByteString;
 
 import static ink.qtum.org.models.Constants.INK_CONTRACT_ADDRESS_HEX;
 import static ink.qtum.org.models.Extras.AMOUNT_EXTRA;
@@ -95,7 +96,7 @@ public class SendConfirmActivity extends AToolbarActivity {
     private void generateQtumRawTx() {
         try {
             txHex = walletManager.generateQtumHexTx(address, amount, feePerKb, description);
-            txSizeBytes = txHex.length() / 2;
+            txSizeBytes = ByteString.decodeHex(txHex).toByteArray().length;
             updateViews();
         } catch (Exception e) {
             Toast.makeText(this, e.toString(), Toast.LENGTH_LONG).show();
@@ -115,7 +116,7 @@ public class SendConfirmActivity extends AToolbarActivity {
                     try {
                         txHex = walletManager.createTokenHexTx(abiParams, INK_CONTRACT_ADDRESS_HEX,
                                 fee, BigDecimal.valueOf(feeBerKb), unspentOutputs, description);
-                        txSizeBytes = txHex.length() / 2;
+                        txSizeBytes = ByteString.decodeHex(txHex).toByteArray().length;
                         updateViews();
                     } catch (Exception e) {
                         e.printStackTrace();
@@ -180,7 +181,6 @@ public class SendConfirmActivity extends AToolbarActivity {
                         openMainActivity();
                     }
                 });
-                Log.d("svcom", "onFailure " + msg);
             }
         });
     }

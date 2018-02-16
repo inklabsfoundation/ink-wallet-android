@@ -92,6 +92,6 @@
     <string name="input_pin_to_unlock">Input your PIN to unlock</string>
     <string name="input_pin_to_backup">Input your PIN to backup</string>
 
-    <string name="text_length_more_descriprion_limit">Text length is more than description limit</string>
-    <string name="generating_wallet">Generating wallet</string>
+    <string name="text_length_more_descriprion_limit" translatable="false">Text length is more than description limit</string>
+    <string name="generating_wallet" translatable="false">Generating wallet</string>
 </resources>

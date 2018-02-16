@@ -96,6 +96,9 @@ public class MainFragment extends BaseFragment {
     public void onResume() {
         super.onResume();
         initViews();
+        if (!TextUtils.isEmpty(walletManager.getWalletFriendlyAddress())) {
+            walletManager.updateWallet();
+        }
     }
 
     @Override

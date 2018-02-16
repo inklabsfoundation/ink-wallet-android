@@ -111,6 +111,12 @@ public class SendTxActivity extends AToolbarActivity {
         disableControls();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        walletManager.updateWallet();
+    }
+
     private void initDescriptionField() {
         etDescription.addTextChangedListener(new TextWatcher() {
             @Override
@@ -422,13 +428,12 @@ public class SendTxActivity extends AToolbarActivity {
 
                 try {
                     byte[] descr = etDescription.getText().toString().getBytes("UTF-8");
-                    Log.d("svcom", "descr size = " + descr.length);
                 } catch (UnsupportedEncodingException e) {
                     e.printStackTrace();
                 }
 
                 if (cbStandard.isChecked()) {
-                    intent.putExtra(FEE_EXTRA, Transaction.REFERENCE_DEFAULT_MIN_TX_FEE.getValue());
+                    intent.putExtra(FEE_EXTRA, Transaction.DEFAULT_TX_FEE.getValue());
                 } else {
                     intent.putExtra(FEE_EXTRA, currentFee);
                 }

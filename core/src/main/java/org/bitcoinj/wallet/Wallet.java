@@ -5003,13 +5003,10 @@ public class Wallet extends BaseTaggableObject
                 ECKey key = null;
                 Script redeemScript = null;
                 if (script.isSentToAddress()) {
-                    System.out.println("svcom script.Pubkeyhash - " + script.getPubKeyHash());
                     key = findKeyFromPubHash(script.getPubKeyHash());
-                    System.out.println("svcom script.isSentToAddress()");
                     checkNotNull(key, "Coin selection includes unspendable outputs");
                 } else if (script.isPayToScriptHash()) {
                     redeemScript = findRedeemDataFromScriptHash(script.getPubKeyHash()).redeemScript;
-                    System.out.println("svcom script.isPayToScriptHash()");
                     checkNotNull(redeemScript, "Coin selection includes unspendable outputs");
                 }
                 size += script.getNumberOfBytesRequiredToSpend(key, redeemScript);

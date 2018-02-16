@@ -1,6 +1,7 @@
 package ink.qtum.org.managers;
 
 import android.content.Context;
+import android.util.Log;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
@@ -157,6 +158,7 @@ public class WalletManager {
                 return wallet.getParams();
             }
         };
+        wallet.reset();
         wallet.setUTXOProvider(utxoProvider);
         walletQtumBalance = wallet.getBalance();
     }
